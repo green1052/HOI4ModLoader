@@ -53,7 +53,7 @@ public unsafe class Queues : Plugin
     const int WindowOfEntry = 16, UpgradeOfEntry = 40, ButtonOfEntry = 0x40, AgencyOfEntry = 4216; // agency upgrade entry
     const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
     const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
-    const long CooldownMs = 1500;                                 // a posted command takes a tick or two to execute
+    const long SentTimeoutMs = 10_000;                            // a sent command not running by then failed: send again
 
     [Function(CallingConventions.Microsoft)] public delegate nint TechClickFn(nint view, nint ev);
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
@@ -176,48 +176,59 @@ public unsafe class Queues : Plugin
         if (_session != (Game.State, tag)) // another game or country: queued pointers no longer apply
         {
             _session = (Game.State, tag);
-            _research.Items.Clear();
-            _focus.Items.Clear();
-            _agency.Items.Clear();
+            _research.Clear();
+            _focus.Clear();
+            _agency.Clear();
         }
 
         var research = *(nint*)(country + ResearchOfCountry);
-        if (research != 0 && _research.Ready)
+        if (research != 0)
             foreach (var slot in Native.PdxArray(research + Slots))
             {
+                var index = *(int*)(slot + IndexOfSlot);
                 var current = *(nint*)(slot + TechOfSlot);
-                if (current != 0) _research.Items.Remove(*(nint*)(current + TechOfStatus)); // started by hand
-                else StartFirst(_research, tag, cmd =>
+                if (current != 0) _research.Running(index, *(nint*)(current + TechOfStatus));
+                else StartFirst(_research, index, tag, cmd =>
                 {
-                    *(int*)(cmd + ResearchSlot) = *(int*)(slot + IndexOfSlot);
+                    *(int*)(cmd + ResearchSlot) = index;
                     *(byte*)(cmd + ResearchBonus) = 0;
                 });
             }
 
         var focus = *(nint*)(country + FocusOfCountry);
-        if (focus != 0 && _focus.Ready)
+        if (focus != 0)
         {
             var current = *(nint*)(focus + FocusInProgress);
-            if (current != 0) _focus.Items.Remove(current);
-            else StartFirst(_focus, tag);
+            if (current != 0) _focus.Running(0, current);
+            else StartFirst(_focus, 0, tag);
         }
 
         var agency = *(nint*)(country + AgencyOfCountry);
-        if (agency != 0 && _agency.Ready && *(byte*)(agency + AgencyCreated) != 0 && *(nint*)(agency + AgencyUpgradeInProgress) == 0)
-            StartFirst(_agency, tag);
+        if (agency != 0 && *(byte*)(agency + AgencyCreated) != 0)
+        {
+            var current = *(nint*)(agency + AgencyUpgradeInProgress);
+            if (current != 0) _agency.Running(0, current);
+            else StartFirst(_agency, 0, tag);
+        }
     }
 
-    /// <summary>Sends the first queued entry the game would accept (its own CanExecute), and drops it from the queue.</summary>
-    void StartFirst(Queue queue, int tag, Action<nint>? fill = null)
+    /// <summary>
+    /// Sends the first queued entry the game would accept (its own CanExecute) to the idle <paramref name="slot"/>. The entry
+    /// stays queued until it shows up running: in multiplayer a command takes a round trip, and sending another to the same
+    /// slot meanwhile would replace the first.
+    /// </summary>
+    void StartFirst(Queue queue, int slot, int tag, Action<nint>? fill = null)
     {
+        var now = Environment.TickCount64;
+        if (queue.Sent.TryGetValue(slot, out var sent) && now < sent.Until) return;
         foreach (var item in queue.Items)
         {
+            if (queue.Sent.Any(s => s.Key != slot && s.Value.Item == item && now < s.Value.Until)) continue; // on its way to another slot
             var cmd = Commands.New(queue.Command, queue.CommandSize, tag, item);
             fill?.Invoke(cmd);
             if (!Commands.TryPost(cmd)) continue;
-            queue.Items.Remove(item);
-            queue.Cooldown = Environment.TickCount64 + CooldownMs;
-            Log.Info($"{queue.Name}: started, {queue.Items.Count} left");
+            queue.Sent[slot] = (item, now + SentTimeoutMs);
+            Log.Info($"{queue.Name}: started #{queue.Items.IndexOf(item) + 1}");
             return;
         }
     }
@@ -228,7 +239,19 @@ public unsafe class Queues : Plugin
         public string Command { get; } = command;
         public int CommandSize { get; } = commandSize;
         public List<nint> Items { get; } = new();
-        public long Cooldown;
-        public bool Ready => Items.Count > 0 && Environment.TickCount64 >= Cooldown;
+        public Dictionary<int, (nint Item, long Until)> Sent { get; } = new(); // by slot: sent, not seen running yet
+
+        /// <summary><paramref name="item"/> is running in <paramref name="slot"/>, whether we sent it or the player started it.</summary>
+        public void Running(int slot, nint item)
+        {
+            Sent.Remove(slot);
+            Items.Remove(item);
+        }
+
+        public void Clear()
+        {
+            Items.Clear();
+            Sent.Clear();
+        }
     }
 }
