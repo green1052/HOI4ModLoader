@@ -2,6 +2,7 @@
   <Folder Name="/plugins/">
     <Project Path="plugins/AirWingFieldMarshal/AirWingFieldMarshal.csproj" />
     <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
+    <Project Path="plugins/Queues/Queues.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Signatures.Tests/Signatures.Tests.csproj" />

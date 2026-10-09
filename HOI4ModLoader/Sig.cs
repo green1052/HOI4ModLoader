@@ -24,6 +24,9 @@ public static class Sig
     /// <summary>The unique match in the running game; throws if it matches 0 or 2+ times (e.g. after a game update).</summary>
     public static nint Find(string pattern, string? anchor = null) => Image.Game.FindAll(pattern, 1, anchor)[0];
 
+    /// <summary>All matches; throws unless there are exactly <paramref name="count"/> (e.g. the same code inlined twice).</summary>
+    public static nint[] FindAll(string pattern, int count, string? anchor = null) => Image.Game.FindAll(pattern, count, anchor);
+
     /// <summary>vtable of the C++ class <paramref name="className"/> (e.g. "CSetResearchCommand"), found through its RTTI.</summary>
     public static nint VTable(string className) => Image.Game.VTable(className);
 }
