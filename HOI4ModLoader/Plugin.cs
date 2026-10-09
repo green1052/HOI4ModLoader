@@ -21,6 +21,9 @@ public sealed class PluginAttribute(string id, string name, string version) : At
     /// single player only. Everything else (UI, sending the player's own commands) works in multiplayer too.
     /// </summary>
     public bool AffectsGameState { get; init; }
+
+    /// <summary>Load only in multiplayer, e.g. a stand-in for an <see cref="AffectsGameState"/> plugin that only sends vanilla commands.</summary>
+    public bool MultiplayerOnly { get; init; }
 }
 
 /// <summary>Load this plugin after <paramref name="id"/>; skip it if that plugin is missing or failed.</summary>

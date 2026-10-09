@@ -144,6 +144,11 @@ public static class Loader
                 log.Info("off in multiplayer");
                 return false;
             }
+            if (info.MultiplayerOnly && !_multiplayer)
+            {
+                log.Info("multiplayer only");
+                return false;
+            }
             if (info.GameVersion is { } want
                 && !config.Bind("General", "IgnoreGameVersion", false, $"Load even if the game is not HOI4 {want}, which this plugin was made for (may crash).")
                 && !Game.Version.StartsWith(want, StringComparison.Ordinal))
