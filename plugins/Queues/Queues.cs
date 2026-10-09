@@ -1,3 +1,4 @@
+using System.Text;
 using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
@@ -29,6 +30,21 @@ public static class Signatures
     /// <summary>Agency upgrades window: refresh every entry (window). Only runs when the window opens or the game changes something.</summary>
     [Signature] public const string AgencyWindowRefresh = "48 89 6C 24 ? 56 48 83 EC 20 48 8B 41 ? 48 8B B0";
 
+    /// <summary>
+    /// CTechnologyTreeTechItem::UpdateBonus(item): always re-sets the item's "bonus" text (hidden and empty when there's no
+    /// bonus). Runs whenever the item's state changes, so a postfix can put the queue number there without it piling up.
+    /// </summary>
+    [Signature] public const string TechItemUpdateBonus = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC 88 01 00 00 4C 8B E9";
+
+    /// <summary>CCountryTechTreeView::UpdateAllItemStates(view): re-runs every displayed item's state, and so UpdateBonus.</summary>
+    [Signature] public const string TechViewUpdateAllItems = "40 53 57 41 54 41 55 41 56 48 83 EC 30 48 8B F9 E8 ? ? ? ? 80 3D ? ? ? ? 00 4C 8B E0";
+
+    /// <summary>
+    /// CNationalFocusView::UpdateNodeStates(view, float dt, cache): updates every focus item, every frame while the tree is
+    /// open. Item names are set once when items are built, so a postfix keeps the queue number in front of them.
+    /// </summary>
+    [Signature] public const string FocusUpdateNodeStates = "48 8B C4 48 89 58 ? 48 89 68 ? 56 57 41 54 41 56 41 57 48 83 EC 60 F3 0F 10 91 ? ? ? ? 45 32 FF";
+
     [VTable] public const string ResearchCommand = "CSetResearchCommand";
     [VTable] public const string FocusCommand = "CSetNationalFocusCommand";
     [VTable] public const string AgencyCommand = "CIntelligenceAgencyUpgradeCommand";
@@ -37,7 +53,8 @@ public static class Signatures
 /// <summary>
 /// Research, national focus and intelligence agency upgrade queues. Shift+click a tech, focus or agency upgrade to
 /// queue/unqueue it; whenever a research slot, the focus or the agency is idle, the first queued entry the game accepts
-/// is started with the same command the UI sends (so multiplayer stays in sync).
+/// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
+/// "N." on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (Queues UI mod).
 /// </summary>
 [Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class Queues : Plugin
@@ -51,6 +68,12 @@ public unsafe class Queues : Plugin
     const int Repetitions = 96, MaxRepetitions = 540;             // agency: CPdxArray<{upgrade*, int done}>; upgrade: allowed count
     const int StatusOfEvent = 8;                                  // tech tree click event -> CTechnologyStatus
     const int WindowOfEntry = 16, UpgradeOfEntry = 40, ButtonOfEntry = 0x40, AgencyOfEntry = 4216; // agency upgrade entry
+    const int WindowOfItem = 0x10;                                // tech and focus tree items: their window
+    const int ViewOfTechItem = 0x30, StatusOfTechItem = 0xC8, StateOfTechItem = 0xD0; // CTechnologyTreeTechItem
+    const int TechResearched = 4, TechResearching = 5;            // tech item states
+    const int ViewedTagOfTechView = 0x1AA0;                       // int tag of the country shown, <= 0 = the player
+    const int FocusItems = 0x2058, FocusOfItem = 0x20;            // CNationalFocusView items; CNationalFocusTreeItem -> CNationalFocus
+    const int ViewedCountryOfFocusView = 0x20F8, TagOfCountry = 8; // CCountry* shown, null = the player
     const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
     const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
     const long SentTimeoutMs = 10_000;                            // a sent command not running by then failed: send again
@@ -60,12 +83,17 @@ public unsafe class Queues : Plugin
     [Function(CallingConventions.Microsoft)] public delegate nint AgencyClickFn(nint entry);
     [Function(CallingConventions.Microsoft)] public delegate void EntryFn(nint entry);
     [Function(CallingConventions.Microsoft)] public delegate void WindowFn(nint window);
+    [Function(CallingConventions.Microsoft)] public delegate void NodeStatesFn(nint view, float dt, nint cache);
 
     IHook<TechClickFn>? _techClick, _xorTechClick;
     IHook<FocusClickFn>? _focusClick;
     IHook<AgencyClickFn>? _agencyClick;
     IHook<EntryFn>? _agencyEntryRefresh;
     IHook<WindowFn>? _agencyWindowRefresh;
+    IHook<EntryFn>? _techItemBonus;
+    IHook<NodeStatesFn>? _focusNodeStates;
+    delegate* unmanaged<nint, void> _techViewUpdateAllItems;
+    readonly HashSet<nint> _labelledFocusItems = new();
     nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
     bool _reportedNumberBox;
 
@@ -82,9 +110,12 @@ public unsafe class Queues : Plugin
         var agencyClick = Sig.Find(Signatures.AgencyClick);
         var agencyEntryRefresh = Sig.Find(Signatures.AgencyEntryRefresh);
         var agencyWindowRefresh = Sig.Find(Signatures.AgencyWindowRefresh);
+        var techItemBonus = Sig.Find(Signatures.TechItemUpdateBonus);
+        _techViewUpdateAllItems = (delegate* unmanaged<nint, void>)Sig.Find(Signatures.TechViewUpdateAllItems);
+        var focusNodeStates = Sig.Find(Signatures.FocusUpdateNodeStates);
 
-        _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(ev) ? 0 : _techClick!.OriginalFunction(view, ev));
-        _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
+        _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _techClick!.OriginalFunction(view, ev));
+        _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
         _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
             if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
@@ -109,15 +140,70 @@ public unsafe class Queues : Plugin
             _agencyWindowRefresh!.OriginalFunction(window);
         });
 
+        _techItemBonus = Patches.Hook<EntryFn>(techItemBonus, item =>
+        {
+            _techItemBonus!.OriginalFunction(item);
+            LabelTech(item);
+        });
+        _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
+        {
+            _focusNodeStates!.OriginalFunction(view, dt, cache);
+            LabelFocuses(view);
+        });
+
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
     }
 
-    bool ShiftQueuesTech(nint ev)
+    bool ShiftQueuesTech(nint view, nint ev)
     {
         var status = *(nint*)(ev + StatusOfEvent);
         if (status == 0 || !Gui.ShiftHeld) return false;
         Toggle(_research, *(nint*)(status + TechOfStatus));
+        _techViewUpdateAllItems(view); // renumber every item now
         return true;
+    }
+
+    /// <summary>Puts a queued tech's position on its "bonus" text, which the game has just re-set (and shows it if hidden).</summary>
+    void LabelTech(nint item)
+    {
+        var status = *(nint*)(item + StatusOfTechItem);
+        if (status == 0 || *(int*)(item + StateOfTechItem) is TechResearched or TechResearching) return;
+        var position = _research.Items.IndexOf(*(nint*)(status + TechOfStatus)) + 1;
+        var viewed = *(int*)(*(nint*)(item + ViewOfTechItem) + ViewedTagOfTechView);
+        if (position == 0 || viewed > 0 && viewed != Game.PlayerTag) return;
+        var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "bonus"); // every item but secret weapons has one
+        if (box == 0) return;
+        Label(box, position);
+        if (Gui.IsHidden(box)) Gui.Show(box);
+    }
+
+    /// <summary>Keeps "N. " in front of queued focuses' names, and takes it off focuses no longer queued.</summary>
+    void LabelFocuses(nint view)
+    {
+        var viewed = *(nint*)(view + ViewedCountryOfFocusView);
+        if (viewed != 0 && *(int*)(viewed + TagOfCountry) != Game.PlayerTag) return;
+        foreach (var item in Native.PdxArray(view + FocusItems))
+        {
+            var position = _focus.Items.IndexOf(*(nint*)(item + FocusOfItem)) + 1;
+            if (position == 0 && !_labelledFocusItems.Contains(item)) continue;
+            var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "name");
+            if (box == 0) continue;
+            Label(box, position);
+            if (position > 0) _labelledFocusItems.Add(item);
+            else _labelledFocusItems.Remove(item);
+        }
+    }
+
+    /// <summary>Sets <paramref name="box"/>'s text to "N. " + its text without an earlier "N. " (none for position 0); idempotent.</summary>
+    static void Label(nint box, int position)
+    {
+        var text = Gui.Text(box);
+        var digits = 0;
+        while (digits < text.Length && char.IsAsciiDigit((char)text[digits])) digits++;
+        var core = digits > 0 && text[digits..].StartsWith(". "u8) ? text[(digits + 2)..] : text;
+        var label = position > 0 ? Encoding.ASCII.GetBytes($"{position}. ") : [];
+        if (text.Length == label.Length + core.Length && text.StartsWith(label)) return; // already right; SetText re-lays out
+        Gui.SetText(box, [.. label, .. core]);
     }
 
     void Toggle(Queue queue, nint item)
@@ -134,7 +220,7 @@ public unsafe class Queues : Plugin
     /// <summary>Writes the 1-based queue position of <paramref name="item"/> into the window's number box (empty if not queued).</summary>
     void ShowPosition(nint window, Queue queue, nint item)
     {
-        var box = window == 0 ? 0 : Gui.FindChild(window, NumberBox);
+        var box = window == 0 ? 0 : Gui.FindTextBox(window, NumberBox);
         if (!_reportedNumberBox)
         {
             _reportedNumberBox = true;
