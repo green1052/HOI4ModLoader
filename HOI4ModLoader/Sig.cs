@@ -14,11 +14,18 @@ public sealed class SignatureAttribute(int count = 1) : Attribute
     public string? Anchor { get; init; }
 }
 
+/// <summary>Marks a `const string` C++ class name whose vtable a mod looks up with <see cref="Sig.VTable"/>, so the tests check it too.</summary>
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class VTableAttribute : Attribute;
+
 /// <summary>Finds code in hoi4.exe by IDA-style byte patterns ("48 8B ?? 05"). No symbols ship with the game, so this is how a target is named.</summary>
 public static class Sig
 {
     /// <summary>The unique match in the running game; throws if it matches 0 or 2+ times (e.g. after a game update).</summary>
     public static nint Find(string pattern, string? anchor = null) => Image.Game.FindAll(pattern, 1, anchor)[0];
+
+    /// <summary>vtable of the C++ class <paramref name="className"/> (e.g. "CSetResearchCommand"), found through its RTTI.</summary>
+    public static nint VTable(string className) => Image.Game.VTable(className);
 }
 
 /// <summary>A PE image mapped in memory: the running game, or hoi4.exe mapped as data (tests).</summary>
@@ -27,15 +34,17 @@ public sealed unsafe class Image
     public static readonly Image Game = new(NativeLibrary.GetMainProgramHandle());
 
     readonly nint _base;
+    readonly long _pointerBase; // what absolute pointers in the image are relative to: actual base when loaded, preferred base when mapped as data
     readonly List<(nint Start, int Size, bool Code)> _sections = new();
     readonly (int Begin, int End)[] _functions;
 
-    Image(nint b)
+    Image(nint b, bool relocated = true)
     {
         _base = b;
         var nt = b + *(int*)(b + 0x3C);
         int count = *(ushort*)(nt + 6);
         var opt = nt + 24;
+        _pointerBase = relocated ? b : *(long*)(opt + 24);
         var sec = opt + *(ushort*)(nt + 20);
         for (int i = 0; i < count; i++, sec += 40)
             _sections.Add((b + *(int*)(sec + 12), *(int*)(sec + 8), (*(uint*)(sec + 36) & 0x20000000) != 0)); // IMAGE_SCN_MEM_EXECUTE
@@ -53,7 +62,7 @@ public sealed unsafe class Image
         const uint LOAD_LIBRARY_AS_DATAFILE = 0x2, LOAD_LIBRARY_AS_IMAGE_RESOURCE = 0x20;
         var h = LoadLibraryExW(path, 0, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
         if (h == 0) throw new FileNotFoundException($"cannot map {path} (error {Marshal.GetLastPInvokeError()})");
-        return new Image(h & ~3); // low bits tag data-file handles
+        return new Image(h & ~3, relocated: false); // low bits tag data-file handles
     }
 
     /// <summary>
@@ -98,6 +107,34 @@ public sealed unsafe class Image
         return hits;
     }
 
+    /// <summary>
+    /// vtable of <paramref name="className"/> via MSVC RTTI: the type descriptor holds ".?AV&lt;name&gt;@@", the complete
+    /// object locator (signature 1, offset 0) points at it by RVA, and the vtable's slot -1 points at the locator.
+    /// </summary>
+    public nint VTable(string className)
+    {
+        var name = FindData(Encoding.ASCII.GetBytes($".?AV{className}@@\0"));
+        if (name.Count != 1) throw new InvalidOperationException($"RTTI for {className} found {name.Count}x");
+        var td = (int)(name[0] - 16 - _base);
+
+        var locators = FindData(BitConverter.GetBytes(td)).Where(a => *(int*)(a - 12) == 1 && *(int*)(a - 8) == 0).Select(a => a - 12).ToList();
+        var vtables = locators.SelectMany(col => FindData(BitConverter.GetBytes(_pointerBase + (col - _base)))).Select(a => a + 8).ToList();
+        if (vtables.Count != 1) throw new InvalidOperationException($"vtable of {className} found {vtables.Count}x");
+        return vtables[0];
+    }
+
+    List<nint> FindData(byte[] needle)
+    {
+        var hits = new List<nint>();
+        foreach (var (start, size, code) in _sections)
+        {
+            if (code) continue;
+            var span = new ReadOnlySpan<byte>((void*)start, size);
+            for (int i = 0, n; (n = span[i..].IndexOf(needle)) >= 0; i += n + 1) hits.Add(start + i + n);
+        }
+        return hits;
+    }
+
     /// <summary>Begin RVA of the .pdata function containing <paramref name="address"/>.</summary>
     int? FunctionAt(nint address)
     {
@@ -116,15 +153,8 @@ public sealed unsafe class Image
     /// <summary>Functions that take the address of the null-terminated ASCII string <paramref name="text"/> (lea/mov reg,[rip+disp32]).</summary>
     HashSet<int> FunctionsReferencing(string text)
     {
-        var needle = Encoding.ASCII.GetBytes(text + "\0");
-        var strings = new HashSet<nint>();
-        foreach (var (start, size, code) in _sections)
-        {
-            if (code) continue;
-            var span = new ReadOnlySpan<byte>((void*)start, size);
-            for (int i = 0, n; (n = span[i..].IndexOf(needle)) >= 0; i += n + 1)
-                if (i + n == 0 || span[i + n - 1] == 0) strings.Add(start + i + n); // whole string, not a suffix of a longer one
-        }
+        // whole string, not the tail of a longer one
+        var strings = FindData(Encoding.ASCII.GetBytes(text + "\0")).Where(a => *(byte*)(a - 1) == 0).ToHashSet();
 
         var funcs = new HashSet<int>();
         foreach (var (start, size, code) in _sections)

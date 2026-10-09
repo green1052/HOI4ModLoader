@@ -10,31 +10,34 @@ public class SignatureTests
 
     static readonly Lazy<Image> Game = new(() => Image.Load(Path.Combine(GameDir, "hoi4.exe")));
 
-    /// <summary>Every `[Signature] const string` in this folder's assemblies (loader + every plugin).</summary>
-    public static TheoryData<string, string> All()
+    /// <summary>Every `[Signature]` / `[VTable]` const in this folder's assemblies (loader + every plugin), as "assembly|type|field".</summary>
+    public static TheoryData<string> All()
     {
-        var data = new TheoryData<string, string>();
+        var data = new TheoryData<string>();
         foreach (var file in Directory.GetFiles(AppContext.BaseDirectory, "*.dll"))
         {
             Type?[] types;
             try { types = Assembly.LoadFrom(file).GetTypes(); }
-            catch (ReflectionTypeLoadException e) { types = e.Types; } // mod classes reference Reloaded assemblies that only exist in-game
+            catch (ReflectionTypeLoadException e) { types = e.Types; } // plugin classes reference types that only resolve in-game
             catch (BadImageFormatException) { continue; }
             foreach (var field in types.OfType<Type>().SelectMany(t => t.GetFields()))
-                if (field.GetCustomAttribute<SignatureAttribute>() != null)
-                    data.Add(field.DeclaringType!.Assembly.GetName().Name!, $"{field.DeclaringType.FullName}.{field.Name}");
+                if (field.IsDefined(typeof(SignatureAttribute)) || field.IsDefined(typeof(VTableAttribute)))
+                    data.Add($"{field.DeclaringType!.Assembly.GetName().Name}|{field.DeclaringType.FullName}|{field.Name}");
         }
         return data;
     }
 
     [Theory]
     [MemberData(nameof(All))]
-    public void MatchesInstalledGame(string assembly, string name)
+    public void MatchesInstalledGame(string id)
     {
-        var type = Assembly.Load(assembly).GetType(name[..name.LastIndexOf('.')])!;
-        var field = type.GetField(name[(name.LastIndexOf('.') + 1)..])!;
-        var sig = field.GetCustomAttribute<SignatureAttribute>()!;
-        Game.Value.FindAll((string)field.GetRawConstantValue()!, sig.Count, sig.Anchor); // throws with the match count on failure
+        var parts = id.Split('|');
+        var field = Assembly.Load(parts[0]).GetType(parts[1])!.GetField(parts[2])!;
+        var value = (string)field.GetRawConstantValue()!;
+        if (field.GetCustomAttribute<SignatureAttribute>() is { } sig)
+            Game.Value.FindAll(value, sig.Count, sig.Anchor); // throws with the match count on failure
+        else
+            Game.Value.VTable(value);
     }
 
     [Fact]
