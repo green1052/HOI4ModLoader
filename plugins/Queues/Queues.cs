@@ -27,6 +27,9 @@ public static class Signatures
     /// <summary>Intelligence agency upgrade entry refresh (entry): fills entry+WindowOfEntry's texts for entry+UpgradeOfButton.</summary>
     [Signature] public const string AgencyEntryRefresh = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 38 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B F1";
 
+    /// <summary>Agency upgrades window: refresh every entry (window). Only runs when the window opens or the game changes something.</summary>
+    [Signature] public const string AgencyWindowRefresh = "48 89 6C 24 ? 56 48 83 EC 20 48 8B 41 ? 48 8B B0";
+
     /// <summary>CSession::PostCommand(session, command, force) (clausewitz session.cpp).</summary>
     [Signature] public const string PostCommand = "48 89 5C 24 ? 57 48 81 EC 30 01 00 00 48 8B FA 48 8B D9 45 84 C0";
 
@@ -70,6 +73,7 @@ public unsafe class Queues : Plugin
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
     [Function(CallingConventions.Microsoft)] public delegate nint AgencyClickFn(nint button);
     [Function(CallingConventions.Microsoft)] public delegate void EntryFn(nint entry);
+    [Function(CallingConventions.Microsoft)] public delegate void WindowFn(nint window);
     [Function(CallingConventions.Microsoft)] public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
     IHook<TechClickFn>? _techClick, _xorTechClick;
@@ -77,6 +81,8 @@ public unsafe class Queues : Plugin
     IHook<FocusClickFn>? _focusClick;
     IHook<AgencyClickFn>? _agencyClick;
     IHook<EntryFn>? _agencyEntryRefresh;
+    IHook<WindowFn>? _agencyWindowRefresh;
+    nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
     IHook<PeekMessageFn>? _peekMessage;
 
     delegate* unmanaged<nint, nint, byte, byte> _post;
@@ -96,6 +102,7 @@ public unsafe class Queues : Plugin
         var focusClick = Sig.Find(Signatures.FocusClick);
         var agencyClick = Sig.Find(Signatures.AgencyClick);
         var agencyEntryRefresh = Sig.Find(Signatures.AgencyEntryRefresh);
+        var agencyWindowRefresh = Sig.Find(Signatures.AgencyWindowRefresh);
         var holder = Sig.Find(Signatures.SessionHolder) + 0x15;  // mov rcx, [rip+disp32]
         var lookup = Sig.FindAll(Signatures.CountryLookup, 2)[0];
         _post = (delegate* unmanaged<nint, nint, byte, byte>)Sig.Find(Signatures.PostCommand);
@@ -119,6 +126,7 @@ public unsafe class Queues : Plugin
         {
             if (!Shift()) return _agencyClick!.OriginalFunction(button);
             Toggle(_agency, *(nint*)(button + UpgradeOfButton));
+            if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
             return 0;
         });
 
@@ -126,6 +134,12 @@ public unsafe class Queues : Plugin
         {
             _agencyEntryRefresh!.OriginalFunction(entry);
             ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfButton));
+        });
+
+        _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
+        {
+            _agencyWindow = window;
+            _agencyWindowRefresh!.OriginalFunction(window);
         });
 
         // The main loop pumps window messages every frame: a safe place to send commands from the UI thread.
