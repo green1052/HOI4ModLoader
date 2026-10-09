@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <!-- Attach slots on the marshal card, like leader_groups_portrait_window has. -->
-    <GuiPatch Include="interface\leadergroups.gui" After="(?s)name = &quot;army_group_portrait_window&quot;.*?Orientation = upper_left" Snippet="gui\army_group_attached_units.gui" />
+    <!-- Attach slots on the marshal card, like leader_groups_portrait_window has; appended at the window's end so it draws on top. -->
+    <GuiPatch Include="interface\leadergroups.gui" After="(?s)name = &quot;army_group_portrait_window&quot;.*?(?=\n\t\})" Snippet="gui\army_group_attached_units.gui" />
   </ItemGroup>
 
 </Project>
