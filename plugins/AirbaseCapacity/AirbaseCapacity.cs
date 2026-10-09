@@ -72,7 +72,9 @@ public unsafe class AirbaseCapacity : Plugin
         {
             var wing = data[i];
             // Already there (vanilla cancels its transfer) or already flying there (counted above): no new room needed.
-            var counted = *(ulong*)(*(nint*)(wing + Pool) + BaseOfPool) == id || *(ulong*)(wing + Destination) == id;
+            // No pool counts as already there too, as vanilla treats it.
+            var pool = *(nint*)(wing + Pool);
+            var counted = pool == 0 || *(ulong*)(pool + BaseOfPool) == id || *(ulong*)(wing + Destination) == id;
             if (!counted)
             {
                 if (*(int*)(wing + Planes) > room) continue;

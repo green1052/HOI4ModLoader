@@ -76,7 +76,7 @@ public unsafe class Queues : Plugin
     const int ViewedCountryOfFocusView = 0x20F8, TagOfCountry = 8; // CCountry* shown, null = the player
     const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
     const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
-    const long SentTimeoutMs = 10_000;                            // a sent command not running by then failed: send again
+    const long SentTimeoutMs = 30_000;                            // a sent command not running by then failed: drop the entry
 
     [Function(CallingConventions.Microsoft)] public delegate nint TechClickFn(nint view, nint ev);
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
@@ -93,7 +93,7 @@ public unsafe class Queues : Plugin
     IHook<EntryFn>? _techItemBonus;
     IHook<NodeStatesFn>? _focusNodeStates;
     delegate* unmanaged<nint, void> _techViewUpdateAllItems;
-    readonly HashSet<nint> _labelledFocusItems = new();
+    readonly Dictionary<nint, (byte[] Name, byte[] Shown)> _labelledFocusItems = new(); // the game's name, what we wrote
     nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
     bool _reportedNumberBox;
 
@@ -167,17 +167,23 @@ public unsafe class Queues : Plugin
     void LabelTech(nint item)
     {
         var status = *(nint*)(item + StatusOfTechItem);
-        if (status == 0 || *(int*)(item + StateOfTechItem) is TechResearched or TechResearching) return;
-        var position = _research.Items.IndexOf(*(nint*)(status + TechOfStatus)) + 1;
         var viewed = *(int*)(*(nint*)(item + ViewOfTechItem) + ViewedTagOfTechView);
-        if (position == 0 || viewed > 0 && viewed != Game.PlayerTag) return;
+        if (status == 0 || viewed > 0 && viewed != Game.PlayerTag) return;
+        var tech = *(nint*)(status + TechOfStatus);
+        var state = *(int*)(item + StateOfTechItem);
+        if (state == TechResearched && _research.Items.Remove(tech)) Log.Info("research: dropped a queued tech that is already researched");
+        var position = _research.Items.IndexOf(tech) + 1;
+        if (position == 0 || state == TechResearching) return;
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "bonus"); // every item but secret weapons has one
         if (box == 0) return;
-        Label(box, position);
+        Gui.SetText(box, [.. Encoding.ASCII.GetBytes($"{position}. "), .. Gui.Text(box)]);
         if (Gui.IsHidden(box)) Gui.Show(box);
     }
 
-    /// <summary>Keeps "N. " in front of queued focuses' names, and takes it off focuses no longer queued.</summary>
+    /// <summary>
+    /// Keeps "N. " in front of queued focuses' names (set once by the game when it builds the items), and puts the game's
+    /// name back on focuses no longer queued. Runs every frame while the tree is open; SetText only when something changed.
+    /// </summary>
     void LabelFocuses(nint view)
     {
         var viewed = *(nint*)(view + ViewedCountryOfFocusView);
@@ -185,25 +191,17 @@ public unsafe class Queues : Plugin
         foreach (var item in Native.PdxArray(view + FocusItems))
         {
             var position = _focus.Items.IndexOf(*(nint*)(item + FocusOfItem)) + 1;
-            if (position == 0 && !_labelledFocusItems.Contains(item)) continue;
+            var known = _labelledFocusItems.TryGetValue(item, out var labelled);
+            if (position == 0 && !known) continue;
             var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "name");
             if (box == 0) continue;
-            Label(box, position);
-            if (position > 0) _labelledFocusItems.Add(item);
+            var text = Gui.Text(box);
+            var name = known && text.SequenceEqual(labelled.Shown) ? labelled.Name : text.ToArray(); // else the game re-set it
+            byte[] shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. name] : name;
+            if (!text.SequenceEqual(shown)) Gui.SetText(box, shown);
+            if (position > 0) _labelledFocusItems[item] = (name, shown);
             else _labelledFocusItems.Remove(item);
         }
-    }
-
-    /// <summary>Sets <paramref name="box"/>'s text to "N. " + its text without an earlier "N. " (none for position 0); idempotent.</summary>
-    static void Label(nint box, int position)
-    {
-        var text = Gui.Text(box);
-        var digits = 0;
-        while (digits < text.Length && char.IsAsciiDigit((char)text[digits])) digits++;
-        var core = digits > 0 && text[digits..].StartsWith(". "u8) ? text[(digits + 2)..] : text;
-        var label = position > 0 ? Encoding.ASCII.GetBytes($"{position}. ") : [];
-        if (text.Length == label.Length + core.Length && text.StartsWith(label)) return; // already right; SetText re-lays out
-        Gui.SetText(box, [.. label, .. core]);
     }
 
     void Toggle(Queue queue, nint item)
@@ -306,7 +304,12 @@ public unsafe class Queues : Plugin
     void StartFirst(Queue queue, int slot, int tag, Action<nint>? fill = null)
     {
         var now = Environment.TickCount64;
-        if (queue.Sent.TryGetValue(slot, out var sent) && now < sent.Until) return;
+        if (queue.Sent.TryGetValue(slot, out var sent))
+        {
+            if (now < sent.Until) return;
+            queue.Sent.Remove(slot); // the game took the command but never started it: don't keep the slot waiting on it
+            if (queue.Items.Remove(sent.Item)) Log.Info($"{queue.Name}: dropped an entry that never started");
+        }
         foreach (var item in queue.Items)
         {
             if (queue.Sent.Any(s => s.Key != slot && s.Value.Item == item && now < s.Value.Until)) continue; // on its way to another slot
@@ -331,6 +334,7 @@ public unsafe class Queues : Plugin
         public void Running(int slot, nint item)
         {
             Sent.Remove(slot);
+            foreach (var other in Sent.Where(s => s.Value.Item == item).Select(s => s.Key).ToList()) Sent.Remove(other); // started elsewhere
             Items.Remove(item);
         }
 
