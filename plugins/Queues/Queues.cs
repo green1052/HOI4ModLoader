@@ -8,8 +8,12 @@ namespace Queues;
 /// <summary>Byte patterns and class names (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
-    /// <summary>Tech tree item click (item): both the normal and the bonus click end here; item+StatusOfItem is the CTechnologyStatus.</summary>
-    [Signature] public const string ResearchClick = "48 89 5C 24 ? 57 48 83 EC 20 48 8B D9 48 81 C1 D0 14 00 00";
+    /// <summary>
+    /// CCountryTechTreeView click on a tech / on an XOR tech (view, event): event+8 is the CTechnologyStatus. Normally opens
+    /// the technology info window, whose Research button then starts it.
+    /// </summary>
+    [Signature] public const string TechClick = "48 89 5C 24 ? 57 48 83 EC 20 80 3D ? ? ? ? ? 48 8B F9";
+    [Signature] public const string XorTechClick = "40 55 56 48 83 EC 28 80 3D";
 
     /// <summary>
     /// National focus tree: open the detail popup of a clicked focus (view, CNationalFocus*, bool). Hooked instead of the
@@ -56,19 +60,20 @@ public unsafe class Queues : Plugin
     const int TechOfStatus = 0x160;                          // CTechnologyStatus -> CTechnology
     const int FocusOfCountry = 0x1380, FocusInProgress = 0x10; // CCountry -> focus progress -> CNationalFocus* (null = idle)
     const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
-    const int StatusOfItem = 5272, UpgradeOfButton = 40, WindowOfEntry = 16;
+    const int StatusOfEvent = 8, UpgradeOfButton = 40, WindowOfEntry = 16;
     const string NumberBox = "hoimod_queue"; // added to the GUI by the Queues UI mod
     const int CommandTag = 40, CommandTarget = 48, ResearchSlot = 56, ResearchBonus = 60;
     const int VK_SHIFT = 0x10;
     const long CooldownMs = 1500; // a posted command takes a tick or two to execute
 
-    [Function(CallingConventions.Microsoft)] public delegate void ResearchClickFn(nint item);
+    [Function(CallingConventions.Microsoft)] public delegate nint TechClickFn(nint view, nint ev);
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
     [Function(CallingConventions.Microsoft)] public delegate nint AgencyClickFn(nint button);
     [Function(CallingConventions.Microsoft)] public delegate void EntryFn(nint entry);
     [Function(CallingConventions.Microsoft)] public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
-    IHook<ResearchClickFn>? _researchClick;
+    IHook<TechClickFn>? _techClick, _xorTechClick;
+    bool _reportedNumberBox;
     IHook<FocusClickFn>? _focusClick;
     IHook<AgencyClickFn>? _agencyClick;
     IHook<EntryFn>? _agencyEntryRefresh;
@@ -86,7 +91,8 @@ public unsafe class Queues : Plugin
 
     public override void Load()
     {
-        var researchClick = Sig.Find(Signatures.ResearchClick);
+        var techClick = Sig.Find(Signatures.TechClick);
+        var xorTechClick = Sig.Find(Signatures.XorTechClick);
         var focusClick = Sig.Find(Signatures.FocusClick);
         var agencyClick = Sig.Find(Signatures.AgencyClick);
         var agencyEntryRefresh = Sig.Find(Signatures.AgencyEntryRefresh);
@@ -102,11 +108,8 @@ public unsafe class Queues : Plugin
         _agencyVt = Sig.VTable(Signatures.AgencyCommand);
         _mainThread = Environment.CurrentManagedThreadId; // plugins load on the game's main (UI) thread
 
-        _researchClick = Patches.Hook<ResearchClickFn>(researchClick, item =>
-        {
-            if (Shift()) Toggle(_research, *(nint*)(*(nint*)(item + StatusOfItem) + TechOfStatus));
-            else _researchClick!.OriginalFunction(item);
-        });
+        _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(ev) ? 0 : _techClick!.OriginalFunction(view, ev));
+        _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
         _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
             if (focus != 0 && Shift()) Toggle(_focus, focus);
@@ -139,11 +142,24 @@ public unsafe class Queues : Plugin
         });
     }
 
+    bool ShiftQueuesTech(nint ev)
+    {
+        var status = *(nint*)(ev + StatusOfEvent);
+        if (status == 0 || !Shift()) return false;
+        Toggle(_research, *(nint*)(status + TechOfStatus));
+        return true;
+    }
+
     /// <summary>Writes the 1-based queue position of <paramref name="item"/> into the window's number box (empty if not queued).</summary>
-    static void ShowPosition(nint window, Queue queue, nint item)
+    void ShowPosition(nint window, Queue queue, nint item)
     {
         var box = window == 0 ? 0 : Gui.FindChild(window, NumberBox);
-        if (box == 0) return; // Queues UI mod not enabled
+        if (!_reportedNumberBox)
+        {
+            _reportedNumberBox = true;
+            Log.Info(box != 0 ? "queue numbers: on" : $"queue numbers: no '{NumberBox}' element (is the Queues UI mod enabled?)");
+        }
+        if (box == 0) return;
         var index = queue.Items.IndexOf(item);
         Gui.SetText(box, index < 0 ? "" : (index + 1).ToString());
     }

@@ -17,7 +17,7 @@ public static unsafe class Gui
     public static nint FindChild(nint window, string name)
     {
         var str = NewString(name);
-        try { return ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[FindChildSlot])(window, str, 0); }
+        try { return ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[FindChildSlot])(window, str, 1); }
         finally { FreeString(str); }
     }
 
