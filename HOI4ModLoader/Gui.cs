@@ -10,6 +10,7 @@ public static unsafe class Gui
     [Signature] public const string SetTextSig = "48 89 5C 24 ? 48 89 74 24 ? 48 89 54 24 ? 57 48 83 EC 20 48 8B F2";
 
     const int FindChildSlot = 15; // CWindow vtable: child by name (std::string*, bool)
+    const int ShowSlot = 15, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), flags byte
 
     static delegate* unmanaged<nint, nint, void> _setText;
 
@@ -28,6 +29,20 @@ public static unsafe class Gui
         try { _setText(textBox, str); }
         finally { NativeMemory.Free((void*)str); } // SetText already took (and freed) any heap buffer
     }
+
+    public static bool IsHidden(nint widget) => (*(byte*)(widget + Flags) & HiddenFlag) != 0;
+
+    /// <summary>Shows a widget the code hid (what the game does: clear the hidden flag, then Show()).</summary>
+    public static void Show(nint widget)
+    {
+        *(byte*)(widget + Flags) &= unchecked((byte)~HiddenFlag);
+        ((delegate* unmanaged<nint, void>)(*(nint**)widget)[ShowSlot])(widget);
+    }
+
+    public static bool ShiftHeld => (GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
+
+    [DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int key);
 
     /// <summary>
     /// An MSVC std::string { char buf[16] | char* ptr; size; capacity }. Heap buffers come from the CRT heap,
