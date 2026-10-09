@@ -81,3 +81,8 @@ public class MyPlugin : Plugin
 
 ### ChecksumPatcher (`com.green1052.checksumpatcher`)
 체크섬이 바뀌어도 업적과 철인 모드를 유지합니다. `"Active Mod Count: "`를 쓰는 함수 안의 `test eax,eax; sete`를 `xor eax,eax`로 바꿉니다. **메모리에서만** 패치하므로 exe는 그대로입니다.
+
+### Queues (`com.green1052.queues`)
+연구, 국가 중점, 정보부 업그레이드를 예약합니다. 기술, 중점, 업그레이드를 **Shift+클릭**하면 대기열에 넣거나 뺍니다. 연구 슬롯, 중점, 정보부가 비면 게임이 받아 주는 첫 항목을 UI와 같은 명령으로 시작하므로 멀티플레이에서도 동기화됩니다.
+- 정보부 업그레이드에는 대기 순번을 표시합니다(`gui/agency_queue_number.gui`). HOI4 런처에서 `Queues UI`를 켜야 합니다.
+- 다른 업그레이드가 진행 중이어도 버튼을 눌러 예약할 수 있게 둡니다.
