@@ -28,6 +28,31 @@ public static class Signatures
 
     /// <summary>bool: are air wings currently selected.</summary>
     [Signature] public const string AirWingsSelected = "48 83 EC 28 48 8B 0D ? ? ? ? 48 85 C9 74 ? 48 81 C1 38 05 00 00";
+
+    /// <summary>
+    /// UI: attach air wings to a group (CPdxArray&lt;CAirWing*&gt;* wings, COrdersGroup* group): posts one vanilla
+    /// CAttachAirWingToArmyCommand for them. The army card's right-click and the army list both end here.
+    /// </summary>
+    [Signature] public const string PostAttachWings = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 8B FA 48 8B F1 48 8B 0D ? ? ? ? 48 8B 01 FF 90 ? ? ? ? 48 8B D8 B9 48 00 00 00";
+}
+
+/// <summary>The army card's "this card is an army group's" byte, at the offset the slot refresh instruction names.</summary>
+static unsafe class Card
+{
+    public static int IsArmyGroupOffset(nint refreshWingSlots) => *(int*)(refreshWingSlots + 12);
+
+    /// <summary>
+    /// Runs <paramref name="original"/> with the card treated as an army card when <paramref name="when"/>: the card UI
+    /// skips attached-wing slots and the right-click attach for army-group cards. UI thread only, so nothing else sees the flip.
+    /// </summary>
+    public static void AsArmyCard(nint card, int isArmyGroupOffset, bool when, Action original)
+    {
+        var flag = (byte*)(card + isArmyGroupOffset);
+        var was = *flag;
+        if (when) *flag = 0;
+        try { original(); }
+        finally { *flag = was; }
+    }
 }
 
 /// <summary>
@@ -62,7 +87,7 @@ public unsafe class AirWingFieldMarshal : Plugin
         // Field offsets come from the instructions themselves where the patterns contain them.
         if (*(byte*)(attachStatus + 2) != OrdersGroup.IsArmyGroupOffset)
             throw new InvalidOperationException($"COrdersGroup layout changed (army group flag at 0x{*(byte*)(attachStatus + 2):X})");
-        _cardIsArmyGroup = *(int*)(refreshSlots + 12);
+        _cardIsArmyGroup = Card.IsArmyGroupOffset(refreshSlots);
         _cardWingGrid = *(int*)(refreshSlots + 32);
         _airWingsSelected = Patches.Function<ByteFn>(wingsSelected);
 
@@ -89,11 +114,12 @@ public unsafe class AirWingFieldMarshal : Plugin
         }
 
         _updateAttachedWings = Patches.Hook<GroupFn>(update, UpdateAttachedWings);
-        _createWingSlots = Patches.Hook<CardFn>(createSlots, card => AsArmyCard(card, true, () => _createWingSlots!.OriginalFunction(card)));
+        _createWingSlots = Patches.Hook<CardFn>(createSlots, card =>
+            Card.AsArmyCard(card, _cardIsArmyGroup, true, () => _createWingSlots!.OriginalFunction(card)));
         _refreshWingSlots = Patches.Hook<CardGroupFn>(refreshSlots, (card, group) =>
-            AsArmyCard(card, *(nint*)(card + _cardWingGrid) != 0, () => _refreshWingSlots!.OriginalFunction(card, group)));
+            Card.AsArmyCard(card, _cardIsArmyGroup, *(nint*)(card + _cardWingGrid) != 0, () => _refreshWingSlots!.OriginalFunction(card, group)));
         _cardRightClick = Patches.Hook<CardFn>(rightClick, card =>
-            AsArmyCard(card, _airWingsSelected!() != 0, () => _cardRightClick!.OriginalFunction(card)));
+            Card.AsArmyCard(card, _cardIsArmyGroup, _airWingsSelected!() != 0, () => _cardRightClick!.OriginalFunction(card)));
     }
 
     // Daily attached-wing order update. It picks mission regions from where the group's divisions are,
@@ -104,15 +130,57 @@ public unsafe class AirWingFieldMarshal : Plugin
         if (g.IsArmyGroup && g.AttachedWingCount > 0) g.WithArmiesMembers(() => _updateAttachedWings!.OriginalFunction(ptr));
         else _updateAttachedWings!.OriginalFunction(ptr);
     }
+}
 
-    // The card UI skips attached-wing slots and right-click attach for army-group cards.
-    // Treat the card as an army card while those run (UI thread only, so nothing else sees the flag flip).
-    void AsArmyCard(nint card, bool when, Action original)
+/// <summary>
+/// Multiplayer stand-in for <see cref="AirWingFieldMarshal"/>, which changes game rules and so is off in multiplayer.
+/// Right-clicking a field marshal's card with air wings selected attaches them to his armies instead, spread over them,
+/// with the vanilla attach command; the game then runs their missions and bases like any army's wings. Other players
+/// need nothing.
+/// </summary>
+[Plugin("com.green1052.airwingfieldmarshal.multiplayer", "Air Wing Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true)]
+public unsafe class AirWingFieldMarshalMultiplayer : Plugin
+{
+    [Function(CallingConventions.Microsoft)] public delegate void CardFn(nint card);
+    [Function(CallingConventions.Microsoft)] public delegate byte PostAttachFn(nint wings, nint group);
+    [Function(CallingConventions.Microsoft)] public delegate byte ByteFn();
+
+    IHook<CardFn>? _cardRightClick;
+    IHook<PostAttachFn>? _postAttach;
+
+    public override void Load()
     {
-        var flag = (byte*)(card + _cardIsArmyGroup);
-        var was = *flag;
-        if (when) *flag = 0;
-        try { original(); }
-        finally { *flag = was; }
+        var rightClick = Sig.Find(Signatures.CardRightClick);
+        var isArmyGroup = Card.IsArmyGroupOffset(Sig.Find(Signatures.RefreshWingSlots));
+        var postAttach = Sig.Find(Signatures.PostAttachWings);
+        var wingsSelected = Patches.Function<ByteFn>(Sig.Find(Signatures.AirWingsSelected));
+
+        // A marshal's card ignores a right-click with wings selected; as an army card's it gets to the attach below...
+        _cardRightClick = Patches.Hook<CardFn>(rightClick, card =>
+            Card.AsArmyCard(card, isArmyGroup, wingsSelected() != 0, () => _cardRightClick!.OriginalFunction(card)));
+        // ...which an army group can't take: attach to its armies instead.
+        _postAttach = Patches.Hook<PostAttachFn>(postAttach, (wings, group) =>
+            group != 0 && new OrdersGroup(group).IsArmyGroup ? SpreadOverArmies(wings, group) : _postAttach!.OriginalFunction(wings, group));
+    }
+
+    // ponytail: round-robin in selection order, not weighted by army size or front; weigh it if that matters in play.
+    byte SpreadOverArmies(nint wings, nint group)
+    {
+        var all = Native.PdxArray(wings).ToArray();
+        var armies = new OrdersGroup(group).Armies.ToArray();
+        byte posted = 0;
+        var view = stackalloc nint[3]; // a CPdxArray of one army's share: the command reads only data (+0) and size (+0xC)
+        for (var a = 0; a < armies.Length && a < all.Length; a++)
+        {
+            var share = all.Where((_, i) => i % armies.Length == a).ToArray();
+            fixed (nint* data = share)
+            {
+                view[0] = (nint)data;
+                ((int*)view)[2] = ((int*)view)[3] = share.Length;
+                posted |= _postAttach!.OriginalFunction((nint)view, armies[a]);
+            }
+        }
+        Log.Info($"{all.Length} air wings attached across {Math.Min(armies.Length, all.Length)} of the marshal's armies");
+        return posted;
     }
 }
