@@ -20,6 +20,9 @@ public static class Signatures
     /// <summary>Intelligence agency upgrade button (button): button+UpgradeOfButton is the upgrade.</summary>
     [Signature] public const string AgencyClick = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 30 48 8B F9 E8 ? ? ? ? 84 C0";
 
+    /// <summary>Intelligence agency upgrade entry refresh (entry): fills entry+WindowOfEntry's texts for entry+UpgradeOfButton.</summary>
+    [Signature] public const string AgencyEntryRefresh = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 38 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B F1";
+
     /// <summary>CSession::PostCommand(session, command, force) (clausewitz session.cpp).</summary>
     [Signature] public const string PostCommand = "48 89 5C 24 ? 57 48 81 EC 30 01 00 00 48 8B FA 48 8B D9 45 84 C0";
 
@@ -53,7 +56,8 @@ public unsafe class Queues : Plugin
     const int TechOfStatus = 0x160;                          // CTechnologyStatus -> CTechnology
     const int FocusOfCountry = 0x1380, FocusInProgress = 0x10; // CCountry -> focus progress -> CNationalFocus* (null = idle)
     const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
-    const int StatusOfItem = 5272, UpgradeOfButton = 40;
+    const int StatusOfItem = 5272, UpgradeOfButton = 40, WindowOfEntry = 16;
+    const string NumberBox = "hoimod_queue"; // added to the GUI by the Queues UI mod
     const int CommandTag = 40, CommandTarget = 48, ResearchSlot = 56, ResearchBonus = 60;
     const int VK_SHIFT = 0x10;
     const long CooldownMs = 1500; // a posted command takes a tick or two to execute
@@ -61,11 +65,13 @@ public unsafe class Queues : Plugin
     [Function(CallingConventions.Microsoft)] public delegate void ResearchClickFn(nint item);
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
     [Function(CallingConventions.Microsoft)] public delegate nint AgencyClickFn(nint button);
+    [Function(CallingConventions.Microsoft)] public delegate void EntryFn(nint entry);
     [Function(CallingConventions.Microsoft)] public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
     IHook<ResearchClickFn>? _researchClick;
     IHook<FocusClickFn>? _focusClick;
     IHook<AgencyClickFn>? _agencyClick;
+    IHook<EntryFn>? _agencyEntryRefresh;
     IHook<PeekMessageFn>? _peekMessage;
 
     delegate* unmanaged<nint, nint, byte, byte> _post;
@@ -83,6 +89,7 @@ public unsafe class Queues : Plugin
         var researchClick = Sig.Find(Signatures.ResearchClick);
         var focusClick = Sig.Find(Signatures.FocusClick);
         var agencyClick = Sig.Find(Signatures.AgencyClick);
+        var agencyEntryRefresh = Sig.Find(Signatures.AgencyEntryRefresh);
         var holder = Sig.Find(Signatures.SessionHolder) + 0x15;  // mov rcx, [rip+disp32]
         var lookup = Sig.FindAll(Signatures.CountryLookup, 2)[0];
         _post = (delegate* unmanaged<nint, nint, byte, byte>)Sig.Find(Signatures.PostCommand);
@@ -112,6 +119,12 @@ public unsafe class Queues : Plugin
             return 0;
         });
 
+        _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
+        {
+            _agencyEntryRefresh!.OriginalFunction(entry);
+            ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfButton));
+        });
+
         // The main loop pumps window messages every frame: a safe place to send commands from the UI thread.
         var peek = NativeLibrary.GetExport(NativeLibrary.Load("user32.dll"), "PeekMessageW");
         _peekMessage = Patches.Hook<PeekMessageFn>(peek, (msg, hwnd, min, max, remove) =>
@@ -124,6 +137,15 @@ public unsafe class Queues : Plugin
             }
             return result;
         });
+    }
+
+    /// <summary>Writes the 1-based queue position of <paramref name="item"/> into the window's number box (empty if not queued).</summary>
+    static void ShowPosition(nint window, Queue queue, nint item)
+    {
+        var box = window == 0 ? 0 : Gui.FindChild(window, NumberBox);
+        if (box == 0) return; // Queues UI mod not enabled
+        var index = queue.Items.IndexOf(item);
+        Gui.SetText(box, index < 0 ? "" : (index + 1).ToString());
     }
 
     static bool Shift() => (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;

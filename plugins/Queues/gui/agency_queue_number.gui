@@ -1,0 +1,14 @@
+
+
+		# Queues: position of this upgrade in the queue (set by code, empty when not queued).
+		instantTextboxType = {
+			name = "hoimod_queue"
+			position = { x = 14 y = 30 }
+			font = "hoi_18mbs"
+			text = ""
+			maxWidth = 30
+			maxHeight = 22
+			format = center
+			vertical_alignment = center
+			alwaystransparent = yes
+		}
