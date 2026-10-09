@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/plugins/">
+    <Project Path="plugins/AirWingFieldMarshal/AirWingFieldMarshal.csproj" />
+    <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Signatures.Tests/Signatures.Tests.csproj" />
+  </Folder>
+  <Project Path="HOI4ModLoader/HOI4ModLoader.csproj" />
+</Solution>
