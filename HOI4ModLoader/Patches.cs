@@ -68,8 +68,8 @@ public static unsafe partial class Patches
                 Expression.Invoke(Expression.Constant(onError), ex),
                 Expression.Invoke(original.Body, argValues)))), args).Compile();
 
-        hook = Hooks.CreateHook(guarded, at).Activate();
-        Record(hook.Disable, hook); // also keeps the delegates alive
+        hook = Hooks.CreateHook(guarded, at);
+        Restorable(at, () => hook.Activate(), hook.Disable, hook);
         return hook;
     }
 
@@ -80,8 +80,8 @@ public static unsafe partial class Patches
     public static IAsmHook Asm(nint at, int length, params string[] asm)
     {
         Claim(at, length);
-        var hook = Hooks.CreateAsmHook(asm, at, AsmHookBehaviour.DoNotExecuteOriginal, length).Activate();
-        Record(hook.Disable, hook);
+        var hook = Hooks.CreateAsmHook(asm, at, AsmHookBehaviour.DoNotExecuteOriginal, length);
+        Restorable(at, () => hook.Activate(), hook.Disable, hook);
         return hook;
     }
 
@@ -97,7 +97,28 @@ public static unsafe partial class Patches
         for (long a = at; a < at + length; a++) Claims[a] = owner;
     }
 
-    static void Record(Action undo, object? keepAlive = null)
+    /// <summary>
+    /// Activates a hook and records how to take it out again: disable it (a thread already past the jump then runs the
+    /// original), then put back the bytes it overwrote, so the code reads as never hooked and signatures match again
+    /// (hot reload loads the plugin anew). Unless something hooked over it since: then it stays in the chain, disabled.
+    /// </summary>
+    static void Restorable(nint at, Action activate, Action disable, object hook)
+    {
+        const int Window = 64; // a hook's jump plus the instructions it cut through
+        var before = new ReadOnlySpan<byte>((void*)at, Window).ToArray();
+        activate();
+        var after = new ReadOnlySpan<byte>((void*)at, Window).ToArray();
+        var changed = Window;
+        while (changed > 0 && before[changed - 1] == after[changed - 1]) changed--;
+        Record(() =>
+        {
+            disable();
+            if (new ReadOnlySpan<byte>((void*)at, changed).SequenceEqual(after.AsSpan(0, changed))) WriteCode(at, before[..changed]);
+        }, hook); // also keeps the hook's delegates alive: a thread may still be inside it
+    }
+
+    /// <summary>Runs <paramref name="undo"/> when the current <see cref="Owner"/> is reverted (failed load, hot reload).</summary>
+    internal static void Record(Action undo, object? keepAlive = null)
     {
         if (keepAlive != null) KeepAlive.Add(keepAlive);
         var owner = Owner ?? "?";

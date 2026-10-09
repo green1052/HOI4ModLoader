@@ -14,15 +14,20 @@ public static class MainThread
     public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
     static readonly int Id = Environment.CurrentManagedThreadId; // plugins load on the main thread
-    static readonly List<(Action Action, long IntervalMs, long[] Next)> Timers = new();
+    static readonly List<Timer> Timers = new();
     static IHook<PeekMessageFn>? _hook;
     static readonly Logger Log = new("MainThread");
 
-    /// <summary>Runs <paramref name="action"/> on the main thread at most every <paramref name="interval"/>.</summary>
+    /// <summary>
+    /// Runs <paramref name="action"/> on the main thread at most every <paramref name="interval"/>, until the plugin that
+    /// registered it (in <see cref="Plugin.Load"/>) is reverted or reloaded.
+    /// </summary>
     public static void Every(TimeSpan interval, Action action)
     {
         if (_hook == null) Install();
-        Timers.Add((action, (long)interval.TotalMilliseconds, new long[1]));
+        var timer = new Timer(action, (long)interval.TotalMilliseconds);
+        Timers.Add(timer);
+        Patches.Record(() => Timers.Remove(timer));
     }
 
     static void Install()
@@ -48,12 +53,19 @@ public static class MainThread
     static void Tick()
     {
         var now = Environment.TickCount64;
-        foreach (var (action, interval, next) in Timers)
+        foreach (var timer in Timers.ToArray()) // a timer may reload plugins, which removes and adds timers
         {
-            if (now < next[0]) continue;
-            next[0] = now + interval;
-            try { action(); }
+            if (now < timer.Next || !Timers.Contains(timer)) continue;
+            timer.Next = now + timer.IntervalMs;
+            try { timer.Action(); }
             catch (Exception e) { Log.Error(e.ToString()); }
         }
+    }
+
+    sealed class Timer(Action action, long intervalMs)
+    {
+        public Action Action { get; } = action;
+        public long IntervalMs { get; } = intervalMs;
+        public long Next;
     }
 }

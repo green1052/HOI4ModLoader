@@ -27,7 +27,7 @@ public sealed class DependencyAttribute(string id) : Attribute
     public string Id { get; } = id;
 }
 
-/// <summary>Base class for plugins. Every subclass in hoi4mods\plugins\*.dll is loaded once, before the game's entry point.</summary>
+/// <summary>Base class for plugins. Every subclass in hoi4mods\plugins\*.dll is loaded before the game's entry point, and anew on hot reload.</summary>
 public abstract class Plugin
 {
     public PluginAttribute Info { get; internal set; } = null!;

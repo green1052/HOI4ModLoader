@@ -21,7 +21,7 @@ hoi4mods\dotnet\     (선택) 동봉 런타임. 없으면 설치된 .NET 10을 �
 ```
 
 ## 빌드
-Rider에서 `HOI4ModLoader.slnx`를 빌드하거나 `dotnet build`를 실행합니다. 빌드할 때마다 게임 폴더(Steam 레지스트리로 자동 탐색, `HOI4Dir`로 변경 가능)에 바로 배포됩니다. 게임이 켜져 있으면 잠긴 파일은 경고만 내고 넘어갑니다.
+Rider에서 `HOI4ModLoader.slnx`를 빌드하거나 `dotnet build`를 실행합니다. 빌드할 때마다 게임 폴더(Steam 레지스트리로 자동 탐색, `HOI4Dir`로 변경 가능)에 바로 배포됩니다. 게임이 켜져 있으면 플러그인은 핫 리로드되고, 코어(`hoi4mods\core`)처럼 잠긴 파일은 경고만 내고 넘어갑니다.
 
 `bootstrap`(C++)은 C# 빌드가 `vswhere`로 VS C++ 도구를 찾아 소스가 바뀌었을 때만 빌드합니다. C++ MSBuild와 SDK 스타일 MSBuild를 한 솔루션에서 함께 쓸 수 없어서 `.slnx`에는 넣지 않았습니다.
 
@@ -62,6 +62,14 @@ public class MyPlugin : Plugin
 
 ## 디버깅
 `hoi4mods\config\HOI4ModLoader.cfg`에서 `WaitForDebugger = True`로 두고 게임을 켭니다. 그다음 Rider의 **Run → Attach to Process → hoi4.exe**로 붙이면 `Load()`부터 브레이크포인트가 걸립니다.
+
+## 핫 리로드
+게임이 켜진 채로 플러그인을 다시 빌드하면, 로더가 `hoi4mods\plugins`의 DLL이 바뀐 것을 감지해(1초 간격, 복사가 끝날 때까지 대기) 모든 플러그인을 다시 로드합니다.
+- 기존 패치를 모두 되돌립니다. 훅이 덮어쓴 바이트까지 원래대로 돌려놓으므로 시그니처가 다시 맞습니다. 그다음 새 DLL로 `Load()`를 다시 실행합니다.
+- 플러그인은 메모리로 읽어 로드하므로 DLL 파일이 잠기지 않습니다. 이전 버전은 메모리에 남습니다(재시작하면 정리됨).
+- 플러그인 상태(예: 대기열)는 초기화됩니다. 멀티플레이 체크섬은 다시 계산하지 않습니다.
+- 끄려면 `hoi4mods\config\HOI4ModLoader.cfg`에서 `HotReload = False`로 둡니다.
+- `MainThread.Every`와 패치는 `Load()` 안에서 등록해야 리로드 때 함께 정리됩니다.
 
 ## 게임 업데이트 후
 `dotnet test tests/Signatures.Tests`로 깨진 패턴을 확인합니다. 그다음 오프셋을 확인하고 `GameVersion`을 올립니다.
