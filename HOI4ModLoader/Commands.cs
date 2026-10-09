@@ -44,14 +44,23 @@ public static unsafe class Commands
     /// <summary>Hands the command to the session, which owns and eventually frees it.</summary>
     public static void Post(nint cmd)
     {
-        if (_post == null)
+        if (_post == null) _post = (delegate* unmanaged<nint, nint, byte, byte>)Sig.Find(PostSig);
+        _post(Session, cmd, 0);
+    }
+
+    /// <summary>The game's CSession (clausewitz session.cpp), or 0 before the game application exists.</summary>
+    internal static nint Session
+    {
+        get
         {
-            var holder = Sig.Find(SessionHolderSig) + 0x15; // mov rcx, [rip+disp32]
-            _sessionHolder = (nint*)(holder + 7 + *(int*)(holder + 3));
-            _post = (delegate* unmanaged<nint, nint, byte, byte>)Sig.Find(PostSig);
+            if (_sessionHolder == null)
+            {
+                var holder = Sig.Find(SessionHolderSig) + 0x15; // mov rcx, [rip+disp32]
+                _sessionHolder = (nint*)(holder + 7 + *(int*)(holder + 3));
+            }
+            var app = *_sessionHolder;
+            return app == 0 ? 0 : ((delegate* unmanaged<nint, nint>)(*(nint**)app)[GetSessionSlot])(app);
         }
-        var app = *_sessionHolder;
-        _post(((delegate* unmanaged<nint, nint>)(*(nint**)app)[GetSessionSlot])(app), cmd, 0);
     }
 
     /// <summary>Releases a command that was never posted.</summary>

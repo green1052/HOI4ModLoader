@@ -126,6 +126,21 @@ public sealed unsafe class Image
         return vtables[0];
     }
 
+    /// <summary>
+    /// Whether the C++ object at <paramref name="obj"/> is a <paramref name="className"/> or derives from one, like
+    /// dynamic_cast: its vtable's slot -1 is the complete object locator, whose class hierarchy lists every base's type descriptor.
+    /// </summary>
+    public bool IsA(nint obj, string className)
+    {
+        var locator = *(nint*)(*(nint*)obj - 8);
+        var hierarchy = _base + *(int*)(locator + 16);
+        var bases = _base + *(int*)(hierarchy + 12);
+        var name = $".?AV{className}@@";
+        for (int i = 0, n = *(int*)(hierarchy + 8); i < n; i++)
+            if (Marshal.PtrToStringAnsi(_base + *(int*)(_base + *(int*)(bases + 4 * i)) + 16) == name) return true;
+        return false;
+    }
+
     List<nint> FindData(byte[] needle)
     {
         var hits = new List<nint>();

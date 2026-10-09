@@ -17,6 +17,7 @@ public static class Loader
     static readonly List<Plugin> Loaded = new();
     static string _loadedFiles = "", _changedFiles = "";
     static int _generation;
+    static bool _multiplayer;
 
     /// <summary>Called once by the native bootstrap (version.dll), before the game's entry point.</summary>
     [UnmanagedCallersOnly]
@@ -29,13 +30,14 @@ public static class Loader
             if (config.Bind("Debug", "WaitForDebugger", false, "Pause startup until a debugger attaches (Rider: Run > Attach to Process > hoi4.exe)."))
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
-                "Reload all plugins when a DLL in hoi4mods\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost; the multiplayer checksum is not recomputed.");
+                "Reload all plugins when a DLL in hoi4mods\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
 
             Log.Info($"HOI4 {Game.Version}, .NET {Environment.Version}");
             LoadPlugins();
 
             Patches.Owner = "HOI4ModLoader";
-            Checksum.Install(Loaded.Select(p => p.Info).Where(i => i.AffectsGameState).ToList(), Log);
+            _ = Game.IsMultiplayer; // resolves its signature now, so a failure is reported once, at startup
+            MainThread.Every(TimeSpan.FromMilliseconds(250), FollowMultiplayer);
             if (hotReload) MainThread.Every(TimeSpan.FromSeconds(1), ReloadIfChanged);
         }
         catch (Exception e)
@@ -60,6 +62,21 @@ public static class Loader
             return;
         }
         Log.Info("plugin files changed: reloading");
+        Reload();
+    }
+
+    // Multiplayer runs every player's simulation in lockstep, so a plugin changing game rules would desync anyone without it.
+    // Those plugins are off from the multiplayer lobby on (vanilla to the other players) and back on in single player.
+    static void FollowMultiplayer()
+    {
+        if (Game.IsMultiplayer == _multiplayer) return;
+        _multiplayer = !_multiplayer;
+        Log.Info(_multiplayer ? "multiplayer: game rule plugins off" : "single player: game rule plugins on");
+        Reload();
+    }
+
+    static void Reload()
+    {
         for (var i = Loaded.Count - 1; i >= 0; i--) Patches.Revert(Loaded[i].Info.Id);
         Loaded.Clear();
         LoadPlugins();
@@ -119,6 +136,11 @@ public static class Loader
             if (!config.Bind("General", "Enabled", true, "Load this plugin."))
             {
                 log.Info("disabled in config");
+                return false;
+            }
+            if (info.AffectsGameState && _multiplayer)
+            {
+                log.Info("off in multiplayer");
                 return false;
             }
             if (info.GameVersion is { } want

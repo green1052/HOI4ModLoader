@@ -15,8 +15,11 @@ public sealed class PluginAttribute(string id, string name, string version) : At
     /// </summary>
     public string? GameVersion { get; init; }
 
-    /// <summary>The plugin changes simulation results. It is mixed into the game checksum, so a multiplayer lobby shows a
-    /// checksum mismatch unless every player runs the same such plugins (instead of desyncing mid-game).</summary>
+    /// <summary>
+    /// The plugin changes game rules (simulation results), not just what one player sees or clicks. Multiplayer runs every
+    /// player's simulation in lockstep, so it would desync anyone without the plugin: it is off in multiplayer and works in
+    /// single player only. Everything else (UI, sending the player's own commands) works in multiplayer too.
+    /// </summary>
     public bool AffectsGameState { get; init; }
 }
 

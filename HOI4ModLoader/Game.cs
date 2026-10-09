@@ -17,6 +17,7 @@ public static unsafe class Game
     [Signature(2)] public const string CountryLookupSig = "83 3B 00 48 8B 3D ?? ?? ?? ?? 75 04 33 C0 EB 08 48 8B CB E8 ?? ?? ?? ?? 48 8B 5C 24 48 48 63 C8 48 8B 87 ?? ?? ?? ?? 48 8B 04 C8";
 
     const int PlayerTagOffset = 0x520, ObserverTagOffset = 0x524; // gamestate: int country tags
+    const int ServerOfSession = 88;                                // CSession -> CServer*
 
     static nint* _state;
     static delegate* unmanaged<nint, int> _tagIndex;
@@ -46,6 +47,20 @@ public static unsafe class Game
             if (gs == 0) return 0;
             var tag = *(int*)(gs + PlayerTagOffset);
             return tag > 0 ? tag : *(int*)(gs + ObserverTagOffset);
+        }
+    }
+
+    /// <summary>
+    /// In a multiplayer lobby or game: the session's server is a network one (host) or a proxy of one (client). The game's
+    /// own telemetry tells "multiplayer" from single player the same way.
+    /// </summary>
+    public static bool IsMultiplayer
+    {
+        get
+        {
+            var session = Commands.Session;
+            var server = session == 0 ? 0 : *(nint*)(session + ServerOfSession);
+            return server != 0 && (Image.Game.IsA(server, "CNetworkServer") || Image.Game.IsA(server, "CProxyServer"));
         }
     }
 
