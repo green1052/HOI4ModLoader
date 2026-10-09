@@ -33,13 +33,21 @@ public static class Loader
                 "Reload all plugins when a DLL in hoi4mods\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
 
             Log.Info($"HOI4 {Game.Version}, .NET {Environment.Version}");
+            var followMultiplayer = true;
+            try { _ = Game.IsMultiplayer; } // resolves its signature now, before any game rule plugin loads
+            catch (Exception e)
+            {
+                followMultiplayer = false;
+                _multiplayer = true; // fail closed: unable to tell, game rule plugins could desync a multiplayer game
+                Log.Error($"multiplayer check unavailable, game rule plugins stay off: {e.Message}");
+            }
             LoadPlugins();
 
             Patches.Owner = "HOI4ModLoader";
-            VersionLabel.Install(() => $"\nHOI4ModLoader {typeof(Loader).Assembly.GetName().Version!.ToString(3)} ({Loaded.Count} plugins)");
-            _ = Game.IsMultiplayer; // resolves its signature now, so a failure is reported once, at startup
-            MainThread.Every(TimeSpan.FromMilliseconds(250), FollowMultiplayer);
+            if (followMultiplayer) MainThread.Every(TimeSpan.FromMilliseconds(250), FollowMultiplayer);
             if (hotReload) MainThread.Every(TimeSpan.FromSeconds(1), ReloadIfChanged);
+            try { VersionLabel.Install(() => $"\nHOI4ModLoader {typeof(Loader).Assembly.GetName().Version!.ToString(3)} ({Loaded.Count} plugins)"); }
+            catch (Exception e) { Log.Error($"version label: {e.Message}"); }
         }
         catch (Exception e)
         {
@@ -70,7 +78,14 @@ public static class Loader
     // Those plugins are off from the multiplayer lobby on (vanilla to the other players) and back on in single player.
     static void FollowMultiplayer()
     {
-        if (Game.IsMultiplayer == _multiplayer) return;
+        bool multiplayer;
+        try { multiplayer = Game.IsMultiplayer; }
+        catch (Exception e)
+        {
+            multiplayer = true; // fail closed
+            if (!_multiplayer) Log.Error($"multiplayer check failed: {e.Message}");
+        }
+        if (multiplayer == _multiplayer) return;
         _multiplayer = !_multiplayer;
         Log.Info(_multiplayer ? "multiplayer: game rule plugins off" : "single player: game rule plugins on");
         Reload();
@@ -90,14 +105,20 @@ public static class Loader
     {
         _loadedFiles = PluginFiles(); // before reading them: a change during the load reloads again
         if (!Directory.Exists(PluginsDir)) return;
-        var context = new PluginContext(PluginsDir, ++_generation);
+        var files = new Dictionary<string, string>(); // assembly name -> file (a file may be named differently)
+        foreach (var file in Directory.EnumerateFiles(PluginsDir, "*.dll"))
+        {
+            try { files[AssemblyName.GetAssemblyName(file).Name!] = file; }
+            catch (Exception e) { Log.Error($"{Path.GetFileName(file)}: {e.Message}"); }
+        }
+        var context = new PluginContext(files, ++_generation);
 
         var found = new Dictionary<string, (Type Type, PluginAttribute Info)>();
-        foreach (var file in Directory.EnumerateFiles(PluginsDir, "*.dll"))
+        foreach (var (name, file) in files)
         {
             try
             {
-                var assembly = context.LoadFromAssemblyName(new AssemblyName(Path.GetFileNameWithoutExtension(file)));
+                var assembly = context.LoadFromAssemblyName(new AssemblyName(name));
                 foreach (var type in assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(Plugin)) && !t.IsAbstract))
                 {
                     if (type.GetCustomAttribute<PluginAttribute>() is not { } info)
@@ -133,37 +154,37 @@ public static class Loader
                 return false;
             }
 
-            var config = new ConfigFile(Path.Combine(ModsDir, "config", info.Id + ".cfg"));
-            if (!config.Bind("General", "Enabled", true, "Load this plugin."))
-            {
-                log.Info("disabled in config");
-                return false;
-            }
-            if (info.AffectsGameState && _multiplayer)
-            {
-                log.Info("off in multiplayer");
-                return false;
-            }
-            if (info.MultiplayerOnly && !_multiplayer)
-            {
-                log.Info("multiplayer only");
-                return false;
-            }
-            if (info.GameVersion is { } want
-                && !config.Bind("General", "IgnoreGameVersion", false, $"Load even if the game is not HOI4 {want}, which this plugin was made for (may crash).")
-                && !Game.Version.StartsWith(want, StringComparison.Ordinal))
-            {
-                log.Error($"skipped: made for HOI4 {want}, game is {Game.Version}");
-                return false;
-            }
-
-            var plugin = (Plugin)Activator.CreateInstance(type)!;
-            plugin.Info = info;
-            plugin.Config = config;
-            plugin.Log = log;
             Patches.Owner = info.Id;
-            try
+            try // anything a plugin brings (constructor, config file, Load) only skips that plugin
             {
+                var config = new ConfigFile(Path.Combine(ModsDir, "config", info.Id + ".cfg"));
+                if (!config.Bind("General", "Enabled", true, "Load this plugin."))
+                {
+                    log.Info("disabled in config");
+                    return false;
+                }
+                if (info.AffectsGameState && _multiplayer)
+                {
+                    log.Info("off in multiplayer");
+                    return false;
+                }
+                if (info.MultiplayerOnly && !_multiplayer)
+                {
+                    log.Info("multiplayer only");
+                    return false;
+                }
+                if (info.GameVersion is { } want
+                    && !config.Bind("General", "IgnoreGameVersion", false, $"Load even if the game is not HOI4 {want}, which this plugin was made for (may crash).")
+                    && !Game.Version.StartsWith(want, StringComparison.Ordinal))
+                {
+                    log.Error($"skipped: made for HOI4 {want}, game is {Game.Version}");
+                    return false;
+                }
+
+                var plugin = (Plugin)Activator.CreateInstance(type)!;
+                plugin.Info = info;
+                plugin.Config = config;
+                plugin.Log = log;
                 plugin.Load();
                 log.Info($"{info.Version} loaded");
                 Loaded.Add(plugin);
@@ -172,7 +193,7 @@ public static class Loader
             catch (Exception e)
             {
                 Patches.Revert(info.Id);
-                log.Error($"FAILED, all its patches reverted: {e.Message}");
+                log.Error($"FAILED, all its patches reverted: {(e as TargetInvocationException)?.InnerException?.Message ?? e.Message}");
                 return false;
             }
             finally
@@ -186,16 +207,18 @@ public static class Loader
     /// One load of the plugins folder. Plugins are read into memory, so their files stay unlocked and can be rebuilt while
     /// the game runs; each reload needs a new context, as a context loads an assembly name only once. Old contexts stay
     /// loaded: hooks marshal plugin delegates to native code, which collectible (unloadable) contexts don't support.
-    /// Anything not in the folder (HOI4ModLoader, Reloaded.Hooks, .NET) comes from the loader's context, so types are shared.
+    /// Whatever the loader's context has (HOI4ModLoader, Reloaded.Hooks, .NET) comes from there, even if a copy sits in the
+    /// folder, so types are shared.
     /// </summary>
-    sealed class PluginContext(string dir, int generation) : AssemblyLoadContext($"plugins #{generation}")
+    sealed class PluginContext(Dictionary<string, string> files, int generation) : AssemblyLoadContext($"plugins #{generation}")
     {
         static readonly AssemblyLoadContext Core = GetLoadContext(typeof(Loader).Assembly)!;
 
         protected override Assembly? Load(AssemblyName name)
         {
-            var dll = Path.Combine(dir, name.Name + ".dll");
-            if (!File.Exists(dll)) return Core.LoadFromAssemblyName(name);
+            try { return Core.LoadFromAssemblyName(name); }
+            catch (FileNotFoundException) when (files.ContainsKey(name.Name!)) { }
+            var dll = files[name.Name!];
             var pdb = Path.ChangeExtension(dll, ".pdb");
             using var image = new MemoryStream(File.ReadAllBytes(dll));
             using var symbols = File.Exists(pdb) ? new MemoryStream(File.ReadAllBytes(pdb)) : null;
