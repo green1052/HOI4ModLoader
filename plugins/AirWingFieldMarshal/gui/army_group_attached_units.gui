@@ -4,7 +4,7 @@
 		# Above army_group_bg, which is drawn over this card.
 		gridBoxType = {
 			name = "attached_units"
-			position = { x = 1 y = -103 }
+			position = { x = 1 y = -130 }
 			size = {width=27 height=68 }
 			slotsize = {width=27 height=68}
 			max_slots_vertical = 1
