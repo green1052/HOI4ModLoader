@@ -36,6 +36,7 @@ public static class Loader
             LoadPlugins();
 
             Patches.Owner = "HOI4ModLoader";
+            VersionLabel.Install(() => $" + HOI4ModLoader {typeof(Loader).Assembly.GetName().Version!.ToString(3)} ({Loaded.Count} plugins)");
             _ = Game.IsMultiplayer; // resolves its signature now, so a failure is reported once, at startup
             MainThread.Every(TimeSpan.FromMilliseconds(250), FollowMultiplayer);
             if (hotReload) MainThread.Every(TimeSpan.FromSeconds(1), ReloadIfChanged);

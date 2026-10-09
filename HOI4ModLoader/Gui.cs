@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace HOI4ModLoader;
 
@@ -44,19 +43,11 @@ public static unsafe class Gui
     [DllImport("user32.dll")]
     static extern short GetAsyncKeyState(int key);
 
-    /// <summary>
-    /// An MSVC std::string { char buf[16] | char* ptr; size; capacity }. Heap buffers come from the CRT heap,
-    /// the same process heap the game's statically linked CRT frees from.
-    /// </summary>
     static nint NewString(string value)
     {
-        var bytes = Encoding.UTF8.GetBytes(value);
         var s = (nint)NativeMemory.AllocZeroed(32);
-        var data = bytes.Length < 16 ? s : (nint)NativeMemory.AllocZeroed((nuint)bytes.Length + 1);
-        if (data != s) *(nint*)s = data;
-        bytes.CopyTo(new Span<byte>((void*)data, bytes.Length));
-        *(long*)(s + 16) = bytes.Length;
-        *(long*)(s + 24) = Math.Max(15, bytes.Length);
+        *(long*)(s + 24) = 15; // empty, inline buffer
+        Native.SetMsvcString(s, value);
         return s;
     }
 
