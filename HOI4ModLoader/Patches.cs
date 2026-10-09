@@ -1,0 +1,132 @@
+using System.Linq.Expressions;
+using System.Runtime.InteropServices;
+using Reloaded.Hooks;
+using Reloaded.Hooks.Definitions;
+using Reloaded.Hooks.Definitions.Enums;
+
+namespace HOI4ModLoader;
+
+/// <summary>
+/// Every way a plugin changes the game. Each patch is recorded against the plugin being loaded, so a failing
+/// <see cref="Plugin.Load"/> is rolled back entirely, and two plugins can't silently overwrite the same bytes.
+/// Hooking itself is Reloaded.Hooks (https://github.com/Reloaded-Project/Reloaded.Hooks).
+/// </summary>
+public static unsafe partial class Patches
+{
+    /// <summary>Plugin id patches are recorded against (set by the loader around <see cref="Plugin.Load"/>).</summary>
+    internal static string? Owner;
+
+    static readonly Dictionary<long, string> Claims = new();
+    static readonly Dictionary<string, List<Action>> Undo = new();
+    static readonly List<object> KeepAlive = new();
+    static readonly Logger Log = new("Patches");
+
+    /// <summary>The Reloaded.Hooks instance, for anything the helpers below don't cover.</summary>
+    public static IReloadedHooks Hooks => ReloadedHooks.Instance;
+
+    /// <summary>
+    /// Writes <paramref name="replace"/> over <paramref name="expect"/> (hex, same length) at <paramref name="at"/>.
+    /// Throws if the bytes there aren't <paramref name="expect"/>: a game update, or another plugin's patch/hook.
+    /// </summary>
+    public static void Bytes(nint at, string expect, string replace)
+    {
+        var want = Convert.FromHexString(expect.Replace(" ", ""));
+        var with = Convert.FromHexString(replace.Replace(" ", ""));
+        if (want.Length != with.Length) throw new ArgumentException("expect and replace differ in length");
+        var found = new ReadOnlySpan<byte>((void*)at, want.Length);
+        if (!found.SequenceEqual(want))
+            throw new InvalidOperationException($"unexpected bytes at 0x{at:X}: {Convert.ToHexString(found)} (wanted {Convert.ToHexString(want)})");
+        Claim(at, want.Length);
+        WriteCode(at, with);
+        Record(() => WriteCode(at, want));
+    }
+
+    /// <summary>
+    /// Function hook, i.e. Harmony prefix/postfix: the detour runs instead of the function and calls
+    /// <c>hook.OriginalFunction</c> when it wants. A managed exception in the detour is logged once and the
+    /// original runs instead, so a plugin bug can't crash the game (call the original last, or it may run twice).
+    /// </summary>
+    public static IHook<T> Hook<T>(nint at, T detour) where T : Delegate
+    {
+        IHook<T>? hook = null;
+        var owner = Owner;
+        var logged = false;
+        Action<Exception> onError = e =>
+        {
+            if (logged) return;
+            logged = true;
+            Log.Error($"{owner}: hook at 0x{at:X} threw, running the original instead: {e}");
+        };
+
+        var args = typeof(T).GetMethod("Invoke")!.GetParameters().Select(p => Expression.Parameter(p.ParameterType, p.Name)).ToArray();
+        IEnumerable<Expression> argValues = args;
+        var ex = Expression.Parameter(typeof(Exception), "e");
+        Expression<Func<T>> original = () => hook!.OriginalFunction; // reads `hook` when called, i.e. after it's assigned below
+        var guarded = Expression.Lambda<T>(Expression.TryCatch(
+            Expression.Invoke(Expression.Constant(detour), argValues),
+            Expression.Catch(ex, Expression.Block(
+                Expression.Invoke(Expression.Constant(onError), ex),
+                Expression.Invoke(original.Body, argValues)))), args).Compile();
+
+        hook = Hooks.CreateHook(guarded, at).Activate();
+        Record(hook.Disable, hook); // also keeps the delegates alive
+        return hook;
+    }
+
+    /// <summary>
+    /// Mid-function assembly hook, i.e. Harmony transpiler: replaces the instructions in [at, +length) with
+    /// <paramref name="asm"/> (FASM syntax, "use64" first), then continues after them.
+    /// </summary>
+    public static IAsmHook Asm(nint at, int length, params string[] asm)
+    {
+        Claim(at, length);
+        var hook = Hooks.CreateAsmHook(asm, at, AsmHookBehaviour.DoNotExecuteOriginal, length).Activate();
+        Record(hook.Disable, hook);
+        return hook;
+    }
+
+    /// <summary>Callable delegate for a game function.</summary>
+    public static T Function<T>(nint at) where T : Delegate => Hooks.CreateWrapper<T>(at, out _);
+
+    static void Claim(nint at, int length)
+    {
+        var owner = Owner ?? "?";
+        for (long a = at; a < at + length; a++)
+            if (Claims.TryGetValue(a, out var other) && other != owner)
+                throw new InvalidOperationException($"0x{a:X} is already patched by {other}");
+        for (long a = at; a < at + length; a++) Claims[a] = owner;
+    }
+
+    static void Record(Action undo, object? keepAlive = null)
+    {
+        if (keepAlive != null) KeepAlive.Add(keepAlive);
+        var owner = Owner ?? "?";
+        if (!Undo.TryGetValue(owner, out var list)) Undo[owner] = list = new();
+        list.Add(undo);
+    }
+
+    /// <summary>Undoes everything <paramref name="owner"/> patched, newest first.</summary>
+    internal static void Revert(string owner)
+    {
+        if (!Undo.Remove(owner, out var list)) return;
+        for (int i = list.Count - 1; i >= 0; i--) list[i]();
+        foreach (var a in Claims.Where(c => c.Value == owner).Select(c => c.Key).ToList()) Claims.Remove(a);
+    }
+
+    static void WriteCode(nint at, byte[] bytes)
+    {
+        if (!VirtualProtect(at, bytes.Length, 0x40, out var old)) // PAGE_EXECUTE_READWRITE
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), $"VirtualProtect 0x{at:X}");
+        bytes.CopyTo(new Span<byte>((void*)at, bytes.Length));
+        VirtualProtect(at, bytes.Length, old, out _);
+        FlushInstructionCache(-1, at, bytes.Length);
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool VirtualProtect(nint address, nint size, uint newProtect, out uint oldProtect);
+
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool FlushInstructionCache(nint process, nint address, nint size);
+}

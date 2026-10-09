@@ -1,9 +1,65 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <PlatformTarget>x64</PlatformTarget>
+        <!-- Hosted from native code (bootstrap): emits runtimeconfig.json and copies dependencies. -->
+        <EnableDynamicLoading>true</EnableDynamicLoading>
     </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Reloaded.Hooks" Version="4.3.3" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\bootstrap\bootstrap.cpp;..\bootstrap\bootstrap.vcxproj" LinkBase="bootstrap" />
+    </ItemGroup>
+
+    <!--
+      bootstrap\ (C++ version.dll) needs the MSBuild from Visual Studio / Build Tools with the C++ workload, which can't
+      build SDK-style projects (and vice versa), so it isn't in the .slnx: this project builds it when its sources change.
+    -->
+    <PropertyGroup>
+        <BootstrapDll>$(MSBuildThisFileDirectory)..\bootstrap\bin\Release\version.dll</BootstrapDll>
+    </PropertyGroup>
+    <Target Name="BuildBootstrap" BeforeTargets="Build" Inputs="..\bootstrap\bootstrap.cpp;..\bootstrap\bootstrap.vcxproj" Outputs="$(BootstrapDll)">
+        <Exec Command="&quot;$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe&quot; -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find MSBuild\**\Bin\MSBuild.exe"
+              ConsoleToMSBuild="true" StandardOutputImportance="low" ContinueOnError="true">
+            <Output TaskParameter="ConsoleOutput" PropertyName="_VcMSBuild" />
+        </Exec>
+        <Warning Condition="'$(_VcMSBuild)' == ''" Text="Visual Studio C++ build tools not found: bootstrap\ (version.dll) was not rebuilt." />
+        <!-- Clear the variables `dotnet build` exports, or the C++ MSBuild resolves the .NET SDK's targets instead of its own. -->
+        <Exec Condition="'$(_VcMSBuild)' != ''"
+              Command="set MSBuildSDKsPath=&amp; set MSBuildExtensionsPath=&amp; set MSBUILD_EXE_PATH=&amp; set MSBuildLoadMicrosoftTargetsReadOnly=&amp; &quot;$(_VcMSBuild)&quot; &quot;..\bootstrap\bootstrap.vcxproj&quot; -nologo -v:m -p:Configuration=Release -p:Platform=x64" />
+    </Target>
+
+    <!-- Every build copies the loader into <DeployDir>\hoi4mods\core and version.dll next to hoi4.exe. Locked files (game running) only warn. -->
+    <Target Name="DeployCore" AfterTargets="Build" Condition="'$(DeployDir)' != ''">
+        <ItemGroup>
+            <!-- FASM.DLL is the 32-bit assembler; hoi4.exe is 64-bit and uses FASMX64.DLL. -->
+            <_CoreFile Include="$(OutDir)**\*" Exclude="$(OutDir)**\*.targets;$(OutDir)FASM.DLL" />
+        </ItemGroup>
+        <Copy SourceFiles="@(_CoreFile)" DestinationFiles="@(_CoreFile->'$(DeployDir)\hoi4mods\core\%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
+        <Copy Condition="Exists('$(BootstrapDll)')" SourceFiles="$(BootstrapDll)" DestinationFolder="$(DeployDir)" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
+    </Target>
+
+    <!-- -p:BundleRuntime=true ships the .NET runtime in hoi4mods\dotnet, so players don't need it installed. -->
+    <Target Name="BundleRuntime" AfterTargets="DeployCore" Condition="'$(BundleRuntime)' == 'true' And '$(DeployDir)' != ''">
+        <PropertyGroup>
+            <_Fxr>host\fxr\$(BundledNETCoreAppPackageVersion)\</_Fxr>
+            <_Shared>shared\Microsoft.NETCore.App\$(BundledNETCoreAppPackageVersion)\</_Shared>
+        </PropertyGroup>
+        <ItemGroup>
+            <_Fxr Include="$(NetCoreRoot)$(_Fxr)**\*" />
+            <_Shared Include="$(NetCoreRoot)$(_Shared)**\*" />
+        </ItemGroup>
+        <Error Condition="'@(_Fxr)' == '' Or '@(_Shared)' == ''" Text=".NET runtime $(BundledNETCoreAppPackageVersion) not found under $(NetCoreRoot)." />
+        <Copy SourceFiles="@(_Fxr)" DestinationFiles="@(_Fxr->'$(DeployDir)\hoi4mods\dotnet\$(_Fxr)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(_Shared)" DestinationFiles="@(_Shared->'$(DeployDir)\hoi4mods\dotnet\$(_Shared)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    </Target>
 
 </Project>

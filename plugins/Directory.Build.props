@@ -1,0 +1,19 @@
+<Project>
+
+    <!-- Shared by every plugin under plugins\: a plugin project is just a .csproj and its .cs files. -->
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <PlatformTarget>x64</PlatformTarget>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Provided at runtime by hoi4mods\core. -->
+        <ProjectReference Include="$(MSBuildThisFileDirectory)..\HOI4ModLoader\HOI4ModLoader.csproj" Private="false" />
+    </ItemGroup>
+
+</Project>
