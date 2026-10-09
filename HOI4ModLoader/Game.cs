@@ -91,9 +91,12 @@ public static unsafe class Native
     /// Replaces the contents of the MSVC std::string at <paramref name="at"/>. Heap buffers come from and go back to the
     /// CRT heap, the same process heap the game's statically linked CRT uses.
     /// </summary>
-    public static void SetMsvcString(nint at, string value)
+    public static void SetMsvcString(nint at, string value) => SetMsvcString(at, Encoding.UTF8.GetBytes(value));
+
+    /// <inheritdoc cref="SetMsvcString(nint, string)"/>
+    public static void SetMsvcString(nint at, ReadOnlySpan<byte> value)
     {
-        var bytes = Encoding.UTF8.GetBytes(value);
+        var bytes = value.ToArray(); // value may point into the buffer freed below
         if (bytes.Length >= 0xFFF) throw new ArgumentException("too long: MSVC over-aligns buffers of 4 KB and more"); // and frees them differently
         if (*(long*)(at + 0x18) >= 16) NativeMemory.Free(*(void**)at);
         var data = bytes.Length < 16 ? (byte*)at : (byte*)NativeMemory.Alloc((nuint)bytes.Length + 1);
@@ -104,7 +107,7 @@ public static unsafe class Native
         *(long*)(at + 0x18) = Math.Max(15, bytes.Length);
     }
 
-    public static string Utf8(Span<byte> bytes) => Encoding.UTF8.GetString(bytes);
+    public static string Utf8(ReadOnlySpan<byte> bytes) => Encoding.UTF8.GetString(bytes);
 }
 
 /// <summary>COrdersGroup (hoi4/source/ordersgroup.cpp): an army or an army group. Offsets for HOI4 1.19.3.</summary>

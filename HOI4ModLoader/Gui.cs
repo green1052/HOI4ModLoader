@@ -1,27 +1,45 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace HOI4ModLoader;
 
-/// <summary>Reading and writing the game's GUI widgets (elements defined in interface\*.gui).</summary>
+/// <summary>
+/// Reading and writing the game's GUI widgets (elements defined in interface\*.gui). Widget text is the game's byte
+/// encoding (Windows-1252 plus § colour codes, or whatever a language mod maps in), so it is handled as bytes.
+/// </summary>
 public static unsafe class Gui
 {
-    /// <summary>CInstantTextBox::SetText(box, std::string*): takes the string's contents (and frees its heap buffer).</summary>
+    /// <summary>CInstantTextBox::SetText(box, std::string*): moves the string in (freeing the old text) and re-lays it out.</summary>
     [Signature] public const string SetTextSig = "48 89 5C 24 ? 48 89 74 24 ? 48 89 54 24 ? 57 48 83 EC 20 48 8B F2";
 
-    const int FindChildSlot = 15; // CWindow vtable: child by name (std::string*, bool)
+    /// <summary>CContainerWindow::HasInstantTextBox(window, std::string* name) -> bool.</summary>
+    [Signature] public const string HasTextBoxSig = "48 83 EC 28 48 8B C2 4C 8D 81 E0 11 00 00 48 8D 91 F8 11 00 00 48 8B C8 E8 ? ? ? ? 48 85 C0 0F 95 C0 48 83 C4 28 C3";
+
+    const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
     const int ShowSlot = 15, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), flags byte
+    const int TextOffset = 0x110; // CInstantTextBox: std::string text
 
     static delegate* unmanaged<nint, nint, void> _setText;
+    static delegate* unmanaged<nint, nint, byte> _hasTextBox;
 
-    /// <summary>The child element named <paramref name="name"/> of <paramref name="window"/>, or 0.</summary>
-    public static nint FindChild(nint window, string name)
+    /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none.</summary>
+    public static nint FindTextBox(nint window, string name)
     {
-        var str = NewString(name);
-        try { return ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[FindChildSlot])(window, str, 1); }
+        if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, byte>)Sig.Find(HasTextBoxSig);
+        var str = NewString(Encoding.ASCII.GetBytes(name));
+        try
+        {
+            return _hasTextBox(window, str) == 0 ? 0 : ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[FindTextBoxSlot])(window, str, 0);
+        }
         finally { FreeString(str); }
     }
 
-    public static void SetText(nint textBox, string text)
+    /// <summary>The text box's current text (the game's bytes; valid until its text changes).</summary>
+    public static ReadOnlySpan<byte> Text(nint textBox) => Native.MsvcString(textBox + TextOffset);
+
+    public static void SetText(nint textBox, string text) => SetText(textBox, Encoding.UTF8.GetBytes(text));
+
+    public static void SetText(nint textBox, ReadOnlySpan<byte> text)
     {
         if (_setText == null) _setText = (delegate* unmanaged<nint, nint, void>)Sig.Find(SetTextSig);
         var str = NewString(text);
@@ -43,7 +61,7 @@ public static unsafe class Gui
     [DllImport("user32.dll")]
     static extern short GetAsyncKeyState(int key);
 
-    static nint NewString(string value)
+    static nint NewString(ReadOnlySpan<byte> value)
     {
         var s = (nint)NativeMemory.AllocZeroed(32);
         *(long*)(s + 24) = 15; // empty, inline buffer
