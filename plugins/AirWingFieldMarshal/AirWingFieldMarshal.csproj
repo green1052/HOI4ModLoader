@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The HOI4 UI mod overrides interface\leadergroups.gui. Build it from the installed vanilla file plus our gridbox,
+       so it tracks game updates instead of freezing an old copy. -->
+  <Target Name="GenerateLeaderGroupsGui" BeforeTargets="DeployHOI4Mod">
+    <PropertyGroup>
+      <_Vanilla>$(HOI4Dir)\interface\leadergroups.gui</_Vanilla>
+      <_Gui>$(IntermediateOutputPath)leadergroups.gui</_Gui>
+      <_Patched Condition="Exists('$(_Vanilla)')">$([System.Text.RegularExpressions.Regex]::Replace(
+        $([System.IO.File]::ReadAllText('$(_Vanilla)')),
+        '(?s)(name = "army_group_portrait_window".*?Orientation = upper_left)',
+        '$1$([System.IO.File]::ReadAllText('gui\army_group_attached_units.gui'))'))</_Patched>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_Vanilla)')" Text="HOI4 not found at '$(HOI4Dir)' (set HOI4Dir)." />
+    <Error Condition="'$(_Patched.Contains(`AirWingFieldMarshal`))' != 'True'" Text="army_group_portrait_window not found in $(_Vanilla); the game's GUI changed." />
+    <WriteLinesToFile File="$(_Gui)" Lines="$([MSBuild]::Escape($(_Patched)))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <HOI4ModFile Include="$(_Gui)" Link="interface\leadergroups.gui" />
+    </ItemGroup>
+  </Target>
+
+</Project>
