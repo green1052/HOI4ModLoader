@@ -8,11 +8,14 @@ namespace Queues;
 /// <summary>Byte patterns and class names (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
-    /// <summary>CCountryTechTreeView: start researching a tech (view, CTechnologyStatus*, bonus, ...).</summary>
-    [Signature] public const string ResearchClick = "48 8B C4 4C 89 48 ? 44 88 40 ? 48 89 50 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8";
+    /// <summary>Tech tree item click (item): both the normal and the bonus click end here; item+StatusOfItem is the CTechnologyStatus.</summary>
+    [Signature] public const string ResearchClick = "48 89 5C 24 ? 57 48 83 EC 20 48 8B D9 48 81 C1 D0 14 00 00";
 
-    /// <summary>CNationalFocusDetailView button handler (view, event): event+8 == 0 selects view+FocusOfView.</summary>
-    [Signature] public const string FocusClick = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 30 48 8B F9 8B 4A";
+    /// <summary>
+    /// National focus tree: open the detail popup of a clicked focus (view, CNationalFocus*, bool). Hooked instead of the
+    /// popup's select button, which is disabled while another focus is in progress.
+    /// </summary>
+    [Signature] public const string FocusClick = "48 85 D2 0F 84 ? ? ? ? 48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC 30";
 
     /// <summary>Intelligence agency upgrade button (button): button+UpgradeOfButton is the upgrade.</summary>
     [Signature] public const string AgencyClick = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 30 48 8B F9 E8 ? ? ? ? 84 C0";
@@ -50,13 +53,13 @@ public unsafe class Queues : Plugin
     const int TechOfStatus = 0x160;                          // CTechnologyStatus -> CTechnology
     const int FocusOfCountry = 0x1380, FocusInProgress = 0x10; // CCountry -> focus progress -> CNationalFocus* (null = idle)
     const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
-    const int FocusOfView = 3920, UpgradeOfButton = 40;
+    const int StatusOfItem = 5272, UpgradeOfButton = 40;
     const int CommandTag = 40, CommandTarget = 48, ResearchSlot = 56, ResearchBonus = 60;
     const int VK_SHIFT = 0x10;
     const long CooldownMs = 1500; // a posted command takes a tick or two to execute
 
-    [Function(CallingConventions.Microsoft)] public delegate void ResearchClickFn(nint view, nint techStatus, byte bonus, nint a4);
-    [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint ev);
+    [Function(CallingConventions.Microsoft)] public delegate void ResearchClickFn(nint item);
+    [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
     [Function(CallingConventions.Microsoft)] public delegate nint AgencyClickFn(nint button);
     [Function(CallingConventions.Microsoft)] public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
@@ -92,15 +95,15 @@ public unsafe class Queues : Plugin
         _agencyVt = Sig.VTable(Signatures.AgencyCommand);
         _mainThread = Environment.CurrentManagedThreadId; // plugins load on the game's main (UI) thread
 
-        _researchClick = Patches.Hook<ResearchClickFn>(researchClick, (view, status, bonus, a4) =>
+        _researchClick = Patches.Hook<ResearchClickFn>(researchClick, item =>
         {
-            if (Shift()) Toggle(_research, *(nint*)(status + TechOfStatus));
-            else _researchClick!.OriginalFunction(view, status, bonus, a4);
+            if (Shift()) Toggle(_research, *(nint*)(*(nint*)(item + StatusOfItem) + TechOfStatus));
+            else _researchClick!.OriginalFunction(item);
         });
-        _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, ev) =>
+        _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
-            if (*(int*)(ev + 8) == 0 && Shift()) Toggle(_focus, *(nint*)(view + FocusOfView));
-            else _focusClick!.OriginalFunction(view, ev);
+            if (focus != 0 && Shift()) Toggle(_focus, focus);
+            else _focusClick!.OriginalFunction(view, focus, a3);
         });
         _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, button =>
         {
