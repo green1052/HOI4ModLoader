@@ -96,31 +96,13 @@ public unsafe class AirWingFieldMarshal : Plugin
             AsArmyCard(card, _airWingsSelected!() != 0, () => _cardRightClick!.OriginalFunction(card)));
     }
 
-    // Daily attached-wing order update. It picks mission regions from the group's own front orders,
-    // but an army group's fronts usually live on its armies, so it sees those too for the duration of the call.
+    // Daily attached-wing order update. It picks mission regions from where the group's divisions are,
+    // and an army group's divisions belong to its armies.
     void UpdateAttachedWings(nint ptr)
     {
         var g = new OrdersGroup(ptr);
-        if (!g.IsArmyGroup || g.AttachedWingCount == 0)
-        {
-            _updateAttachedWings!.OriginalFunction(ptr);
-            return;
-        }
-
-        // Keep the game's order (multiplayer is lockstep: every client must see the same sequence).
-        var merged = new List<nint>(Native.PdxArray(g.Orders).ToArray());
-        foreach (var army in g.Armies) merged.AddRange(Native.PdxArray(new OrdersGroup(army).Orders).ToArray());
-        merged = merged.Distinct().ToList();
-
-        var orders = g.Orders;
-        var saved = (*(nint*)orders, *(long*)(orders + 8)); // data, capacity|size
-        fixed (nint* data = merged.ToArray())
-        {
-            *(nint*)orders = (nint)data;
-            *(int*)(orders + 8) = *(int*)(orders + 0xC) = merged.Count;
-            try { _updateAttachedWings!.OriginalFunction(ptr); }
-            finally { (*(nint*)orders, *(long*)(orders + 8)) = saved; }
-        }
+        if (g.IsArmyGroup && g.AttachedWingCount > 0) g.WithArmiesMembers(() => _updateAttachedWings!.OriginalFunction(ptr));
+        else _updateAttachedWings!.OriginalFunction(ptr);
     }
 
     // The card UI skips attached-wing slots and right-click attach for army-group cards.

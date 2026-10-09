@@ -1,11 +1,10 @@
-using System.Runtime.InteropServices;
 using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
 namespace Queues;
 
-/// <summary>Byte patterns and class names (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
+/// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
     /// <summary>
@@ -21,26 +20,14 @@ public static class Signatures
     /// </summary>
     [Signature] public const string FocusClick = "48 85 D2 0F 84 ? ? ? ? 48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC 30";
 
-    /// <summary>Intelligence agency upgrade button (button): button+UpgradeOfButton is the upgrade.</summary>
+    /// <summary>Intelligence agency upgrade entry click (entry): entry+UpgradeOfEntry is the upgrade.</summary>
     [Signature] public const string AgencyClick = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 30 48 8B F9 E8 ? ? ? ? 84 C0";
 
-    /// <summary>Intelligence agency upgrade entry refresh (entry): fills entry+WindowOfEntry's texts for entry+UpgradeOfButton.</summary>
+    /// <summary>Intelligence agency upgrade entry refresh (entry): fills entry+WindowOfEntry's texts and buttons.</summary>
     [Signature] public const string AgencyEntryRefresh = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 38 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B F1";
 
     /// <summary>Agency upgrades window: refresh every entry (window). Only runs when the window opens or the game changes something.</summary>
     [Signature] public const string AgencyWindowRefresh = "48 89 6C 24 ? 56 48 83 EC 20 48 8B 41 ? 48 8B B0";
-
-    /// <summary>CSession::PostCommand(session, command, force) (clausewitz session.cpp).</summary>
-    [Signature] public const string PostCommand = "48 89 5C 24 ? 57 48 81 EC 30 01 00 00 48 8B FA 48 8B D9 45 84 C0";
-
-    /// <summary>Sends a command the way the UI does: `mov rcx,[rip+SessionHolder]; mov rax,[rcx]; call [rax+88h]` gets the session.</summary>
-    [Signature] public const string SessionHolder = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 8B FA 48 8B F1 48 8B 0D ? ? ? ? 48 8B 01 FF 90 88 00 00 00 48 8B D8 B9 48 00 00 00 E8";
-
-    /// <summary>
-    /// Country by tag: `mov rdi,[rip+GameState]; ...; call TagIndex; ...; mov rax,[rdi+Countries]; mov rax,[rax+rcx*8]`.
-    /// Twice: the const and non-const getter, both identical.
-    /// </summary>
-    [Signature(2)] public const string CountryLookup = "83 3B 00 48 8B 3D ?? ?? ?? ?? 75 04 33 C0 EB 08 48 8B CB E8 ?? ?? ?? ?? 48 8B 5C 24 48 48 63 C8 48 8B 87 ?? ?? ?? ?? 48 8B 04 C8";
 
     [VTable] public const string ResearchCommand = "CSetResearchCommand";
     [VTable] public const string FocusCommand = "CSetNationalFocusCommand";
@@ -56,46 +43,35 @@ public static class Signatures
 public unsafe class Queues : Plugin
 {
     // Layouts for HOI4 1.19.3.
-    const int PlayerTag = 0x520, ObserverTag = 0x524;      // gamestate: int country tags
-    const int ResearchOfCountry = 0xF60;                     // CCountry -> research
-    const int Slots = 0xA0;                                  // research: CPdxArray<CResearchSlot*>
-    const int TechOfSlot = 0x18, IndexOfSlot = 0x40;          // slot: CTechnologyStatus* in progress (null = idle), slot number
-    const int TechOfStatus = 0x160;                          // CTechnologyStatus -> CTechnology
-    const int FocusOfCountry = 0x1380, FocusInProgress = 0x10; // CCountry -> focus progress -> CNationalFocus* (null = idle)
+    const int ResearchOfCountry = 0xF60, Slots = 0xA0;            // CCountry -> research -> CPdxArray<CResearchSlot*>
+    const int TechOfSlot = 0x18, IndexOfSlot = 0x40;              // slot: CTechnologyStatus* in progress (null = idle), slot number
+    const int TechOfStatus = 0x160;                              // CTechnologyStatus -> CTechnology
+    const int FocusOfCountry = 0x1380, FocusInProgress = 0x10;    // CCountry -> focus progress -> CNationalFocus* (null = idle)
     const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
-    const int StatusOfEvent = 8, UpgradeOfButton = 40, WindowOfEntry = 16;
-    const int ButtonOfEntry = 0x40, AgencyOfEntry = 4216;    // agency upgrade entry: the clickable button, the CIntelligenceAgency
-    const int Repetitions = 96, MaxRepetitions = 540;         // agency: CPdxArray<{upgrade*, int done}>; upgrade: allowed count
-    const int Hidden = 117, HiddenFlag = 0x10, ShowSlot = 15; // GUI object: flags byte, Show() vtable slot
-    const string NumberBox = "hoimod_queue"; // added to the GUI by the Queues UI mod
-    const int CommandTag = 40, CommandTarget = 48, ResearchSlot = 56, ResearchBonus = 60;
-    const int VK_SHIFT = 0x10;
-    const long CooldownMs = 1500; // a posted command takes a tick or two to execute
+    const int Repetitions = 96, MaxRepetitions = 540;             // agency: CPdxArray<{upgrade*, int done}>; upgrade: allowed count
+    const int StatusOfEvent = 8;                                  // tech tree click event -> CTechnologyStatus
+    const int WindowOfEntry = 16, UpgradeOfEntry = 40, ButtonOfEntry = 0x40, AgencyOfEntry = 4216; // agency upgrade entry
+    const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
+    const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
+    const long CooldownMs = 1500;                                 // a posted command takes a tick or two to execute
 
     [Function(CallingConventions.Microsoft)] public delegate nint TechClickFn(nint view, nint ev);
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
-    [Function(CallingConventions.Microsoft)] public delegate nint AgencyClickFn(nint button);
+    [Function(CallingConventions.Microsoft)] public delegate nint AgencyClickFn(nint entry);
     [Function(CallingConventions.Microsoft)] public delegate void EntryFn(nint entry);
     [Function(CallingConventions.Microsoft)] public delegate void WindowFn(nint window);
-    [Function(CallingConventions.Microsoft)] public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
     IHook<TechClickFn>? _techClick, _xorTechClick;
-    bool _reportedNumberBox;
     IHook<FocusClickFn>? _focusClick;
     IHook<AgencyClickFn>? _agencyClick;
     IHook<EntryFn>? _agencyEntryRefresh;
     IHook<WindowFn>? _agencyWindowRefresh;
     nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
-    IHook<PeekMessageFn>? _peekMessage;
+    bool _reportedNumberBox;
 
-    delegate* unmanaged<nint, nint, byte, byte> _post;
-    delegate* unmanaged<nint, int> _tagIndex;
-    nint* _sessionHolder, _gameState;
-    int _countries, _mainThread;
-    nint _researchVt, _focusVt, _agencyVt;
-
-    readonly Queue _research = new("research"), _focus = new("focus"), _agency = new("agency upgrade");
-    long _nextPump;
+    readonly Queue _research = new("research", Signatures.ResearchCommand, 0x40);
+    readonly Queue _focus = new("focus", Signatures.FocusCommand, 0x38);
+    readonly Queue _agency = new("agency upgrade", Signatures.AgencyCommand, 0x38);
     (nint GameState, int Tag) _session;
 
     public override void Load()
@@ -106,66 +82,53 @@ public unsafe class Queues : Plugin
         var agencyClick = Sig.Find(Signatures.AgencyClick);
         var agencyEntryRefresh = Sig.Find(Signatures.AgencyEntryRefresh);
         var agencyWindowRefresh = Sig.Find(Signatures.AgencyWindowRefresh);
-        var holder = Sig.Find(Signatures.SessionHolder) + 0x15;  // mov rcx, [rip+disp32]
-        var lookup = Sig.FindAll(Signatures.CountryLookup, 2)[0];
-        _post = (delegate* unmanaged<nint, nint, byte, byte>)Sig.Find(Signatures.PostCommand);
-        _sessionHolder = (nint*)(holder + 7 + *(int*)(holder + 3));
-        _gameState = (nint*)(lookup + 10 + *(int*)(lookup + 6));
-        _tagIndex = (delegate* unmanaged<nint, int>)(lookup + 24 + *(int*)(lookup + 20));
-        _countries = *(int*)(lookup + 35);
-        _researchVt = Sig.VTable(Signatures.ResearchCommand);
-        _focusVt = Sig.VTable(Signatures.FocusCommand);
-        _agencyVt = Sig.VTable(Signatures.AgencyCommand);
-        _mainThread = Environment.CurrentManagedThreadId; // plugins load on the game's main (UI) thread
 
         _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(ev) ? 0 : _techClick!.OriginalFunction(view, ev));
         _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
         _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
-            if (focus != 0 && Shift()) Toggle(_focus, focus);
+            if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
             else _focusClick!.OriginalFunction(view, focus, a3);
         });
-        _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, button =>
+        _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
         {
-            if (!Shift()) return _agencyClick!.OriginalFunction(button);
-            Toggle(_agency, *(nint*)(button + UpgradeOfButton));
+            if (!Gui.ShiftHeld) return _agencyClick!.OriginalFunction(entry);
+            Toggle(_agency, *(nint*)(entry + UpgradeOfEntry));
             if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
             return 0;
         });
-
         _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
         {
             _agencyEntryRefresh!.OriginalFunction(entry);
-            ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfButton));
+            ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
             KeepClickable(entry);
         });
-
         _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
         {
             _agencyWindow = window;
             _agencyWindowRefresh!.OriginalFunction(window);
         });
 
-        // The main loop pumps window messages every frame: a safe place to send commands from the UI thread.
-        var peek = NativeLibrary.GetExport(NativeLibrary.Load("user32.dll"), "PeekMessageW");
-        _peekMessage = Patches.Hook<PeekMessageFn>(peek, (msg, hwnd, min, max, remove) =>
-        {
-            var result = _peekMessage!.OriginalFunction(msg, hwnd, min, max, remove);
-            if (Environment.CurrentManagedThreadId == _mainThread && Environment.TickCount64 >= _nextPump)
-            {
-                _nextPump = Environment.TickCount64 + 250;
-                Pump();
-            }
-            return result;
-        });
+        MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
     }
 
     bool ShiftQueuesTech(nint ev)
     {
         var status = *(nint*)(ev + StatusOfEvent);
-        if (status == 0 || !Shift()) return false;
+        if (status == 0 || !Gui.ShiftHeld) return false;
         Toggle(_research, *(nint*)(status + TechOfStatus));
         return true;
+    }
+
+    void Toggle(Queue queue, nint item)
+    {
+        if (item == 0) return;
+        if (queue.Items.Remove(item)) Log.Info($"{queue.Name}: unqueued, {queue.Items.Count} left");
+        else
+        {
+            queue.Items.Add(item);
+            Log.Info($"{queue.Name}: queued #{queue.Items.Count}");
+        }
     }
 
     /// <summary>Writes the 1-based queue position of <paramref name="item"/> into the window's number box (empty if not queued).</summary>
@@ -190,12 +153,11 @@ public unsafe class Queues : Plugin
     static void KeepClickable(nint entry)
     {
         var agency = *(nint*)(entry + AgencyOfEntry);
-        var upgrade = *(nint*)(entry + UpgradeOfButton);
+        var upgrade = *(nint*)(entry + UpgradeOfEntry);
         var button = *(nint*)(entry + ButtonOfEntry);
-        if (agency == 0 || upgrade == 0 || button == 0 || (*(byte*)(button + Hidden) & HiddenFlag) == 0) return;
+        if (agency == 0 || upgrade == 0 || button == 0 || !Gui.IsHidden(button)) return;
         if (upgrade == *(nint*)(agency + AgencyUpgradeInProgress) || TimesDone(agency, upgrade) >= *(int*)(upgrade + MaxRepetitions)) return;
-        *(byte*)(button + Hidden) &= unchecked((byte)~HiddenFlag);
-        ((delegate* unmanaged<nint, void>)(*(nint**)button)[ShowSlot])(button);
+        Gui.Show(button);
     }
 
     static int TimesDone(nint agency, nint upgrade)
@@ -206,42 +168,26 @@ public unsafe class Queues : Plugin
         return 0;
     }
 
-    static bool Shift() => (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-
-    void Toggle(Queue queue, nint item)
-    {
-        if (item == 0) return;
-        if (queue.Items.Remove(item)) Log.Info($"{queue.Name}: unqueued, {queue.Items.Count} left");
-        else
-        {
-            queue.Items.Add(item);
-            Log.Info($"{queue.Name}: queued #{queue.Items.Count}");
-        }
-    }
-
     void Pump()
     {
-        var gs = *_gameState;
-        if (gs == 0) return;
-        int tag = *(int*)(gs + PlayerTag) > 0 ? *(int*)(gs + PlayerTag) : *(int*)(gs + ObserverTag);
-        if (tag <= 0) return;
-        if (_session != (gs, tag)) // another game or country: queued pointers no longer apply
+        var tag = Game.PlayerTag;
+        var country = Game.Country(tag);
+        if (country == 0) return;
+        if (_session != (Game.State, tag)) // another game or country: queued pointers no longer apply
         {
-            _session = (gs, tag);
+            _session = (Game.State, tag);
             _research.Items.Clear();
             _focus.Items.Clear();
             _agency.Items.Clear();
         }
-        var country = *(nint*)(*(nint*)(gs + _countries) + 8L * _tagIndex((nint)(&tag)));
-        if (country == 0) return;
 
         var research = *(nint*)(country + ResearchOfCountry);
-        if (research != 0 && Ready(_research))
+        if (research != 0 && _research.Ready)
             foreach (var slot in Native.PdxArray(research + Slots))
             {
                 var current = *(nint*)(slot + TechOfSlot);
                 if (current != 0) _research.Items.Remove(*(nint*)(current + TechOfStatus)); // started by hand
-                else StartFirst(_research, _researchVt, 0x40, tag, cmd =>
+                else StartFirst(_research, tag, cmd =>
                 {
                     *(int*)(cmd + ResearchSlot) = *(int*)(slot + IndexOfSlot);
                     *(byte*)(cmd + ResearchBonus) = 0;
@@ -249,65 +195,40 @@ public unsafe class Queues : Plugin
             }
 
         var focus = *(nint*)(country + FocusOfCountry);
-        if (focus != 0 && Ready(_focus))
+        if (focus != 0 && _focus.Ready)
         {
             var current = *(nint*)(focus + FocusInProgress);
             if (current != 0) _focus.Items.Remove(current);
-            else StartFirst(_focus, _focusVt, 0x38, tag, null);
+            else StartFirst(_focus, tag);
         }
 
         var agency = *(nint*)(country + AgencyOfCountry);
-        if (agency != 0 && Ready(_agency) && *(byte*)(agency + AgencyCreated) != 0 && *(nint*)(agency + AgencyUpgradeInProgress) == 0)
-            StartFirst(_agency, _agencyVt, 0x38, tag, null);
+        if (agency != 0 && _agency.Ready && *(byte*)(agency + AgencyCreated) != 0 && *(nint*)(agency + AgencyUpgradeInProgress) == 0)
+            StartFirst(_agency, tag);
     }
 
-    static bool Ready(Queue q) => q.Items.Count > 0 && Environment.TickCount64 >= q.Cooldown;
-
     /// <summary>Sends the first queued entry the game would accept (its own CanExecute), and drops it from the queue.</summary>
-    void StartFirst(Queue queue, nint vtable, int size, int tag, Action<nint>? fill)
+    void StartFirst(Queue queue, int tag, Action<nint>? fill = null)
     {
         foreach (var item in queue.Items)
         {
-            var cmd = NewCommand(vtable, size, tag, item);
+            var cmd = Commands.New(queue.Command, queue.CommandSize, tag, item);
             fill?.Invoke(cmd);
-            var canExecute = (delegate* unmanaged<nint, byte>)(*(nint**)cmd)[9];
-            if (canExecute(cmd) == 0)
-            {
-                NativeMemory.Free((void*)cmd);
-                continue;
-            }
+            if (!Commands.TryPost(cmd)) continue;
             queue.Items.Remove(item);
             queue.Cooldown = Environment.TickCount64 + CooldownMs;
-            var holder = *_sessionHolder;
-            var session = ((delegate* unmanaged<nint, nint>)(*(nint**)holder)[17])(holder); // +88h
-            _post(session, cmd, 0); // the session owns (and eventually frees) the command
             Log.Info($"{queue.Name}: started, {queue.Items.Count} left");
             return;
         }
     }
 
-    /// <summary>
-    /// What the game's command constructors do (CCommand base, then tag + target). The memory comes from the CRT heap,
-    /// the same process heap hoi4.exe's statically linked CRT frees commands from.
-    /// </summary>
-    static nint NewCommand(nint vtable, int size, int tag, nint target)
-    {
-        var cmd = (nint)NativeMemory.AllocZeroed((nuint)size);
-        *(nint*)cmd = vtable;
-        *(int*)(cmd + 12) = -1;
-        *(int*)(cmd + 20) = -65536;
-        *(int*)(cmd + CommandTag) = tag;
-        *(nint*)(cmd + CommandTarget) = target;
-        return cmd;
-    }
-
-    sealed class Queue(string name)
+    sealed class Queue(string name, string command, int commandSize)
     {
         public string Name { get; } = name;
+        public string Command { get; } = command;
+        public int CommandSize { get; } = commandSize;
         public List<nint> Items { get; } = new();
         public long Cooldown;
+        public bool Ready => Items.Count > 0 && Environment.TickCount64 >= Cooldown;
     }
-
-    [DllImport("user32.dll")]
-    static extern short GetAsyncKeyState(int key);
 }
