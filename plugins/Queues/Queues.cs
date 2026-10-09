@@ -64,6 +64,9 @@ public unsafe class Queues : Plugin
     const int FocusOfCountry = 0x1380, FocusInProgress = 0x10; // CCountry -> focus progress -> CNationalFocus* (null = idle)
     const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
     const int StatusOfEvent = 8, UpgradeOfButton = 40, WindowOfEntry = 16;
+    const int ButtonOfEntry = 0x40, AgencyOfEntry = 4216;    // agency upgrade entry: the clickable button, the CIntelligenceAgency
+    const int Repetitions = 96, MaxRepetitions = 540;         // agency: CPdxArray<{upgrade*, int done}>; upgrade: allowed count
+    const int Hidden = 117, HiddenFlag = 0x10, ShowSlot = 15; // GUI object: flags byte, Show() vtable slot
     const string NumberBox = "hoimod_queue"; // added to the GUI by the Queues UI mod
     const int CommandTag = 40, CommandTarget = 48, ResearchSlot = 56, ResearchBonus = 60;
     const int VK_SHIFT = 0x10;
@@ -134,6 +137,7 @@ public unsafe class Queues : Plugin
         {
             _agencyEntryRefresh!.OriginalFunction(entry);
             ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfButton));
+            KeepClickable(entry);
         });
 
         _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
@@ -176,6 +180,30 @@ public unsafe class Queues : Plugin
         if (box == 0) return;
         var index = queue.Items.IndexOf(item);
         Gui.SetText(box, index < 0 ? "" : (index + 1).ToString());
+    }
+
+    /// <summary>
+    /// While another upgrade runs, the game hides every other upgrade's button (showing an icon in its place), so it can't be
+    /// clicked, let alone shift+clicked. Keep the button of any upgrade that isn't running or finished: a plain click still
+    /// does nothing, because the game's own command check rejects starting a second upgrade.
+    /// </summary>
+    static void KeepClickable(nint entry)
+    {
+        var agency = *(nint*)(entry + AgencyOfEntry);
+        var upgrade = *(nint*)(entry + UpgradeOfButton);
+        var button = *(nint*)(entry + ButtonOfEntry);
+        if (agency == 0 || upgrade == 0 || button == 0 || (*(byte*)(button + Hidden) & HiddenFlag) == 0) return;
+        if (upgrade == *(nint*)(agency + AgencyUpgradeInProgress) || TimesDone(agency, upgrade) >= *(int*)(upgrade + MaxRepetitions)) return;
+        *(byte*)(button + Hidden) &= unchecked((byte)~HiddenFlag);
+        ((delegate* unmanaged<nint, void>)(*(nint**)button)[ShowSlot])(button);
+    }
+
+    static int TimesDone(nint agency, nint upgrade)
+    {
+        var pairs = *(nint*)(agency + Repetitions);
+        for (int i = 0, n = *(int*)(agency + Repetitions + 0xC); i < n; i++)
+            if (*(nint*)(pairs + 16 * i) == upgrade) return *(int*)(pairs + 16 * i + 8);
+        return 0;
     }
 
     static bool Shift() => (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
