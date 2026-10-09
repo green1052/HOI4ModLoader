@@ -10,6 +10,26 @@
       Documents\Paradox Interactive\Hearts of Iron IV\mod\<ProjectName> with a matching .mod file; enable it in the launcher.
       Plugins can add generated files as <HOI4ModFile Include="..." Link="interface\x.gui" /> before DeployHOI4Mod runs.
     -->
+    <!--
+      GuiPatch: a file of the HOI4 mod built from the installed vanilla file plus a snippet inserted after a regex match,
+      so it follows game updates instead of freezing an old copy:
+        <GuiPatch Include="interface\x.gui" After="(?s)name = &quot;window&quot;.*?Orientation = upper_left" Snippet="gui\my.gui" />
+    -->
+    <Target Name="GenerateGuiPatches" BeforeTargets="DeployHOI4Mod" Condition="'@(GuiPatch)' != ''" Outputs="%(GuiPatch.Identity)">
+        <PropertyGroup>
+            <_Vanilla>$(HOI4Dir)\%(GuiPatch.Identity)</_Vanilla>
+            <_Out>$(IntermediateOutputPath)gui\%(GuiPatch.Identity)</_Out>
+            <_Original Condition="Exists('$(_Vanilla)')">$([System.IO.File]::ReadAllText('$(_Vanilla)'))</_Original>
+            <_Patched>$([System.Text.RegularExpressions.Regex]::Replace($(_Original), '%(GuiPatch.After)', '$0$([System.IO.File]::ReadAllText(`%(GuiPatch.Snippet)`))'))</_Patched>
+        </PropertyGroup>
+        <Error Condition="!Exists('$(_Vanilla)')" Text="$(_Vanilla) not found (set HOI4Dir)." />
+        <Error Condition="'$(_Patched)' == '$(_Original)'" Text="'%(GuiPatch.After)' not found in $(_Vanilla); the game's GUI changed." />
+        <WriteLinesToFile File="$(_Out)" Lines="$([MSBuild]::Escape($(_Patched)))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+        <ItemGroup>
+            <HOI4ModFile Include="$(_Out)" Link="%(GuiPatch.Identity)" />
+        </ItemGroup>
+    </Target>
+
     <Target Name="DeployHOI4Mod" AfterTargets="Build" Condition="Exists('mod\descriptor.mod') And '$(HOI4ModDir)' != ''">
         <ItemGroup>
             <HOI4ModFile Include="mod\**\*" Link="%(RecursiveDir)%(Filename)%(Extension)" />
