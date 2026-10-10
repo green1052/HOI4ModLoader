@@ -41,9 +41,10 @@
         <!-- The ingame settings window's 4 tabs become 5 (narrower) and the Mods page goes in after its Back button. -->
         <GuiPatch Include="interface\settings.gui" Snippet="gui\settings_mods.gui"
                   Match="(?s)(name = &quot;menu_settings_ingame&quot;.*?)buttonType = \{\s*name = &quot;settings_tab_1&quot;.*?name = &quot;settings_tab_4&quot;.*?\n\t\t\t\}(.*?shortcut = &quot;ESCAPE&quot;\s*\})" />
-        <!-- The main menu panel 20 px taller and its version label two lines tall: room for the loader's line (VersionLabel.cs). -->
+        <!-- The main menu panel 20 px taller (it grows from its centre: 10 px each way) and its version label two lines tall,
+             10 px lower so the first line stays where it was, under the social buttons: room for the loader's line (VersionLabel.cs). -->
         <GuiPatch Include="interface\frontendmainview.gui" Snippet="gui\main_menu_version.gui"
-                  Match="(?s)(name =&quot;mainmenu_panel_bottom&quot;\s*position = \{ x=0 y =0\}\s*size = \{ width = 320 height = )450(.*?name =&quot;version_label&quot;.*?maxHeight = )20" />
+                  Match="(?s)(name =&quot;mainmenu_panel_bottom&quot;\s*position = \{ x=0 y =0\}\s*size = \{ width = 320 height = )450(.*?name =&quot;version_label&quot;\s*position = \{ x = 0 y = )411(.*?maxHeight = )20" />
     </ItemGroup>
     <Import Project="..\HOI4Mod.targets" />
 
