@@ -36,12 +36,12 @@ public sealed unsafe class Image
 {
     public static readonly Image Game = new(NativeLibrary.GetMainProgramHandle());
 
-    readonly nint _base;
-    readonly long _pointerBase; // what absolute pointers in the image are relative to: actual base when loaded, preferred base when mapped as data
-    readonly List<(nint Start, int Size, bool Code)> _sections = new();
-    readonly (int Begin, int End)[] _functions;
+    private readonly nint _base;
+    private readonly long _pointerBase; // what absolute pointers in the image are relative to: actual base when loaded, preferred base when mapped as data
+    private readonly List<(nint Start, int Size, bool Code)> _sections = new();
+    private readonly (int Begin, int End)[] _functions;
 
-    Image(nint b, bool relocated = true)
+    private Image(nint b, bool relocated = true)
     {
         _base = b;
         var nt = b + *(int*)(b + 0x3C);
@@ -85,7 +85,7 @@ public sealed unsafe class Image
         return hits.ToArray();
     }
 
-    List<nint> Scan(string pattern)
+    private List<nint> Scan(string pattern)
     {
         var pat = pattern.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Select(t => t.StartsWith('?') ? -1 : Convert.ToInt32(t, 16)).ToArray();
@@ -141,7 +141,7 @@ public sealed unsafe class Image
         return false;
     }
 
-    List<nint> FindData(byte[] needle)
+    private List<nint> FindData(byte[] needle)
     {
         var hits = new List<nint>();
         foreach (var (start, size, code) in _sections)
@@ -154,7 +154,7 @@ public sealed unsafe class Image
     }
 
     /// <summary>Begin RVA of the .pdata function containing <paramref name="address"/>.</summary>
-    int? FunctionAt(nint address)
+    private int? FunctionAt(nint address)
     {
         int rva = (int)(address - _base);
         int lo = 0, hi = _functions.Length - 1;
@@ -169,7 +169,7 @@ public sealed unsafe class Image
     }
 
     /// <summary>Functions that take the address of the null-terminated ASCII string <paramref name="text"/> (lea/mov reg,[rip+disp32]).</summary>
-    HashSet<int> FunctionsReferencing(string text)
+    private HashSet<int> FunctionsReferencing(string text)
     {
         // whole string, not the tail of a longer one
         var strings = FindData(Encoding.ASCII.GetBytes(text + "\0")).Where(a => *(byte*)(a - 1) == 0).ToHashSet();
@@ -190,5 +190,5 @@ public sealed unsafe class Image
     }
 
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern nint LoadLibraryExW(string path, nint file, uint flags);
+    private static extern nint LoadLibraryExW(string path, nint file, uint flags);
 }

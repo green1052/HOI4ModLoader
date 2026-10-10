@@ -5,10 +5,10 @@ namespace Signatures.Tests;
 
 public class SignatureTests
 {
-    static readonly string GameDir = typeof(SignatureTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+    private static readonly string GameDir = typeof(SignatureTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
         .Single(a => a.Key == "HOI4Dir").Value!;
 
-    static readonly Lazy<Image> Game = new(() => Image.Load(Path.Combine(GameDir, "hoi4.exe")));
+    private static readonly Lazy<Image> Game = new(() => Image.Load(Path.Combine(GameDir, "hoi4.exe")));
 
     /// <summary>Every `[Signature]` / `[VTable]` const in this folder's assemblies (loader + every plugin), as "assembly|type|field".</summary>
     public static TheoryData<string> All()

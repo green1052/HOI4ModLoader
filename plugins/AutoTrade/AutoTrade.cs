@@ -38,26 +38,26 @@ public static class Signatures
 public unsafe class AutoTrade : Plugin
 {
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.
-    const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484, TagOfCountry = 8;
-    const int Influence = 0xF0;                         // CCountry: CPdxArray<long> trade influence, by importer TagIndex
-    const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem
-    const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
-    const long Fixed = 100_000;
-    const long PendingMs = 10_000;                      // a sent deal shows in the balance at once in single player, a round trip later in multiplayer
-    static readonly byte[] Label = "Auto "u8.ToArray();
+    private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484, TagOfCountry = 8;
+    private const int Influence = 0xF0;                         // CCountry: CPdxArray<long> trade influence, by importer TagIndex
+    private const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem
+    private const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
+    private const long Fixed = 100_000;
+    private const long PendingMs = 10_000;                      // a sent deal shows in the balance at once in single player, a round trip later in multiplayer
+    private static readonly byte[] Label = "Auto "u8.ToArray();
 
     [Function(CallingConventions.Microsoft)] public delegate void ItemFn(nint item);
     [Function(CallingConventions.Microsoft)] public delegate void UpdateFn(nint item, nint unused);
 
-    IHook<ItemFn>? _iconClick;
-    IHook<UpdateFn>? _update;
-    delegate* unmanaged<nint, nint, int> _balance;
-    delegate* unmanaged<nint, long*, nint, long*, long*, nint, void> _maxExport;
-    delegate* unmanaged<long*, nint, long*, long*, int, void> _amountForFactories;
+    private IHook<ItemFn>? _iconClick;
+    private IHook<UpdateFn>? _update;
+    private delegate* unmanaged<nint, nint, int> _balance;
+    private delegate* unmanaged<nint, long*, nint, long*, long*, nint, void> _maxExport;
+    private delegate* unmanaged<long*, nint, long*, long*, int, void> _amountForFactories;
 
-    readonly HashSet<nint> _auto = new();                          // resources with auto trade on
-    readonly Dictionary<nint, (int Balance, long Until)> _sent = new(); // by resource: balance when a deal was sent
-    (nint GameState, int Tag) _session;
+    private readonly HashSet<nint> _auto = new();                          // resources with auto trade on
+    private readonly Dictionary<nint, (int Balance, long Until)> _sent = new(); // by resource: balance when a deal was sent
+    private (nint GameState, int Tag) _session;
 
     public override void Load()
     {
@@ -90,7 +90,7 @@ public unsafe class AutoTrade : Plugin
     }
 
     /// <summary>"Auto " in front of the column's neededType text (empty but for oil) while auto trade is on; idempotent.</summary>
-    void Labels(nint item)
+    private void Labels(nint item)
     {
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "neededType");
         if (box == 0) return;
@@ -101,7 +101,7 @@ public unsafe class AutoTrade : Plugin
         else if (!on && labelled) Gui.SetText(box, text[Label.Length..].ToArray());
     }
 
-    void Pump()
+    private void Pump()
     {
         var tag = Game.PlayerTag;
         var country = Game.Country(tag);
@@ -125,7 +125,7 @@ public unsafe class AutoTrade : Plugin
     }
 
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>
-    void Import(int tag, nint resource, int needed, int balance, long now)
+    private void Import(int tag, nint resource, int needed, int balance, long now)
     {
         var importer = stackalloc long[1];
         *(int*)importer = tag;

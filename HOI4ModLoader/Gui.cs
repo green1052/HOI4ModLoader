@@ -15,12 +15,12 @@ public static unsafe class Gui
     /// <summary>CContainerWindow::HasInstantTextBox(window, std::string* name) -> bool.</summary>
     [Signature] public const string HasTextBoxSig = "48 83 EC 28 48 8B C2 4C 8D 81 E0 11 00 00 48 8D 91 F8 11 00 00 48 8B C8 E8 ? ? ? ? 48 85 C0 0F 95 C0 48 83 C4 28 C3";
 
-    const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
-    const int ShowSlot = 15, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), flags byte
-    const int TextOffset = 0x110; // CInstantTextBox: std::string text
+    private const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
+    private const int ShowSlot = 15, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), flags byte
+    private const int TextOffset = 0x110; // CInstantTextBox: std::string text
 
-    static delegate* unmanaged<nint, nint, void> _setText;
-    static delegate* unmanaged<nint, nint, byte> _hasTextBox;
+    private static delegate* unmanaged<nint, nint, void> _setText;
+    private static delegate* unmanaged<nint, nint, byte> _hasTextBox;
 
     /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none.</summary>
     public static nint FindTextBox(nint window, string name)
@@ -60,9 +60,9 @@ public static unsafe class Gui
     public static bool CtrlHeld => (GetAsyncKeyState(0x11) & 0x8000) != 0;  // VK_CONTROL
 
     [DllImport("user32.dll")]
-    static extern short GetAsyncKeyState(int key);
+    private static extern short GetAsyncKeyState(int key);
 
-    static nint NewString(ReadOnlySpan<byte> value)
+    private static nint NewString(ReadOnlySpan<byte> value)
     {
         var s = (nint)NativeMemory.AllocZeroed(32);
         *(long*)(s + 24) = 15; // empty, inline buffer
@@ -70,7 +70,7 @@ public static unsafe class Gui
         return s;
     }
 
-    static void FreeString(nint s)
+    private static void FreeString(nint s)
     {
         if (*(long*)(s + 24) >= 16) NativeMemory.Free(*(void**)s);
         NativeMemory.Free((void*)s);

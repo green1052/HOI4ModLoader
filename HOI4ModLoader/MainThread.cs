@@ -13,10 +13,10 @@ public static class MainThread
     [Function(CallingConventions.Microsoft)]
     public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
-    static readonly int Id = Environment.CurrentManagedThreadId; // plugins load on the main thread
-    static readonly List<Timer> Timers = new();
-    static IHook<PeekMessageFn>? _hook;
-    static readonly Logger Log = new("MainThread");
+    private static readonly int Id = Environment.CurrentManagedThreadId; // plugins load on the main thread
+    private static readonly List<Timer> Timers = new();
+    private static IHook<PeekMessageFn>? _hook;
+    private static readonly Logger Log = new("MainThread");
 
     /// <summary>
     /// Runs <paramref name="action"/> on the main thread at most every <paramref name="interval"/>, until the plugin that
@@ -30,7 +30,7 @@ public static class MainThread
         Patches.Record(() => Timers.Remove(timer));
     }
 
-    static void Install()
+    private static void Install()
     {
         var owner = Patches.Owner;
         Patches.Owner = "HOI4ModLoader"; // shared by every plugin: don't revert it with whichever plugin asked first
@@ -50,7 +50,7 @@ public static class MainThread
         }
     }
 
-    static void Tick()
+    private static void Tick()
     {
         var now = Environment.TickCount64;
         foreach (var timer in Timers.ToArray()) // a timer may reload plugins, which removes and adds timers
@@ -62,7 +62,7 @@ public static class MainThread
         }
     }
 
-    sealed class Timer(Action action, long intervalMs)
+    private sealed class Timer(Action action, long intervalMs)
     {
         public Action Action { get; } = action;
         public long IntervalMs { get; } = intervalMs;

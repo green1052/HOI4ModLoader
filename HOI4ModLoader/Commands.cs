@@ -14,12 +14,12 @@ public static unsafe class Commands
     /// <summary>A UI helper that sends a command: `mov rcx,[rip+SessionHolder]; mov rax,[rcx]; call [rax+88h]` gets the session.</summary>
     [Signature] public const string SessionHolderSig = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 8B FA 48 8B F1 48 8B 0D ? ? ? ? 48 8B 01 FF 90 88 00 00 00 48 8B D8 B9 48 00 00 00 E8";
 
-    const int TagOffset = 40, TargetOffset = 48; // CCommand subclasses: issuing country tag, then their argument
-    const int CanExecuteSlot = 9, GetSessionSlot = 17;
+    private const int TagOffset = 40, TargetOffset = 48; // CCommand subclasses: issuing country tag, then their argument
+    private const int CanExecuteSlot = 9, GetSessionSlot = 17;
 
-    static delegate* unmanaged<nint, nint, byte, byte> _post;
-    static nint* _sessionHolder;
-    static readonly Dictionary<string, nint> VTables = new();
+    private static delegate* unmanaged<nint, nint, byte, byte> _post;
+    private static nint* _sessionHolder;
+    private static readonly Dictionary<string, nint> VTables = new();
 
     /// <summary>
     /// A new <paramref name="className"/> command (e.g. "CSetResearchCommand") of <paramref name="size"/> bytes, laid out like

@@ -10,14 +10,14 @@ public static class Loader
     /// <summary>&lt;game&gt;\hoi4mods (HOI4ModLoader.dll lives in hoi4mods\core).</summary>
     public static readonly string ModsDir = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(typeof(Loader).Assembly.Location)!, ".."));
 
-    static readonly string PluginsDir = Path.Combine(ModsDir, "plugins");
-    static readonly Logger Log = new("Loader");
+    private static readonly string PluginsDir = Path.Combine(ModsDir, "plugins");
+    private static readonly Logger Log = new("Loader");
 
     // Plugins loaded now, in load order (hooks keep reverted ones' detours alive: a game thread may still be in one).
-    static readonly List<Plugin> Loaded = new();
-    static string _loadedFiles = "", _changedFiles = "";
-    static int _generation;
-    static bool _multiplayer;
+    private static readonly List<Plugin> Loaded = new();
+    private static string _loadedFiles = "", _changedFiles = "";
+    private static int _generation;
+    private static bool _multiplayer;
 
     /// <summary>Called once by the native bootstrap (version.dll), before the game's entry point.</summary>
     [UnmanagedCallersOnly]
@@ -62,7 +62,7 @@ public static class Loader
     // Reloads once the plugin DLLs changed and then stayed the same for a tick (a build may still be copying them).
     // ponytail: patches are rewritten while game threads run; one executing a hooked prologue at that instant could crash.
     // Pause the game first if a plugin hooks simulation code; suspending the other threads is the upgrade if that bites.
-    static void ReloadIfChanged()
+    private static void ReloadIfChanged()
     {
         var files = PluginFiles();
         if (files == _loadedFiles || files != _changedFiles)
@@ -76,7 +76,7 @@ public static class Loader
 
     // Multiplayer runs every player's simulation in lockstep, so a plugin changing game rules would desync anyone without it.
     // Those plugins are off from the multiplayer lobby on (vanilla to the other players) and back on in single player.
-    static void FollowMultiplayer()
+    private static void FollowMultiplayer()
     {
         bool multiplayer;
         try { multiplayer = Game.IsMultiplayer; }
@@ -91,17 +91,17 @@ public static class Loader
         Reload();
     }
 
-    static void Reload()
+    private static void Reload()
     {
         for (var i = Loaded.Count - 1; i >= 0; i--) Patches.Revert(Loaded[i].Info.Id);
         Loaded.Clear();
         LoadPlugins();
     }
 
-    static string PluginFiles() => !Directory.Exists(PluginsDir) ? "" :
+    private static string PluginFiles() => !Directory.Exists(PluginsDir) ? "" :
         string.Join("|", Directory.EnumerateFiles(PluginsDir, "*.dll").Order().Select(f => $"{f}@{File.GetLastWriteTimeUtc(f).Ticks}"));
 
-    static void LoadPlugins()
+    private static void LoadPlugins()
     {
         _loadedFiles = PluginFiles(); // before reading them: a change during the load reloads again
         if (!Directory.Exists(PluginsDir)) return;
@@ -210,9 +210,9 @@ public static class Loader
     /// Whatever the loader's context has (HOI4ModLoader, Reloaded.Hooks, .NET) comes from there, even if a copy sits in the
     /// folder, so types are shared.
     /// </summary>
-    sealed class PluginContext(Dictionary<string, string> files, int generation) : AssemblyLoadContext($"plugins #{generation}")
+    private sealed class PluginContext(Dictionary<string, string> files, int generation) : AssemblyLoadContext($"plugins #{generation}")
     {
-        static readonly AssemblyLoadContext Core = GetLoadContext(typeof(Loader).Assembly)!;
+        private static readonly AssemblyLoadContext Core = GetLoadContext(typeof(Loader).Assembly)!;
 
         protected override Assembly? Load(AssemblyName name)
         {

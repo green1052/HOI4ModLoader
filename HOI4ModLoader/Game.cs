@@ -17,14 +17,14 @@ public static unsafe class Game
     /// </summary>
     [Signature(2)] public const string CountryLookupSig = "83 3B 00 48 8B 3D ?? ?? ?? ?? 75 04 33 C0 EB 08 48 8B CB E8 ?? ?? ?? ?? 48 8B 5C 24 48 48 63 C8 48 8B 87 ?? ?? ?? ?? 48 8B 04 C8";
 
-    const int PlayerTagOffset = 0x520, ObserverTagOffset = 0x524; // gamestate: int country tags
-    const int ServerOfSession = 88;                                // CSession -> CServer*
+    private const int PlayerTagOffset = 0x520, ObserverTagOffset = 0x524; // gamestate: int country tags
+    private const int ServerOfSession = 88;                                // CSession -> CServer*
 
-    static nint* _state;
-    static delegate* unmanaged<nint, int> _tagIndex;
-    static int _countries;
+    private static nint* _state;
+    private static delegate* unmanaged<nint, int> _tagIndex;
+    private static int _countries;
 
-    static void Resolve()
+    private static void Resolve()
     {
         if (_state != null) return;
         var at = Sig.FindAll(CountryLookupSig, 2)[0];

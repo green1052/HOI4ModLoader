@@ -8,8 +8,8 @@ namespace HOI4ModLoader;
 /// </summary>
 public sealed class ConfigFile
 {
-    readonly string _path;
-    readonly List<string> _lines;
+    private readonly string _path;
+    private readonly List<string> _lines;
 
     public ConfigFile(string path)
     {
@@ -43,7 +43,7 @@ public sealed class ConfigFile
         return defaultValue;
     }
 
-    (int Section, int Key) Find(string section, string key)
+    private (int Section, int Key) Find(string section, string key)
     {
         int sectionAt = -1;
         for (int i = 0; i < _lines.Count; i++)

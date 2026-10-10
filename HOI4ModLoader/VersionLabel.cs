@@ -15,7 +15,7 @@ public static class VersionLabel
 
     [Function(CallingConventions.Microsoft)] public delegate nint TextFn(nint view, nint text);
 
-    static IHook<TextFn>? _hook;
+    private static IHook<TextFn>? _hook;
 
     internal static void Install(Func<string> suffix)
     {

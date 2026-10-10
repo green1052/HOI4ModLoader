@@ -28,5 +28,5 @@ public unsafe class AttachedCas : Plugin
         Patches.Bytes(jz, "0F 84" + Hex(rel), "E9" + Hex(rel + 1) + "90");
     }
 
-    static string Hex(int value) => Convert.ToHexString(BitConverter.GetBytes(value));
+    private static string Hex(int value) => Convert.ToHexString(BitConverter.GetBytes(value));
 }

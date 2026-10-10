@@ -63,24 +63,24 @@ public static class Signatures
 public unsafe class Queues : Plugin
 {
     // Layouts for HOI4 1.19.3.
-    const int ResearchOfCountry = 0xF60, Slots = 0xA0;            // CCountry -> research -> CPdxArray<CResearchSlot*>
-    const int TechOfSlot = 0x18, IndexOfSlot = 0x40;              // slot: CTechnologyStatus* in progress (null = idle), slot number
-    const int TechOfStatus = 0x160;                              // CTechnologyStatus -> CTechnology
-    const int FocusOfCountry = 0x1380, FocusInProgress = 0x10;    // CCountry -> focus progress -> CNationalFocus* (null = idle)
-    const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
-    const int Repetitions = 96, MaxRepetitions = 540;             // agency: CPdxArray<{upgrade*, int done}>; upgrade: allowed count
-    const int StatusOfEvent = 8;                                  // tech tree click event -> CTechnologyStatus
-    const int WindowOfEntry = 16, UpgradeOfEntry = 40, ButtonOfEntry = 0x40, AgencyOfEntry = 4216; // agency upgrade entry
-    const int WindowOfItem = 0x10;                                // tech and focus tree items: their window
-    const int ViewOfTechItem = 0x30, StatusOfTechItem = 0xC8, StateOfTechItem = 0xD0; // CTechnologyTreeTechItem
-    const int TechResearched = 4, TechResearching = 5;            // tech item states
-    const int ViewedTagOfTechView = 0x1AA0;                       // int tag of the country shown, <= 0 = the player
-    const int FocusItems = 0x2058, FocusOfItem = 0x20;            // CNationalFocusView items; CNationalFocusTreeItem -> CNationalFocus
-    const int ViewedCountryOfFocusView = 0x20F8, TagOfCountry = 8; // CCountry* shown, null = the player
-    const int Prerequisites = 0x570, FocusesOfGroup = 8;          // CNationalFocus: CPdxArray of prerequisite blocks (AND), each a CPdxArray of focuses (OR)
-    const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
-    const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
-    const long SentTimeoutMs = 30_000;                            // a sent command not running by then failed: drop the entry
+    private const int ResearchOfCountry = 0xF60, Slots = 0xA0;            // CCountry -> research -> CPdxArray<CResearchSlot*>
+    private const int TechOfSlot = 0x18, IndexOfSlot = 0x40;              // slot: CTechnologyStatus* in progress (null = idle), slot number
+    private const int TechOfStatus = 0x160;                              // CTechnologyStatus -> CTechnology
+    private const int FocusOfCountry = 0x1380, FocusInProgress = 0x10;    // CCountry -> focus progress -> CNationalFocus* (null = idle)
+    private const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
+    private const int Repetitions = 96, MaxRepetitions = 540;             // agency: CPdxArray<{upgrade*, int done}>; upgrade: allowed count
+    private const int StatusOfEvent = 8;                                  // tech tree click event -> CTechnologyStatus
+    private const int WindowOfEntry = 16, UpgradeOfEntry = 40, ButtonOfEntry = 0x40, AgencyOfEntry = 4216; // agency upgrade entry
+    private const int WindowOfItem = 0x10;                                // tech and focus tree items: their window
+    private const int ViewOfTechItem = 0x30, StatusOfTechItem = 0xC8, StateOfTechItem = 0xD0; // CTechnologyTreeTechItem
+    private const int TechResearched = 4, TechResearching = 5;            // tech item states
+    private const int ViewedTagOfTechView = 0x1AA0;                       // int tag of the country shown, <= 0 = the player
+    private const int FocusItems = 0x2058, FocusOfItem = 0x20;            // CNationalFocusView items; CNationalFocusTreeItem -> CNationalFocus
+    private const int ViewedCountryOfFocusView = 0x20F8, TagOfCountry = 8; // CCountry* shown, null = the player
+    private const int Prerequisites = 0x570, FocusesOfGroup = 8;          // CNationalFocus: CPdxArray of prerequisite blocks (AND), each a CPdxArray of focuses (OR)
+    private const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
+    private const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
+    private const long SentTimeoutMs = 30_000;                            // a sent command not running by then failed: drop the entry
 
     [Function(CallingConventions.Microsoft)] public delegate nint TechClickFn(nint view, nint ev);
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3);
@@ -89,23 +89,23 @@ public unsafe class Queues : Plugin
     [Function(CallingConventions.Microsoft)] public delegate void WindowFn(nint window);
     [Function(CallingConventions.Microsoft)] public delegate void NodeStatesFn(nint view, float dt, nint cache);
 
-    IHook<TechClickFn>? _techClick, _xorTechClick;
-    IHook<FocusClickFn>? _focusClick;
-    IHook<AgencyClickFn>? _agencyClick;
-    IHook<EntryFn>? _agencyEntryRefresh;
-    IHook<WindowFn>? _agencyWindowRefresh;
-    IHook<EntryFn>? _techItemBonus;
-    IHook<NodeStatesFn>? _focusNodeStates;
-    delegate* unmanaged<nint, void> _techViewUpdateAllItems;
-    delegate* unmanaged<nint, nint, byte> _focusCompleted;
-    readonly Dictionary<nint, (byte[] Name, byte[] Shown)> _labelledFocusItems = new(); // the game's name, what we wrote
-    nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
-    bool _reportedNumberBox;
+    private IHook<TechClickFn>? _techClick, _xorTechClick;
+    private IHook<FocusClickFn>? _focusClick;
+    private IHook<AgencyClickFn>? _agencyClick;
+    private IHook<EntryFn>? _agencyEntryRefresh;
+    private IHook<WindowFn>? _agencyWindowRefresh;
+    private IHook<EntryFn>? _techItemBonus;
+    private IHook<NodeStatesFn>? _focusNodeStates;
+    private delegate* unmanaged<nint, void> _techViewUpdateAllItems;
+    private delegate* unmanaged<nint, nint, byte> _focusCompleted;
+    private readonly Dictionary<nint, (byte[] Name, byte[] Shown)> _labelledFocusItems = new(); // the game's name, what we wrote
+    private nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
+    private bool _reportedNumberBox;
 
-    readonly Queue _research = new("research", Signatures.ResearchCommand, 0x40);
-    readonly Queue _focus = new("focus", Signatures.FocusCommand, 0x38);
-    readonly Queue _agency = new("agency upgrade", Signatures.AgencyCommand, 0x38);
-    (nint GameState, int Tag) _session;
+    private readonly Queue _research = new("research", Signatures.ResearchCommand, 0x40);
+    private readonly Queue _focus = new("focus", Signatures.FocusCommand, 0x38);
+    private readonly Queue _agency = new("agency upgrade", Signatures.AgencyCommand, 0x38);
+    private (nint GameState, int Tag) _session;
 
     public override void Load()
     {
@@ -161,7 +161,7 @@ public unsafe class Queues : Plugin
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
     }
 
-    bool ShiftQueuesTech(nint view, nint ev)
+    private bool ShiftQueuesTech(nint view, nint ev)
     {
         var status = *(nint*)(ev + StatusOfEvent);
         if (status == 0 || !Gui.ShiftHeld) return false;
@@ -171,7 +171,7 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>Puts a queued tech's position on its "bonus" text, which the game has just re-set (and shows it if hidden).</summary>
-    void LabelTech(nint item)
+    private void LabelTech(nint item)
     {
         var status = *(nint*)(item + StatusOfTechItem);
         var viewed = *(int*)(*(nint*)(item + ViewOfTechItem) + ViewedTagOfTechView);
@@ -191,7 +191,7 @@ public unsafe class Queues : Plugin
     /// Keeps "N. " in front of queued focuses' names (set once by the game when it builds the items), and puts the game's
     /// name back on focuses no longer queued. Runs every frame while the tree is open; SetText only when something changed.
     /// </summary>
-    void LabelFocuses(nint view)
+    private void LabelFocuses(nint view)
     {
         var viewed = *(nint*)(view + ViewedCountryOfFocusView);
         if (viewed != 0 && *(int*)(viewed + TagOfCountry) != Game.PlayerTag) return;
@@ -215,7 +215,7 @@ public unsafe class Queues : Plugin
     /// Unqueues <paramref name="focus"/> and every queued focus that can no longer be reached without it: one of its
     /// prerequisite blocks held an unqueued focus and now has none completed, in progress or still queued.
     /// </summary>
-    void UnqueueFocus(nint focus)
+    private void UnqueueFocus(nint focus)
     {
         var country = Game.Country(Game.PlayerTag);
         var progress = country == 0 ? 0 : *(nint*)(country + FocusOfCountry);
@@ -249,7 +249,7 @@ public unsafe class Queues : Plugin
         Log.Info($"focus: unqueued {removed.Count} (with what needed it), {_focus.Items.Count} left");
     }
 
-    void Toggle(Queue queue, nint item)
+    private void Toggle(Queue queue, nint item)
     {
         if (item == 0) return;
         if (queue.Items.Remove(item)) Log.Info($"{queue.Name}: unqueued, {queue.Items.Count} left");
@@ -264,7 +264,7 @@ public unsafe class Queues : Plugin
     /// Queues one more level of a repeatable agency upgrade, up to the levels left; past that, unqueues all of it. A plain
     /// upgrade (one level) toggles.
     /// </summary>
-    void AddLevel(nint agency, nint upgrade)
+    private void AddLevel(nint agency, nint upgrade)
     {
         if (agency == 0 || upgrade == 0) return;
         var queued = _agency.Items.Count(i => i == upgrade);
@@ -282,7 +282,7 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>Writes the 1-based queue position of <paramref name="item"/> into the window's number box (empty if not queued).</summary>
-    void ShowPosition(nint window, Queue queue, nint item)
+    private void ShowPosition(nint window, Queue queue, nint item)
     {
         var box = window == 0 ? 0 : Gui.FindTextBox(window, NumberBox);
         if (!_reportedNumberBox)
@@ -301,7 +301,7 @@ public unsafe class Queues : Plugin
     /// clicked, let alone shift+clicked. Keep the button of any upgrade that isn't running or finished: a plain click still
     /// does nothing, because the game's own command check rejects starting a second upgrade.
     /// </summary>
-    static void KeepClickable(nint entry)
+    private static void KeepClickable(nint entry)
     {
         var agency = *(nint*)(entry + AgencyOfEntry);
         var upgrade = *(nint*)(entry + UpgradeOfEntry);
@@ -312,10 +312,10 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>Levels of <paramref name="upgrade"/> not done nor running.</summary>
-    static int LevelsLeft(nint agency, nint upgrade) =>
+    private static int LevelsLeft(nint agency, nint upgrade) =>
         *(int*)(upgrade + MaxRepetitions) - TimesDone(agency, upgrade) - (*(nint*)(agency + AgencyUpgradeInProgress) == upgrade ? 1 : 0);
 
-    static int TimesDone(nint agency, nint upgrade)
+    private static int TimesDone(nint agency, nint upgrade)
     {
         var pairs = *(nint*)(agency + Repetitions);
         for (int i = 0, n = *(int*)(agency + Repetitions + 0xC); i < n; i++)
@@ -323,7 +323,7 @@ public unsafe class Queues : Plugin
         return 0;
     }
 
-    void Pump()
+    private void Pump()
     {
         var tag = Game.PlayerTag;
         var country = Game.Country(tag);
@@ -372,7 +372,7 @@ public unsafe class Queues : Plugin
     /// stays queued until it shows up running: in multiplayer a command takes a round trip, and sending another to the same
     /// slot meanwhile would replace the first.
     /// </summary>
-    void StartFirst(Queue queue, int slot, int tag, Action<nint>? fill = null)
+    private void StartFirst(Queue queue, int slot, int tag, Action<nint>? fill = null)
     {
         var now = Environment.TickCount64;
         queue.Idle(slot);
@@ -394,14 +394,14 @@ public unsafe class Queues : Plugin
         }
     }
 
-    sealed class Queue(string name, string command, int commandSize)
+    private sealed class Queue(string name, string command, int commandSize)
     {
         public string Name { get; } = name;
         public string Command { get; } = command;
         public int CommandSize { get; } = commandSize;
         public List<nint> Items { get; } = new();
         public Dictionary<int, (nint Item, long Until)> Sent { get; } = new(); // by slot: sent, not seen running yet
-        readonly Dictionary<int, nint> _running = new(); // by slot: what was running at the last pump
+        private readonly Dictionary<int, nint> _running = new(); // by slot: what was running at the last pump
 
         /// <summary>
         /// <paramref name="item"/> is running in <paramref name="slot"/>, whether we sent it or the player started it. Takes one

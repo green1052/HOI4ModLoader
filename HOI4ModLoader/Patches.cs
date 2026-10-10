@@ -16,10 +16,10 @@ public static unsafe partial class Patches
     /// <summary>Plugin id patches are recorded against (set by the loader around <see cref="Plugin.Load"/>).</summary>
     internal static string? Owner;
 
-    static readonly Dictionary<long, string> Claims = new();
-    static readonly Dictionary<string, List<Action>> Undo = new();
-    static readonly List<object> KeepAlive = new();
-    static readonly Logger Log = new("Patches");
+    private static readonly Dictionary<long, string> Claims = new();
+    private static readonly Dictionary<string, List<Action>> Undo = new();
+    private static readonly List<object> KeepAlive = new();
+    private static readonly Logger Log = new("Patches");
 
     /// <summary>The Reloaded.Hooks instance, for anything the helpers below don't cover.</summary>
     public static IReloadedHooks Hooks => ReloadedHooks.Instance;
@@ -88,7 +88,7 @@ public static unsafe partial class Patches
     /// <summary>Callable delegate for a game function.</summary>
     public static T Function<T>(nint at) where T : Delegate => Hooks.CreateWrapper<T>(at, out _);
 
-    static void Claim(nint at, int length)
+    private static void Claim(nint at, int length)
     {
         var owner = Owner ?? "?";
         for (long a = at; a < at + length; a++)
@@ -102,7 +102,7 @@ public static unsafe partial class Patches
     /// original), then put back the bytes it overwrote, so the code reads as never hooked and signatures match again
     /// (hot reload loads the plugin anew). Unless something hooked over it since: then it stays in the chain, disabled.
     /// </summary>
-    static void Restorable(nint at, Action activate, Action disable, object hook)
+    private static void Restorable(nint at, Action activate, Action disable, object hook)
     {
         const int Window = 64; // a hook's jump plus the instructions it cut through
         var before = new ReadOnlySpan<byte>((void*)at, Window).ToArray();
@@ -134,7 +134,7 @@ public static unsafe partial class Patches
         foreach (var a in Claims.Where(c => c.Value == owner).Select(c => c.Key).ToList()) Claims.Remove(a);
     }
 
-    static void WriteCode(nint at, byte[] bytes)
+    private static void WriteCode(nint at, byte[] bytes)
     {
         if (!VirtualProtect(at, bytes.Length, 0x40, out var old)) // PAGE_EXECUTE_READWRITE
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), $"VirtualProtect 0x{at:X}");

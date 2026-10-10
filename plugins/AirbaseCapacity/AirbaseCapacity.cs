@@ -29,16 +29,16 @@ public static class Signatures
 public unsafe class AirbaseCapacity : Plugin
 {
     // Layouts for HOI4 1.19.3.
-    const int Handle = 0x08, Incoming = 0x18, Capacity = 0x78;           // CAirBase: CRef id, CPdxArray<CAirWing*> flying in, planes
-    const int Pool = 0x38, Destination = 0x48, Planes = 0x7C, BaseOfPool = 0x18; // CAirWing (+ its pool's airbase CRef id)
+    private const int Handle = 0x08, Incoming = 0x18, Capacity = 0x78;           // CAirBase: CRef id, CPdxArray<CAirWing*> flying in, planes
+    private const int Pool = 0x38, Destination = 0x48, Planes = 0x7C, BaseOfPool = 0x18; // CAirWing (+ its pool's airbase CRef id)
 
     [Function(CallingConventions.Microsoft)] public delegate void SendFn(nint dest);
     [Function(CallingConventions.Microsoft)] public delegate void SelectedFn(nint wings, int filter);
 
-    IHook<SendFn>? _send;
-    IHook<SelectedFn>? _selected;
-    delegate* unmanaged<nint, int> _planesAt;
-    nint _dest; // the airbase while a Shift+send runs
+    private IHook<SendFn>? _send;
+    private IHook<SelectedFn>? _selected;
+    private delegate* unmanaged<nint, int> _planesAt;
+    private nint _dest; // the airbase while a Shift+send runs
 
     public override void Load()
     {
@@ -60,7 +60,7 @@ public unsafe class AirbaseCapacity : Plugin
     }
 
     /// <summary>Drops wings from the selection list (in place; the caller owns it) until the rest fit at <paramref name="dest"/>.</summary>
-    void KeepWhatFits(nint wings, nint dest)
+    private void KeepWhatFits(nint wings, nint dest)
     {
         var room = *(int*)(dest + Capacity) - _planesAt(dest);
         foreach (var wing in Native.PdxArray(dest + Incoming)) room -= *(int*)(wing + Planes);

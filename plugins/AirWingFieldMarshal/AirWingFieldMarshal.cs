@@ -37,7 +37,7 @@ public static class Signatures
 }
 
 /// <summary>The army card's "this card is an army group's" byte, at the offset the slot refresh instruction names.</summary>
-static unsafe class Card
+internal static unsafe class Card
 {
     public static int IsArmyGroupOffset(nint refreshWingSlots) => *(int*)(refreshWingSlots + 12);
 
@@ -67,11 +67,11 @@ public unsafe class AirWingFieldMarshal : Plugin
     [Function(CallingConventions.Microsoft)] public delegate void CardGroupFn(nint card, nint group);
     [Function(CallingConventions.Microsoft)] public delegate byte ByteFn(); // native bool comes back in al only
 
-    IHook<GroupFn>? _updateAttachedWings;
-    IHook<CardFn>? _createWingSlots, _cardRightClick;
-    IHook<CardGroupFn>? _refreshWingSlots;
-    ByteFn? _airWingsSelected;
-    int _cardIsArmyGroup, _cardWingGrid;
+    private IHook<GroupFn>? _updateAttachedWings;
+    private IHook<CardFn>? _createWingSlots, _cardRightClick;
+    private IHook<CardGroupFn>? _refreshWingSlots;
+    private ByteFn? _airWingsSelected;
+    private int _cardIsArmyGroup, _cardWingGrid;
 
     public override void Load()
     {
@@ -124,7 +124,7 @@ public unsafe class AirWingFieldMarshal : Plugin
 
     // Daily attached-wing order update. It picks mission regions from where the group's divisions are,
     // and an army group's divisions belong to its armies.
-    void UpdateAttachedWings(nint ptr)
+    private void UpdateAttachedWings(nint ptr)
     {
         var g = new OrdersGroup(ptr);
         if (g.IsArmyGroup && g.AttachedWingCount > 0) g.WithArmiesMembers(() => _updateAttachedWings!.OriginalFunction(ptr));
@@ -145,8 +145,8 @@ public unsafe class AirWingFieldMarshalMultiplayer : Plugin
     [Function(CallingConventions.Microsoft)] public delegate byte PostAttachFn(nint wings, nint group);
     [Function(CallingConventions.Microsoft)] public delegate byte ByteFn();
 
-    IHook<CardFn>? _cardRightClick;
-    IHook<PostAttachFn>? _postAttach;
+    private IHook<CardFn>? _cardRightClick;
+    private IHook<PostAttachFn>? _postAttach;
 
     public override void Load()
     {
@@ -164,7 +164,7 @@ public unsafe class AirWingFieldMarshalMultiplayer : Plugin
     }
 
     // ponytail: round-robin in selection order, not weighted by army size or front; weigh it if that matters in play.
-    byte SpreadOverArmies(nint wings, nint group)
+    private byte SpreadOverArmies(nint wings, nint group)
     {
         var all = Native.PdxArray(wings).ToArray();
         var armies = new OrdersGroup(group).Armies.ToArray();
