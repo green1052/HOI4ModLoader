@@ -4,7 +4,6 @@
 #include <windows.h>
 #include <cstdint>
 #include <string>
-#pragma comment(lib, "user32.lib")
 
 #define FWD(name) __pragma(comment(linker, "/export:" #name "=\\\\.\\GLOBALROOT\\SystemRoot\\System32\\version." #name))
 FWD(GetFileVersionInfoA)
@@ -30,15 +29,32 @@ struct hostfxr_initialize_parameters { size_t size; const wchar_t* host_path; co
 using hostfxr_initialize_for_runtime_config_fn = int(__cdecl*)(const wchar_t*, const hostfxr_initialize_parameters*, void**);
 using hostfxr_get_runtime_delegate_fn = int(__cdecl*)(void*, int, void**);
 using hostfxr_close_fn = int(__cdecl*)(void*);
+using hostfxr_error_writer_fn = void(__cdecl*)(const wchar_t*);
+using hostfxr_set_error_writer_fn = hostfxr_error_writer_fn(__cdecl*)(hostfxr_error_writer_fn);
 using load_assembly_and_get_function_pointer_fn = int(__stdcall*)(const wchar_t*, const wchar_t*, const wchar_t*, const wchar_t*, void*, void**);
 constexpr int hdt_load_assembly_and_get_function_pointer = 5;
 const wchar_t* const UNMANAGEDCALLERSONLY_METHOD = (const wchar_t*)-1;
 
 static uint8_t* g_entry;
 static uint8_t g_saved[12];
+static std::wstring g_hostError;  // what hostfxr reported (it writes to stderr, which the game doesn't have)
 
 static void Fail(const std::wstring& msg) {
-    MessageBoxW(nullptr, msg.c_str(), L"HOI4ModLoader: mods disabled", MB_ICONWARNING);
+    MessageBoxW(nullptr, (g_hostError.empty() ? msg : msg + L"\n\n" + g_hostError).c_str(), L"HOI4ModLoader: mods disabled", MB_ICONWARNING);
+}
+
+// An environment variable, or empty (also when it doesn't fit MAX_PATH).
+static std::wstring Env(const wchar_t* name) {
+    wchar_t value[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(name, value, MAX_PATH);
+    return n && n < MAX_PATH ? value : L"";
+}
+
+// Where the .NET installer put the x64 runtime (it may not be under Program Files), or empty.
+static std::wstring InstallLocation() {
+    wchar_t value[MAX_PATH];
+    DWORD size = sizeof value;
+    return RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\dotnet\\Setup\\InstalledVersions\\x64", L"InstallLocation", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6432KEY, nullptr, value, &size) == ERROR_SUCCESS ? value : L"";
 }
 
 static bool IsDir(const std::wstring& path) {
@@ -76,20 +92,21 @@ static void BootDotnet() {
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring mods = std::wstring(exe, wcsrchr(exe, L'\\')) + L"\\HOI4ModLoader";
 
-    // A runtime shipped in HOI4ModLoader\dotnet wins; otherwise the installed one.
+    // A runtime shipped in HOI4ModLoader\dotnet wins; otherwise the installed one, found like the official hosts do.
     std::wstring root = mods + L"\\dotnet";
-    if (!IsDir(root)) {
-        wchar_t env[MAX_PATH];
-        root = GetEnvironmentVariableW(L"DOTNET_ROOT", env, MAX_PATH) ? env : L"";
-        if (root.empty() && GetEnvironmentVariableW(L"ProgramFiles", env, MAX_PATH)) root = std::wstring(env) + L"\\dotnet";
-    }
-    std::wstring fxrPath = FindHostFxr(root);
+    if (!IsDir(root)) root = Env(L"DOTNET_ROOT");
+    if (root.empty()) root = InstallLocation();
+    if (root.empty() && !Env(L"ProgramFiles").empty()) root = Env(L"ProgramFiles") + L"\\dotnet";
+    std::wstring fxrPath = root.empty() ? L"" : FindHostFxr(root);
     HMODULE fxr = fxrPath.empty() ? nullptr : LoadLibraryW(fxrPath.c_str());
     if (!fxr) return Fail(L".NET 10 runtime not found. Install the .NET 10 Runtime (x64) or use a release that bundles HOI4ModLoader\\dotnet.");
 
     auto init = (hostfxr_initialize_for_runtime_config_fn)GetProcAddress(fxr, "hostfxr_initialize_for_runtime_config");
     auto getDelegate = (hostfxr_get_runtime_delegate_fn)GetProcAddress(fxr, "hostfxr_get_runtime_delegate");
     auto close = (hostfxr_close_fn)GetProcAddress(fxr, "hostfxr_close");
+    auto setErrorWriter = (hostfxr_set_error_writer_fn)GetProcAddress(fxr, "hostfxr_set_error_writer");
+    if (!init || !getDelegate || !close) return Fail(fxrPath + L" is too old for .NET 10.");
+    if (setErrorWriter) setErrorWriter([](const wchar_t* message) { g_hostError += message, g_hostError += L"\n"; });
 
     std::wstring core = mods + L"\\core\\";
     hostfxr_initialize_parameters params{sizeof(params), exe, root.c_str()};
@@ -97,8 +114,9 @@ static void BootDotnet() {
     if (init((core + L"HOI4ModLoader.runtimeconfig.json").c_str(), &params, &h) < 0 || !h)
         return Fail(L"Failed to start .NET with " + core + L"HOI4ModLoader.runtimeconfig.json (is .NET 10 installed?)");
     load_assembly_and_get_function_pointer_fn load = nullptr;
-    getDelegate(h, hdt_load_assembly_and_get_function_pointer, (void**)&load);
+    int got = getDelegate(h, hdt_load_assembly_and_get_function_pointer, (void**)&load);
     close(h);
+    if (got < 0) load = nullptr;
 
     void(__stdcall * loaderInit)() = nullptr;
     if (!load || load((core + L"HOI4ModLoader.dll").c_str(), L"HOI4ModLoader.Loader, HOI4ModLoader", L"Init", UNMANAGEDCALLERSONLY_METHOD, nullptr, (void**)&loaderInit) != 0 || !loaderInit)
@@ -115,17 +133,19 @@ static void Write(void* at, const void* data, size_t n) {
 }
 
 // Runs in place of the exe entry point (outside the loader lock): unhook, boot mods, continue.
-static int EntryHook() {
+static DWORD WINAPI EntryHook(void* peb) {
     Write(g_entry, g_saved, sizeof g_saved);
     BootDotnet();
-    return ((int (*)())g_entry)();
+    return ((DWORD(WINAPI*)(void*))g_entry)(peb);
 }
 
-BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID) {
+BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID) {
+    if (reason != DLL_PROCESS_ATTACH) return TRUE;
+    DisableThreadLibraryCalls(module);
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     // The launcher and crash reporter live in the same folder and load this proxy too.
-    if (reason != DLL_PROCESS_ATTACH || g_entry || _wcsicmp(wcsrchr(exe, L'\\') + 1, L"hoi4.exe")) return TRUE;
+    if (_wcsicmp(wcsrchr(exe, L'\\') + 1, L"hoi4.exe")) return TRUE;
 
     auto base = (uint8_t*)GetModuleHandleW(nullptr);
     auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);

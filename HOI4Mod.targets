@@ -35,7 +35,7 @@
             <HOI4ModFile Include="@(_HOI4ModOwnFile)" Link="%(_HOI4ModOwnFile.RecursiveDir)%(_HOI4ModOwnFile.Filename)%(_HOI4ModOwnFile.Extension)" />
         </ItemGroup>
         <Copy SourceFiles="@(HOI4ModFile)" DestinationFiles="@(HOI4ModFile->'$(HOI4ModDir)\$(MSBuildProjectName)\%(Link)')" SkipUnchangedFiles="true" />
-        <WriteLinesToFile File="$(HOI4ModDir)\$(MSBuildProjectName).mod" Overwrite="true"
+        <WriteLinesToFile File="$(HOI4ModDir)\$(MSBuildProjectName).mod" Overwrite="true" WriteOnlyWhenDifferent="true"
                           Lines="$([System.IO.File]::ReadAllText('mod\descriptor.mod'));path=&quot;mod/$(MSBuildProjectName)&quot;" />
     </Target>
 

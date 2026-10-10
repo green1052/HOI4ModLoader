@@ -1,8 +1,5 @@
 bin/
 obj/
-/packages/
-riderModule.iml
-/_ReSharper.Caches/
 out/
 .idea/
 *.DotSettings.user

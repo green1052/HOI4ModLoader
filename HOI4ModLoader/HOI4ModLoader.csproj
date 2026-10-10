@@ -1,11 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <PlatformTarget>x64</PlatformTarget>
+        <!-- The loader's version: the main menu, the Mods tab and the log show it. -->
+        <Version>1.0.0</Version>
         <!-- Hosted from native code (bootstrap): emits runtimeconfig.json and copies dependencies. -->
         <EnableDynamicLoading>true</EnableDynamicLoading>
     </PropertyGroup>
@@ -15,7 +12,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="..\bootstrap\bootstrap.cpp;..\bootstrap\allocator.c;..\bootstrap\bootstrap.vcxproj" LinkBase="bootstrap" />
+        <BootstrapSource Include="..\bootstrap\*.cpp;..\bootstrap\*.c;..\bootstrap\*.vcxproj" />
+        <None Include="@(BootstrapSource)" LinkBase="bootstrap" />
     </ItemGroup>
 
     <!--
@@ -25,8 +23,11 @@
     <PropertyGroup>
         <BootstrapDll>$(MSBuildThisFileDirectory)..\bootstrap\bin\Release\version.dll</BootstrapDll>
     </PropertyGroup>
-    <Target Name="BuildBootstrap" BeforeTargets="Build" Inputs="..\bootstrap\bootstrap.cpp;..\bootstrap\allocator.c;..\bootstrap\bootstrap.vcxproj" Outputs="$(BootstrapDll)">
-        <Exec Command="&quot;$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe&quot; -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find MSBuild\**\Bin\MSBuild.exe"
+    <Target Name="BuildBootstrap" BeforeTargets="Build" Inputs="@(BootstrapSource)" Outputs="$(BootstrapDll)">
+        <PropertyGroup>
+            <_VsWhere>$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe</_VsWhere>
+        </PropertyGroup>
+        <Exec Condition="Exists('$(_VsWhere)')" Command="&quot;$(_VsWhere)&quot; -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find MSBuild\**\Bin\MSBuild.exe"
               ConsoleToMSBuild="true" StandardOutputImportance="low" ContinueOnError="true">
             <Output TaskParameter="ConsoleOutput" PropertyName="_VcMSBuild" />
         </Exec>
@@ -34,6 +35,8 @@
         <!-- Clear the variables `dotnet build` exports, or the C++ MSBuild resolves the .NET SDK's targets instead of its own. -->
         <Exec Condition="'$(_VcMSBuild)' != ''"
               Command="set MSBuildSDKsPath=&amp; set MSBuildExtensionsPath=&amp; set MSBUILD_EXE_PATH=&amp; set MSBuildLoadMicrosoftTargetsReadOnly=&amp; &quot;$(_VcMSBuild)&quot; &quot;..\bootstrap\bootstrap.vcxproj&quot; -nologo -v:m -p:Configuration=Release -p:Platform=x64" />
+        <!-- The C++ build may find nothing to relink (e.g. a comment changed): mark the output current, or this runs every build. -->
+        <Touch Condition="'$(_VcMSBuild)' != '' And Exists('$(BootstrapDll)')" Files="$(BootstrapDll)" />
     </Target>
 
     <!-- The "HOI4ModLoader UI" mod: the settings window's Mods page (SettingsMods.cs), appended to the ingame settings window. -->
@@ -48,12 +51,16 @@
     </ItemGroup>
     <Import Project="..\HOI4Mod.targets" />
 
-    <!-- mimalloc: Microsoft's official release build (pinned and hash-checked), shipped next to the loader (see Allocator.cs). -->
+    <!--
+      mimalloc: Microsoft's official release build (pinned and hash-checked), shipped next to the loader (see Allocator.cs).
+      Each release carries the v1/v2/v3 lines; v2 is the long-standing one. The cache folder is keyed by the hash, so
+      changing the pin downloads again.
+    -->
     <PropertyGroup>
         <MimallocRelease>v3.5.3</MimallocRelease>
         <MimallocVersion>v2.5.2</MimallocVersion>
         <MimallocSha256>4AA58C14E00F64018A1AF3503094151B561F12F137FA77C3F1CA370FAD785D5E</MimallocSha256>
-        <MimallocDir>$(MSBuildThisFileDirectory)obj\mimalloc-$(MimallocVersion)\</MimallocDir>
+        <MimallocDir>$(MSBuildThisFileDirectory)obj\mimalloc-$(MimallocSha256)\</MimallocDir>
     </PropertyGroup>
     <ItemGroup>
         <None Include="$(MimallocDir)bin\mimalloc.dll;$(MimallocDir)bin\mimalloc-redirect.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
