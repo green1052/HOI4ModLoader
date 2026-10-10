@@ -1,5 +1,7 @@
 ﻿l_english:
  com.green1052.supplyoverlay.name:0 "Supply Overlay"
- com.green1052.supplyoverlay.desc:0 "Ctrl+Alt+S draws an arrow from the hub feeding each of your starving divisions to the division, whatever map mode you are in."
+ com.green1052.supplyoverlay.desc:0 "Ctrl+Alt+S draws an arrow from the hub feeding each of your starving divisions to the division, and Ctrl+Alt+C draws your country's trade routes, whatever map mode you are in."
  com.green1052.supplyoverlay.Toggle:0 "Toggle key"
  com.green1052.supplyoverlay.Toggle.desc:0 "Ctrl+Alt+S shows where the supply of each starving division comes from."
+ com.green1052.supplyoverlay.TradeToggle:0 "Trade routes key"
+ com.green1052.supplyoverlay.TradeToggle.desc:0 "Ctrl+Alt+C draws the trade routes of your country: over the land they cross and the seas they sail."

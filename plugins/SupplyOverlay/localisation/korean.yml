@@ -1,5 +1,7 @@
 ﻿l_korean:
  com.green1052.supplyoverlay.name:0 "보급 오버레이"
- com.green1052.supplyoverlay.desc:0 "Ctrl+Alt+S를 누르면 보급을 잃은 사단마다 자기를 먹이는 허브까지 화살표를 그립니다. 어떤 지도 모드에서도 됩니다."
+ com.green1052.supplyoverlay.desc:0 "Ctrl+Alt+S를 누르면 보급을 잃은 사단마다 자기를 먹이는 허브까지 화살표를 그리고, Ctrl+Alt+C를 누르면 우리 나라의 호송 경로를 그립니다. 어떤 지도 모드에서도 됩니다."
  com.green1052.supplyoverlay.Toggle:0 "토글 키"
  com.green1052.supplyoverlay.Toggle.desc:0 "Ctrl+Alt+S를 누르면 보급을 잃은 사단의 보급이 어디서 오는지 보여줍니다."
+ com.green1052.supplyoverlay.TradeToggle:0 "호송 경로 키"
+ com.green1052.supplyoverlay.TradeToggle.desc:0 "Ctrl+Alt+C를 누르면 우리 나라의 호송 경로를 지나는 육지와 바다를 따라 화살표로 그립니다."

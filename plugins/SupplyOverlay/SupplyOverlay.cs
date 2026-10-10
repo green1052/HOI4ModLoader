@@ -34,7 +34,8 @@ public static class Signatures
 
 /// <summary>
 /// A supply overlay for any map mode: Ctrl+Alt+S draws an arrow from the hub feeding each of the player's starving
-/// divisions to the division's province, in the supply map's own arrow style. Read-only, so other players need nothing.
+/// divisions to the division's province, in the supply map's own arrow style. Ctrl+Alt+C draws the player's trade
+/// routes, over land and sea. Read-only, so other players need nothing.
 /// </summary>
 [Plugin("com.green1052.supplyoverlay", "Supply Overlay", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class SupplyOverlay : Plugin
@@ -45,6 +46,11 @@ public unsafe partial class SupplyOverlay : Plugin
     private const int CountryOfEntry = 2, AmountOfEntry = 8, Nodes = 0xB8, NodeSize = 0xE8, ProvinceOfNode = 4;
     private const int UnitsOfCountry = 0x290, KindOfUnit = 8, LocationOfUnit = 0x1F0, IsLowSupplySlot = 43;
     private const int PositionOfProvince = 0xB8; // CProvince: {int x, y}, the map arrow point's 1/100000
+    private const int ResourcesOfCountry = 0x11F8; // CCountry: CCountryResources*, the trade routes
+    private const int RoutesOfResources = 0x788;   // resources: CPdxArray<CResourceDeliveryRoute*>
+    private const int TagAOfRoute = 48, TagBOfRoute = 52; // route: the two trading tags
+    private const int StatesOfRoute = 72, RegionsOfRoute = 96; // route: the states (land) / regions (sea) it passes
+    private const int ProvincesOfState = 24, ProvincesOfRegion = 0x18;
     private const int ColourSize = 32, LabelsSize = 128; // CreateArrow's colour and {colour, 3 label strings} blocks
 
     [Function(CallingConventions.Microsoft)]
@@ -54,15 +60,17 @@ public unsafe partial class SupplyOverlay : Plugin
     private delegate* unmanaged<nint, byte, void> _clear, _rebuild, _visible;
     private IHook<CreateFn>? _create;
     private readonly byte[] _colourA = new byte[ColourSize], _colourB = new byte[ColourSize], _labels = new byte[LabelsSize];
-    private nint _manager, _arrow;
+    private readonly byte[] _tradeColourA = new byte[ColourSize], _tradeColourB = new byte[ColourSize];
+    private nint _manager, _arrow, _tradeArrow;
     private uint _layer;
     private string _style = "supply_to_consumers", _capturedName = "";
     private long _drawn;
-    private bool _on, _down, _reported;
+    private bool _on, _down, _reported, _tradeOn, _tradeDown;
 
     public override void Load()
     {
         var toggle = Config.Bind("Keys", "Toggle", true, "Ctrl+Alt+S shows where the supply of each starving division comes from.");
+        var trade = Config.Bind("Keys", "TradeToggle", true, "Ctrl+Alt+C shows the trade routes of your country.");
         _append = (delegate* unmanaged<nint, nint, byte, byte, int, char>)Sig.Find(Signatures.AppendPoint);
         _clear = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.ClearPoints);
         _rebuild = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.RebuildGlyphs);
@@ -73,7 +81,7 @@ public unsafe partial class SupplyOverlay : Plugin
                 if (_manager == 0 && EmptyStrings(labels)) Capture(manager, name, colourA, colourB, labels, layer);
                 return _create!.OriginalFunction(manager, name, colourA, colourB, labels, layer);
             });
-        MainThread.Every(TimeSpan.FromMilliseconds(30), () => Poll(toggle));
+        MainThread.Every(TimeSpan.FromMilliseconds(30), () => Poll(toggle, trade));
     }
 
     /// <summary>The game calls this with every arrow it draws: the first plain call hands us the manager and the colours.</summary>
@@ -84,50 +92,77 @@ public unsafe partial class SupplyOverlay : Plugin
         _capturedName = Native.Utf8(Native.MsvcString(name));
         Marshal.Copy(colourA, _colourA, 0, ColourSize);
         Marshal.Copy(colourB, _colourB, 0, ColourSize);
+        Marshal.Copy(colourA, _tradeColourA, 0, ColourSize); // the same value objects, retinted: trade arrows get gold
+        Marshal.Copy(colourB, _tradeColourB, 0, ColourSize);
+        Tint(_tradeColourA);
+        Tint(_tradeColourB);
         Marshal.Copy(labels, _labels, 0, LabelsSize);
         Log.Info($"supply overlay: caught the map's arrow manager (style seen: \"{_capturedName}\")");
+    }
+
+    /// <summary>The CColor is a plain value object with float r, g, b at +0x10: overwriting them retints a copy.</summary>
+    private static void Tint(byte[] colour)
+    {
+        System.Array.Copy(System.BitConverter.GetBytes(1f), 0, colour, 0x10, 4);
+        System.Array.Copy(System.BitConverter.GetBytes(0.8f), 0, colour, 0x14, 4);
+        System.Array.Copy(System.BitConverter.GetBytes(0.15f), 0, colour, 0x18, 4);
     }
 
     /// <summary>Whether every label string in the block is empty, so copying the block keeps no dangling heap buffer.</summary>
     private static bool EmptyStrings(nint labels) =>
         labels == 0 || *(long*)(labels + 0x30) == 0 && *(long*)(labels + 0x50) == 0 && *(long*)(labels + 0x70) == 0;
 
-    private void Poll(bool toggle)
+    private void Poll(bool toggle, bool trade)
     {
         var down = (GetAsyncKeyState('S') & 0x8000) != 0;
         var hit = down && !_down && Gui.CtrlHeld && Gui.AltHeld;
         _down = down;
         if (hit && toggle) _on = !_on;
-        if (!_on)
+        var tradeDown = (GetAsyncKeyState('C') & 0x8000) != 0;
+        if (tradeDown && !_tradeDown && Gui.CtrlHeld && Gui.AltHeld && trade) _tradeOn = !_tradeOn;
+        _tradeDown = tradeDown;
+        if (!_on && !_tradeOn)
         {
             if (_arrow != 0) _visible(_arrow, 0);
+            if (_tradeArrow != 0) _visible(_tradeArrow, 0);
             return;
         }
-        if (Game.ControlledTag == 0) { _arrow = 0; return; } // the menu: the map is rebuilt, the arrow with it
+        if (Game.ControlledTag == 0) { _arrow = _tradeArrow = 0; return; } // the menu: the map is rebuilt with it
         if (_manager == 0) { Warn(); return; }
-        if (_arrow == 0 && (_arrow = MakeArrow()) == 0) return;
-        _visible(_arrow, 1);
-        if (Environment.TickCount64 - _drawn >= 5000) { _drawn = Environment.TickCount64; Draw(); }
+        var redraw = Environment.TickCount64 - _drawn >= 5000;
+        if (redraw) _drawn = Environment.TickCount64;
+        if (_on)
+        {
+            if (_arrow == 0 && (_arrow = MakeArrow(_colourA, _colourB)) == 0) return;
+            _visible(_arrow, 1);
+            if (redraw) Draw();
+        }
+        if (_tradeOn)
+        {
+            if (_tradeArrow == 0 && (_tradeArrow = MakeArrow(_tradeColourA, _tradeColourB)) == 0) return;
+            _visible(_tradeArrow, 1);
+            if (redraw) DrawTrade();
+        }
     }
 
     /// <summary>One arrow in the supply map's own style, or 0: the manager's style list comes from the game's .gfx files,
     /// so an unknown style falls back to the name the game itself last drew with.</summary>
-    private nint MakeArrow()
+    private nint MakeArrow(byte[] colourA, byte[] colourB)
     {
         string[] tries = [_style, _capturedName];
         foreach (var style in tries.Distinct())
         {
-            var arrow = Create(style);
+            var arrow = Create(style, colourA, colourB);
             if (arrow != 0) return arrow;
             if (style != _capturedName) Log.Info($"supply overlay: style \"{style}\" not found, trying \"{_capturedName}\"");
         }
         return 0;
     }
 
-    private nint Create(string style)
+    private nint Create(string style, byte[] colourA, byte[] colourB)
     {
         fixed (byte* name = System.Text.Encoding.ASCII.GetBytes(style + '\0'))
-        fixed (byte* a = _colourA, b = _colourB, l = _labels)
+        fixed (byte* a = colourA, b = colourB, l = _labels)
             return _create!.OriginalFunction(_manager, (nint)name, (nint)a, (nint)b, (nint)l, _layer);
     }
 
@@ -155,10 +190,47 @@ public unsafe partial class SupplyOverlay : Plugin
         {
             var hub = node == 0 ? 0 : Game.Province(*(int*)(node + ProvinceOfNode));
             if (hub == 0) continue;
-            Append(hub);
-            Append(province, head: true);
+            PointAt(_arrow, *(int*)(hub + PositionOfProvince), *(int*)(hub + PositionOfProvince + 4));
+            PointAt(_arrow, *(int*)(province + PositionOfProvince), *(int*)(province + PositionOfProvince + 4), head: true);
         }
         _rebuild(_arrow, 1);
+    }
+
+    /// <summary>An arrow along each of our country's trade routes: over the land states it crosses, then the sea regions.</summary>
+    private void DrawTrade()
+    {
+        var tag = Game.ControlledTag;
+        var country = Game.Country(tag);
+        var resources = country == 0 ? 0 : *(nint*)(country + ResourcesOfCountry);
+        if (resources == 0) return;
+        _clear(_tradeArrow, 0);
+        foreach (var route in Native.PdxArray(resources + RoutesOfResources).ToArray())
+        {
+            if (*(int*)(route + TagAOfRoute) != tag && *(int*)(route + TagBOfRoute) != tag) continue; // only ours
+            var points = new List<(int X, int Y)>();
+            Waypoints(route + StatesOfRoute, ProvincesOfState, points);   // over land
+            Waypoints(route + RegionsOfRoute, ProvincesOfRegion, points); // over sea
+            for (var i = 0; i < points.Count; i++)
+                PointAt(_tradeArrow, points[i].X, points[i].Y, i == points.Count - 1);
+        }
+        _rebuild(_tradeArrow, 1);
+    }
+
+    /// <summary>The centre of each state or strategic region the route passes through, in the route's own order.</summary>
+    private static void Waypoints(nint holders, int provincesOf, List<(int X, int Y)> points)
+    {
+        foreach (var holder in Native.PdxArray(holders).ToArray())
+        {
+            long x = 0, y = 0;
+            var n = 0;
+            foreach (var province in Native.PdxArray(holder + provincesOf))
+            {
+                x += *(int*)(province + PositionOfProvince);
+                y += *(int*)(province + PositionOfProvince + 4);
+                n++;
+            }
+            if (n > 0) points.Add(((int)(x / n), (int)(y / n)));
+        }
     }
 
     /// <summary>Our node sending the most supply into the province (its supply flow), or 0 (AutoSupply's FeedingNode).</summary>
@@ -176,12 +248,12 @@ public unsafe partial class SupplyOverlay : Plugin
         return best.Node < 0 || best.Node >= *(int*)(network + Nodes + 0xC) ? 0 : *(nint*)(network + Nodes) + (nint)NodeSize * best.Node;
     }
 
-    private void Append(nint province, bool head = false)
+    private void PointAt(nint arrow, int x, int y, bool head = false)
     {
         var point = stackalloc long[2];
-        point[0] = *(int*)(province + PositionOfProvince) * 100_000L;
-        point[1] = *(int*)(province + PositionOfProvince + 4) * 100_000L;
-        _append(_arrow, (nint)point, 0, (byte)(head ? 1 : 0), -1);
+        point[0] = x * 100_000L;
+        point[1] = y * 100_000L;
+        _append(arrow, (nint)point, 0, (byte)(head ? 1 : 0), -1);
     }
 
     private void Warn()
