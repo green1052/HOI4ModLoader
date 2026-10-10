@@ -161,7 +161,8 @@ internal static unsafe class SettingsMods
         Visible(_list, true);
         var plugins = Loader.Known;
         if (_listTitle != 0)
-            Gui.SetText(_listTitle, Loc.Format("HOIMOD_TITLE", "HOI4ModLoader {0}  ({1} of {2} plugins running)", Loader.Version, Loader.LoadedCount, plugins.Count));
+            Gui.SetText(_listTitle, Loc.Format("HOIMOD_TITLE", "HOI4ModLoader {0}  ({1} of {2} plugins active)", Loader.Version,
+                plugins.Count(p => Loader.IsLoaded(p.Id) || Loader.IsWaiting(p)), plugins.Count));
         for (var row = 0; row < PluginRows; row++)
         {
             var show = row < plugins.Count;
@@ -197,8 +198,8 @@ internal static unsafe class SettingsMods
         text.Append("\n\n").Append(
             Loader.IsLoaded(plugin.Id) ? Loc.Get("HOIMOD_STATUS_RUNNING", "Running.") :
             !Loader.IsEnabled(plugin.Id) ? Loc.Get("HOIMOD_STATUS_OFF", "Off.") :
-            plugin.AffectsGameState && Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_OFF_MP", "Off in multiplayer: it changes game rules.") :
-            plugin.MultiplayerOnly && !Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_MP_ONLY", "Runs in multiplayer only.") :
+            plugin.AffectsGameState && Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_OFF_MP", "Enabled: it changes game rules, so it rests in multiplayer and starts again in single player.") :
+            plugin.MultiplayerOnly && !Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_MP_ONLY", "Enabled: starts by itself in multiplayer.") :
             Loc.Get("HOIMOD_STATUS_FAILED", "Failed to load: see HOI4ModLoader/LogOutput.log."));
         if (plugin.AffectsGameState && !Loader.Multiplayer) text.Append(' ').Append(Loc.Get("HOIMOD_SP_ONLY", "Single player only: it changes game rules."));
         return text.ToString();

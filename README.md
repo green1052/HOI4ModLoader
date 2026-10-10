@@ -1,94 +1,96 @@
 # HOI4ModLoader
 
-Hearts of Iron IV에 C# 플러그인을 로드하는 모드 로더입니다(BepInEx와 비슷한 방식). 게임 파일은 바꾸지 않고, 게임이 실행될 때 메모리에서만 동작합니다.
+A C# plugin loader for Hearts of Iron IV, in the spirit of BepInEx. It changes no game files: everything happens in memory while the game runs.
 
-함께 들어 있는 플러그인으로 연구·중점·정치력 대기열, 자동 건설, 자동 무역, 원수 공군 배속 같은 편의 기능을 쓸 수 있습니다.
+The bundled plugins add quality-of-life features: research, focus and political power queues, auto construction, auto trade, air wings for field marshals and more.
 
-## 요구 사항
-- Hearts of Iron IV **1.19.3** (Steam, Windows 64비트)
+## Requirements
+- Hearts of Iron IV **1.19.3** (Steam, Windows 64-bit)
 - [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)
 
-## 설치
-1. [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)을 설치합니다.
-2. [Releases](../../releases)에서 최신 zip을 받아 압축을 풉니다.
-3. `version.dll`과 `HOI4ModLoader` 폴더를 게임 폴더(`hoi4.exe`가 있는 곳)에 넣습니다.
-   - Steam 라이브러리에서 HOI4 우클릭 → 관리 → 로컬 파일 보기
-4. `mod` 폴더 안의 파일을 `문서\Paradox Interactive\Hearts of Iron IV\mod`에 넣습니다.
-5. HOI4 런처의 모드 목록에서 `HOI4ModLoader UI`를 켜고, 쓰려는 플러그인의 UI 모드(`Queues UI` 등)도 켭니다.
-6. 게임을 실행하면 메인 메뉴의 게임 버전 표시 아래에 `HOI4ModLoader 1.0.0 (N plugins)`가 보입니다.
+## Installation
+1. Install the [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0).
+2. Download the latest zip from [Releases](../../releases) and extract it.
+3. Put `version.dll` and the `HOI4ModLoader` folder in the game folder (where `hoi4.exe` is).
+   - Steam library → right-click Hearts of Iron IV → Manage → Browse local files
+4. Put the contents of the `mod` folder in `Documents\Paradox Interactive\Hearts of Iron IV\mod`.
+5. In the HOI4 launcher, enable `HOI4ModLoader UI` and the UI mods of the plugins you use (`Queues UI` and so on).
+6. Start the game: the main menu's version label shows `HOI4ModLoader 1.0.0 (N plugins)` under the game version.
 
-### 제거
-게임 폴더에서 `version.dll`과 `HOI4ModLoader` 폴더를 지웁니다.
+The UI mods' interface files are built from your installed game each time it starts, so they keep up with game updates.
 
-## 사용법
-- **설정 → 모드 탭:** 플러그인을 켜고 끄고, 플러그인별 설정을 바꿉니다. 이름에 마우스를 올리면 설명이 나옵니다.
-- **메인 메뉴 버전 표시:** 마우스를 올리면 로드된 플러그인 목록이 보입니다.
-- 설정 파일은 `HOI4ModLoader\config\`에 플러그인별로 생깁니다(처음 실행 시).
+### Uninstall
+Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 
-## 플러그인
-| 플러그인 | 기능 | 멀티플레이 |
+## Usage
+- **Settings → Mods tab:** turn plugins on or off and change their settings. Hover a plugin for its description.
+- **Main menu version label:** hover it for the list of loaded plugins.
+- Each plugin's settings file is created in `HOI4ModLoader\config\` on first start.
+
+## Plugins
+| Plugin | What it does | Multiplayer |
 |---|---|---|
-| Queues | 연구, 중점, 정보부, 정치력 대기열 | ✅ |
-| AutoConstruction | 건물별 자동 건설 목표 | ✅ |
-| AutoTrade | 부족한 자원 자동 수입 | ✅ |
-| AirbaseCapacity | 공항 수용량만큼만 공군 이동 | ✅ |
-| AirWingFieldMarshal | 원수에게 공군 배속 | ✅ (대체 방식) |
-| RailwayGuns | 원수에게 열차포 배정, 이동 개선 | 배정만 (대체 방식) |
-| AttachedCas | 배속 공군이 임무 지역 전체에 CAS | 싱글 전용 |
-| ChecksumPatcher | 모드를 써도 업적·철인 모드 유지 | ✅ |
-| NoTelemetry | 게임 플레이 텔레메트리 차단 | ✅ |
+| Queues | Research, focus, intelligence agency and political power queues | ✅ |
+| AutoConstruction | Auto construction targets per building | ✅ |
+| AutoTrade | Imports resources you are short of | ✅ |
+| AirbaseCapacity | Sends only the air wings an airbase has room for | ✅ |
+| AirWingFieldMarshal | Air wings for field marshals | ✅ (stand-in) |
+| RailwayGuns | Railway guns for field marshals, better positioning | Assignment only (stand-in) |
+| AttachedCas | Attached air wings give CAS in their whole mission area | Single player only |
+| ChecksumPatcher | Keeps achievements and ironman with mods | ✅ |
+| NoTelemetry | Blocks gameplay telemetry | ✅ |
 
 ### Queues
-**Shift+클릭**으로 예약하고, 다시 누르면 뺍니다. 예약한 항목은 이름 앞에 `N. `이 붙습니다.
-- **연구, 국가 중점, 정보부 업그레이드:** 슬롯이 비면 예약한 첫 항목을 시작합니다.
-  - 여러 번 할 수 있는 정보부 업그레이드는 누를 때마다 한 단계씩 더 예약합니다(`1x3`).
-  - 중점을 빼면 그 중점이 있어야 하는 예약 중점도 함께 빠집니다.
-- **국민정신, 법, 디자이너, 고문, 결정:** 정치력이 모이는 대로 하나씩 실행하고, 찬 슬롯은 교체합니다.
-- 정보부 순번 표시에는 `Queues UI` 모드가 필요합니다.
+**Shift+click** to queue, again to unqueue. Queued items show `N. ` in front of their name.
+- **Research, national focus, intelligence agency upgrades:** the first queued item starts as soon as a slot is free.
+  - Repeatable agency upgrades queue one more level per click (`1x3`).
+  - Unqueueing a focus also unqueues the queued focuses that need it.
+- **National spirits, laws, designers, advisors, decisions:** taken one at a time as soon as you have the political power; a full slot is replaced.
+- Agency queue numbers need the `Queues UI` mod.
 
 ### AutoConstruction
-건설 탭의 건물 버튼을 **Shift+클릭**하면 자동 건설 목표가 1 늘고, **Ctrl+Shift+클릭**하면 5 늘고, **Ctrl+클릭**하면 1 줄어듭니다. 버튼에 남은 개수가 `+N`으로 표시됩니다(`Auto Construction UI` 모드).
-- 모자란 만큼을 건설 대기열 끝에 넣습니다. 여러 주(또는 프로빈스)에 1레벨씩 나눠 동시에 짓습니다.
-- 위치 우선순위: 핵심주, 기반시설 레벨, 빈 건물 슬롯 순.
+In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are left as `+N` (`Auto Construction UI` mod).
+- What's missing is added to the end of the construction queue, one level per state (or province) so they are built at the same time.
+- Location priority: core states, then infrastructure level, then free building slots.
 
 ### AutoTrade
-무역 화면에서 자원 아이콘을 **Shift+클릭**하면 그 자원의 자동 무역을 켜고 끕니다(`Auto` 표시). 자원이 모자라면 그만큼 수입합니다.
-- 판매국 우선순위: 내 괴뢰국, 내 세력, 가장 많이 팔 수 있는 나라 순. 같으면 무역 영향력 순.
-- 이미 맺은 수입은 줄이지 않습니다.
+In the trade view, **Shift+click** a resource icon to turn auto trade on or off for it (`Auto` shows). A shortage is imported automatically.
+- Seller priority: your subjects, your faction, then whoever can sell the most; trade influence breaks ties.
+- Existing imports are never reduced.
 
 ### AirbaseCapacity
-공군을 선택한 채 공항을 **Shift+우클릭**하면 남은 수용량만큼만 보냅니다. 들어가지 못하는 공군은 제자리에 남습니다.
+With air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
 
 ### AirWingFieldMarshal
-원수(집단군)에게 공군을 배속합니다. 원수 카드에 배속 슬롯이 생깁니다(`Air Wing Field Marshal UI` 모드).
-- 멀티플레이에서는 공군을 선택한 채 원수 카드를 우클릭하면 그 원수의 야전군들에 나눠 배속합니다.
+Attach air wings to field marshals (army groups). The marshal's card gets attach slots (`Air Wing Field Marshal UI` mod).
+- In multiplayer, right-clicking a marshal's card with air wings selected spreads them over the marshal's armies instead.
 
 ### RailwayGuns
-- **원수 배정:** 열차포를 선택한 채 원수 카드를 우클릭합니다. 싱글에서는 원수에게 직접 배정하고, 멀티에서는 그 원수의 야전군들에 나눠 배정합니다.
-- **이동 개선(싱글 전용):** 전선에 바로 붙은 곳을 피해 그 뒤에 자리 잡고, 바다 건너로 수송하지 않습니다. 모드 탭에서 조정할 수 있습니다.
+- **Field marshal assignment:** right-click a marshal's card with railway guns selected. In single player they are assigned to the marshal; in multiplayer they are spread over the marshal's armies.
+- **Better positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. Adjustable in the Mods tab.
 
 ### AttachedCas
-장군에게 배속한 공군이 소속 사단의 전투뿐 아니라 임무 지역의 모든 전투에 CAS를 지원합니다.
+Air wings attached to a general support every battle in their mission area, not only their own divisions' battles.
 
 ### ChecksumPatcher
-체크섬이 바뀌어도 업적과 철인 모드를 유지합니다. 메모리에서만 패치하므로 게임 파일은 그대로입니다.
+Keeps achievements and ironman available when the checksum changes. Patched in memory only.
 
 ### NoTelemetry
-게임 플레이 텔레메트리를 Paradox로 보내지 않습니다. 로그인, 멀티플레이, 크래시 리포트는 그대로입니다.
+Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports are untouched.
 
-## 멀티플레이
-- 다른 플레이어에게는 바닐라로 보입니다. 체크섬을 바꾸지 않으므로 같은 방에 플러그인이 없는 사람이 있어도 됩니다.
-- 대기열, 자동 건설 같은 플러그인은 플레이어가 클릭으로 보내는 것과 같은 명령만 보내서 그대로 동작합니다.
-- 게임 규칙을 바꾸는 플러그인(AttachedCas, 열차포 이동 개선 등)은 멀티플레이 로비에 들어가면 자동으로 꺼지고, 싱글로 돌아오면 다시 켜집니다.
+## Multiplayer
+- Other players see vanilla. The checksum is unchanged, so players without the loader can join the same game.
+- Plugins like the queues and auto construction send the same commands a player's clicks would, so they work as usual.
+- Plugins that change game rules (AttachedCas, railway gun positioning, ...) switch off in a multiplayer lobby and back on in single player. Their multiplayer stand-ins start by themselves in multiplayer; the Mods tab shows both as active.
 
-## 성능: mimalloc
-게임의 메모리 할당에 Windows 기본 힙 대신 Microsoft의 [mimalloc](https://github.com/microsoft/mimalloc)을 씁니다. 튕김이나 메모리 문제가 의심되면 `HOI4ModLoader\config\HOI4ModLoader.cfg`에서 `[Performance] Mimalloc = False`로 끄세요(다음 실행부터 적용).
+## Performance: mimalloc
+The game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap. If you suspect crashes or memory problems, set `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` (takes effect at the next start).
 
-## 문제 해결
-- **".NET 10 Runtime not found" 창이 뜸:** .NET 10 Runtime (x64)을 설치합니다. 이 창이 떠도 게임은 모드 없이 실행됩니다.
-- **플러그인이 동작하지 않음:** `HOI4ModLoader\LogOutput.log`를 확인합니다. 게임 버전이 1.19.3이 아니면 플러그인이 로드되지 않습니다.
-- **UI가 깨지거나 표시가 안 보임:** 런처에서 해당 UI 모드가 켜져 있는지 확인합니다. GUI를 덮어쓰는 다른 모드와 충돌할 수 있습니다.
-- **특정 플러그인을 끄고 싶음:** 설정 → 모드 탭에서 끄거나, `config\<플러그인 ID>.cfg`에서 `Enabled = False`로 둡니다.
+## Troubleshooting
+- **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.
+- **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins don't load on game versions other than 1.19.3.
+- **UI elements missing or broken:** check that the plugin's UI mod is enabled in the launcher. Other mods that replace the same GUI files can conflict.
+- **Turning a plugin off:** use the Mods tab, or set `Enabled = False` in `config\<plugin id>.cfg`.
 
-## 개발
-빌드와 플러그인 작성 방법은 [docs/development.md](docs/development.md)를 보세요.
+## Development
+See [docs/development.md](docs/development.md) for building and writing plugins.

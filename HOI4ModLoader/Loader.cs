@@ -149,6 +149,13 @@ public static class Loader
     /// <summary>Whether the plugin is loaded now.</summary>
     internal static bool IsLoaded(string id) => Loaded.Any(p => p.Info.Id == id);
 
+    /// <summary>
+    /// Enabled but waiting for the other mode: a multiplayer stand-in in single player, or a rule-changing plugin in
+    /// multiplayer. It starts by itself when the mode changes.
+    /// </summary>
+    internal static bool IsWaiting(PluginAttribute plugin) => !IsLoaded(plugin.Id) && IsEnabled(plugin.Id)
+        && (plugin.MultiplayerOnly && !Multiplayer || plugin.AffectsGameState && Multiplayer);
+
     /// <summary>Whether the game is a multiplayer one (as the plugins were last loaded for).</summary>
     internal static bool Multiplayer { get; private set; }
 
