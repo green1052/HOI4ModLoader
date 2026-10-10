@@ -1,2 +1,8 @@
 ﻿l_english:
  com.green1052.autoconstruction.desc:0 "Shift+click a building in the construction tab to set a target count; missing levels are queued in the best states."
+ com.green1052.autoconstruction.CtrlShiftStep:0 "Ctrl+Shift+click step"
+ com.green1052.autoconstruction.CoresFirst:0 "Core states first"
+ com.green1052.autoconstruction.InfrastructureFirst:0 "Infrastructure first"
+ com.green1052.autoconstruction.AutoSupply:0 "Auto supply"
+ com.green1052.autoconstruction.SaturationPercent:0 "Hub saturation (%)"
+ com.green1052.autoconstruction.HubDistance:0 "New hub distance (provinces)"

@@ -46,7 +46,7 @@ public static class Signatures
 /// sync), in the best state first: core states, then higher infrastructure, then more free building slots.
 /// </summary>
 [Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.3")]
-public unsafe class AutoConstruction : Plugin
+public unsafe partial class AutoConstruction : Plugin
 {
     // Layouts for HOI4 1.19.3.
     private const int StatesOfCountry = 0x460, ProductionOfCountry = 0xF68;
@@ -78,9 +78,17 @@ public unsafe class AutoConstruction : Plugin
     private nint _infrastructure;                                               // its CBuildingType*, once seen on a button
     private PerGame _game = null!;
     private bool _reportedBox;
+    private int _bigStep;
+    private bool _coresFirst, _infrastructureFirst;
 
     public override void Load()
     {
+        _bigStep = Math.Max(1, Config.Bind("Targets", "CtrlShiftStep", 5, "How much Ctrl+Shift+click raises a target (Shift+click: 1)."));
+        _coresFirst = Config.Bind("Location", "CoresFirst", true, "Build in core states first.");
+        _infrastructureFirst = Config.Bind("Location", "InfrastructureFirst", true, "Then in states with more infrastructure (faster construction); after that, more free building slots.");
+        var supply = Config.Bind("Supply", "AutoSupply", true,
+            "Where your divisions are low on supply: upgrade the railway of a saturated hub, connect a cut-off hub, or build a hub where there is none near.");
+
         _find = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
         _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.FreeLevels);
         _canBuildInState = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInState);
@@ -92,6 +100,7 @@ public unsafe class AutoConstruction : Plugin
             _targets.Clear();
             _sent.Clear();
             _failed.Clear();
+            _supplySent.Clear();
         });
 
         _click = Patches.Hook<ClickFn>(Sig.Find(Signatures.BuildingClick), item =>
@@ -105,7 +114,7 @@ public unsafe class AutoConstruction : Plugin
             var count = Count(country, type);
             // Targets count from what the country has (built and queued): +1 means one more than now.
             var from = Math.Max(count, _targets.GetValueOrDefault(type, count));
-            var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? 5 : 1));
+            var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? _bigStep : 1));
             if (target <= count && !Gui.ShiftHeld) _targets.Remove(type); // lowered to what's there: off
             else _targets[type] = target;
             _failed.Remove(type);
@@ -123,6 +132,7 @@ public unsafe class AutoConstruction : Plugin
         });
 
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);
+        if (supply) LoadSupply();
     }
 
     private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));
@@ -220,7 +230,8 @@ public unsafe class AutoConstruction : Plugin
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
         {
             if (_canBuildInState(country, state, type, 1) == 0) continue;
-            var rank = (Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0, _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure),
+            var rank = (_coresFirst && Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0,
+                !_infrastructureFirst || _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure),
                 _freeSharedSlots(state), -*(int*)(state + IdOfState));
             if (!perProvince) places.Add((state + BuildingsOfState, *(int*)(state + IdOfState), _freeLevels(state + BuildingsOfState, type), rank));
             else
@@ -231,17 +242,19 @@ public unsafe class AutoConstruction : Plugin
         var order = places.Where(p => p.Free > 0)
             .OrderBy(p => building.Contains(p.Container)).ThenByDescending(p => p.Rank).ToList();
 
-        var queued = 0;
-        foreach (var place in order.Take(wanted))
-        {
-            var cmd = Commands.New(Signatures.ConstructionCommand, 0x50, tag, Sig.VTable(Signatures.BuildingReference));
-            *(int*)(cmd + Location) = place.Id;
-            *(int*)(cmd + Building) = *(int*)(type + TokenOfType);
-            *(int*)(cmd + Levels) = 1;
-            *(byte*)(cmd + Insertion) = AtEnd;
-            if (Commands.TryPost(cmd)) queued++;
-        }
+        var queued = order.Take(wanted).Count(place => PostConstruction(tag, place.Id, type));
         if (queued > 0) Log.Info($"{Name(type)}: queued 1 level in each of {queued} {(perProvince ? "provinces" : "states")}");
         return queued;
+    }
+
+    /// <summary>Queues one level of <paramref name="type"/> at the end of the construction queue, in a state or province (by id).</summary>
+    private static bool PostConstruction(int tag, int location, nint type)
+    {
+        var cmd = Commands.New(Signatures.ConstructionCommand, 0x50, tag, Sig.VTable(Signatures.BuildingReference));
+        *(int*)(cmd + Location) = location;
+        *(int*)(cmd + Building) = *(int*)(type + TokenOfType);
+        *(int*)(cmd + Levels) = 1;
+        *(byte*)(cmd + Insertion) = AtEnd;
+        return Commands.TryPost(cmd);
     }
 }

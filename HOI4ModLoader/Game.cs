@@ -97,7 +97,7 @@ public static unsafe class Game
     private const int ProvincesOfGameState = 8;                              // province container: vtable slot 0 = by id
     private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8;
 
-    /// <summary>CProvince by id (+164 id, +0xC8 state, +0x188 controller tag, +400 buildings), or 0.</summary>
+    /// <summary>CProvince by id (+164 id, +0xC0 state, +0xC8 strategic region, +0x188 controller tag, +400 buildings), or 0.</summary>
     public static nint Province(int id)
     {
         var gs = State;
