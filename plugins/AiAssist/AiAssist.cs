@@ -758,7 +758,7 @@ public unsafe class AiAssist : Plugin
 
     private const int MinWanted = 0x90, DesiredWanted = 0x94, MaxWanted = 0x98, FixedRequest = 0x9C, CountryOfFront = 0xE0, FrontOfAiFront = 0xE8;
     private const int SectionOfAiFront = 0xF0, AreaDefense = 0x104, InvasionTarget = 0x120, AttackingFront = 0x218 + 0x84, OtherRequest = 0x1DC;
-    private const int SectionsOfFront = 0x58, IdOfSection = 8, PairsOfSection = 0x48;
+    private const int SectionsOfFront = 0x58, IdOfSection = 8, PairsOfSection = 0x48, CombatsInProvince = 0x17C; // province: combats count
     private const double QuietFactor = 0.25, WeakRatio = 0.5, ScreenPerEnemy = 1.5, HotBoost = 1.25;
 
     [Function(CallingConventions.Microsoft)] public delegate nint GeneralRetFn(nint general);
@@ -801,32 +801,40 @@ public unsafe class AiAssist : Plugin
                 if (*(int*)(s + IdOfSection) == *(int*)(front + SectionOfAiFront)) { section = s; break; }
             if (section == 0) continue;
 
-            // The enemy side of the section: how many of its provinces are held by a country at war with us, with how many divisions.
-            var enemyProvinces = new HashSet<nint>();
-            var hostile = false;
+            // Both sides of the section: enemy provinces (held by a country at war with us) and their divisions; our provinces
+            // facing enemy divisions (each needs a defender), and whether any of ours is fighting.
+            var enemyHeld = new Dictionary<nint, bool>();
+            var threatened = new HashSet<nint>();
+            var fighting = false;
             var enemy = 0;
             var pairs = *(nint*)(section + PairsOfSection);
             for (int i = 0, n = *(int*)(section + PairsOfSection + 0xC); i < n; i++)
             {
-                var theirs = *(nint*)(pairs + 16 * i + 8);
-                if (theirs == 0 || !enemyProvinces.Add(theirs)) continue;
-                var controller = *(int*)(theirs + ControllerOfProvince);
-                if (controller == 0 || controller == tag) continue;
-                (other[0], other[1]) = (controller, Game.TagIndex(controller));
-                if (_atWar(country, other) == 0) continue;
-                hostile = true;
-                enemy += *(int*)(theirs + DivisionsInProvince);
+                nint ours = *(nint*)(pairs + 16 * i), theirs = *(nint*)(pairs + 16 * i + 8);
+                if (ours != 0 && *(int*)(ours + CombatsInProvince) > 0) fighting = true;
+                if (theirs == 0) continue;
+                if (!enemyHeld.TryGetValue(theirs, out var held))
+                {
+                    var controller = *(int*)(theirs + ControllerOfProvince);
+                    (other[0], other[1]) = (controller, controller > 0 ? Game.TagIndex(controller) : 0);
+                    held = enemyHeld[theirs] = controller > 0 && controller != tag && _atWar(country, other) != 0;
+                    if (held) enemy += *(int*)(theirs + DivisionsInProvince);
+                }
+                if (held && ours != 0 && *(int*)(theirs + DivisionsInProvince) > 0) threatened.Add(ours);
             }
+            var hostile = enemyHeld.ContainsValue(true);
+            var enemyProvinces = enemyHeld.Count(e => e.Value);
             int min = *(int*)(front + MinWanted), desired = *(int*)(front + DesiredWanted), max = *(int*)(front + MaxWanted);
             var factor = !hostile ? QuietFactor
                 : *(byte*)(front + AttackingFront) != 0 ? 1                                                 // its offensive: as it is
-                : enemy < enemyProvinces.Count * WeakRatio ? Math.Clamp(enemy * ScreenPerEnemy / Math.Max(1, min), QuietFactor, 1)
+                : enemy < enemyProvinces * WeakRatio ? Math.Clamp(enemy * ScreenPerEnemy / Math.Max(1, min), QuietFactor, 1)
                 : enemy > min ? HotBoost : 1;
+            if (fighting) factor = Math.Max(factor, 1); // a front in battle never gives divisions away
             if (factor == 1) continue;
             min = (int)Math.Ceiling(min * factor);
             desired = (int)Math.Ceiling(desired * factor);
             if (factor < 1) max = (int)Math.Ceiling(max * factor); // the rest goes to the fronts that need it
-            if (enemyProvinces.Count > 0) min = Math.Max(min, 1);    // a screen stays
+            min = Math.Max(min, Math.Max(threatened.Count, enemyProvinces > 0 ? 1 : 0)); // a defender for every province facing enemy divisions
             desired = Math.Max(desired, min);
             max = Math.Max(max, desired);
             (*(int*)(front + MinWanted), *(int*)(front + DesiredWanted), *(int*)(front + MaxWanted)) = (min, desired, max);
