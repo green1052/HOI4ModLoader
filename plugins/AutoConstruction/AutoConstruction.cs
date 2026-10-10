@@ -71,6 +71,7 @@ public unsafe class AutoConstruction : Plugin
 
     private readonly Dictionary<nint, int> _targets = new();                    // CBuildingType* -> wanted count
     private readonly Dictionary<nint, (int Count, long Until)> _sent = new();   // by type: count when a command was sent
+    private readonly HashSet<nint> _failed = new();                             // types whose last try found nowhere to build (logged once)
     private nint _infrastructure;                                               // its CBuildingType*, once seen on a button
     private (nint GameState, int Tag) _session;
     private bool _reportedBox;
@@ -88,10 +89,15 @@ public unsafe class AutoConstruction : Plugin
         {
             var type = *(nint*)(item + TypeOfItem);
             if (type == 0 || !Gui.ShiftHeld && !Gui.CtrlHeld) return _click!.OriginalFunction(item);
-            var target = Math.Max(0, _targets.GetValueOrDefault(type) + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? 5 : 1));
-            if (target == 0) _targets.Remove(type);
+            var country = Game.Country(Game.PlayerTag);
+            var count = country == 0 ? 0 : Count(country, type);
+            // The first click starts from what the country has (built and queued): +1 means one more than now.
+            var from = _targets.TryGetValue(type, out var current) ? current : count;
+            var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? 5 : 1));
+            if (target <= count && !Gui.ShiftHeld) _targets.Remove(type); // lowered to what's there: off
             else _targets[type] = target;
-            Log.Info($"{Name(type)}: target {target}");
+            _failed.Remove(type);
+            Log.Info($"{Name(type)}: target {target}, now {count} (built and queued)");
             ShowTarget(item);
             return 0;
         });
@@ -133,6 +139,7 @@ public unsafe class AutoConstruction : Plugin
             _session = (Game.State, tag);
             _targets.Clear();
             _sent.Clear();
+            _failed.Clear();
         }
         var now = Environment.TickCount64;
         foreach (var (type, target) in _targets)
@@ -140,7 +147,13 @@ public unsafe class AutoConstruction : Plugin
             var count = Count(country, type);
             if (_sent.TryGetValue(type, out var sent) && sent.Count == count && now < sent.Until) continue; // not in the queue yet
             _sent.Remove(type);
-            if (count < target && Queue(country, tag, type, target - count)) _sent[type] = (count, now + PendingMs);
+            if (count >= target) continue;
+            if (Queue(country, tag, type, target - count))
+            {
+                _sent[type] = (count, now + PendingMs);
+                _failed.Remove(type);
+            }
+            else if (_failed.Add(type)) Log.Info($"{Name(type)}: {count} of {target}, but no state can take more (or the game refused the command)");
         }
     }
 
@@ -206,7 +219,11 @@ public unsafe class AutoConstruction : Plugin
         *(int*)(cmd + Building) = *(int*)(type + TokenOfType);
         *(int*)(cmd + Levels) = levels;
         *(byte*)(cmd + Insertion) = AtEnd;
-        if (!Commands.TryPost(cmd)) return false;
+        if (!Commands.TryPost(cmd))
+        {
+            Log.Info($"{Name(type)}: the game refused {levels} in {(perProvince ? "province" : "state")} {best.Id}");
+            return false;
+        }
         Log.Info($"{Name(type)}: queued {levels} in {(perProvince ? "province" : "state")} {best.Id}");
         return true;
     }
