@@ -93,6 +93,29 @@ public static unsafe class Game
 
     /// <summary>Every CCountry, empty before a game is loaded.</summary>
     public static ReadOnlySpan<nint> Countries => State == 0 ? default : Native.PdxArray(State + _countries);
+
+    private const int ProvincesOfGameState = 8;                              // province container: vtable slot 0 = by id
+    private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8;
+
+    /// <summary>CProvince by id (+164 id, +0xC8 state, +0x188 controller tag, +400 buildings), or 0.</summary>
+    public static nint Province(int id)
+    {
+        var gs = State;
+        if (gs == 0) return 0;
+        var provinces = gs + ProvincesOfGameState;
+        return ((delegate* unmanaged<nint, int, nint>)(**(nint**)provinces))(provinces, id);
+    }
+
+    /// <summary>Ids of the provinces next to <paramref name="province"/> (land and sea).</summary>
+    public static List<int> Neighbours(nint province)
+    {
+        var adjacency = *(nint*)(province + AdjacencyOfProvince);
+        if (adjacency == 0) return [];
+        var data = *(nint*)(adjacency + Adjacencies);
+        var ids = new List<int>();
+        for (int i = 0, n = *(int*)(adjacency + Adjacencies + 0xC); i < n; i++) ids.Add(*(int*)(data + i * AdjacencySize + NeighbourId));
+        return ids;
+    }
 }
 
 /// <summary>Readers for engine containers.</summary>

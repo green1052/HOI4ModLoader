@@ -19,12 +19,10 @@ public sealed class PluginAttribute(string id, string name, string version) : At
     /// <summary>
     /// The plugin changes game rules (simulation results), not just what one player sees or clicks. Multiplayer runs every
     /// player's simulation in lockstep, so it would desync anyone without the plugin: it is off in multiplayer and works in
-    /// single player only. Everything else (UI, sending the player's own commands) works in multiplayer too.
+    /// single player only. Everything else (UI, sending the player's own commands) works in multiplayer too. A plugin that
+    /// has a multiplayer-safe way of doing its job leaves this off and picks its behaviour by <see cref="Plugin.Multiplayer"/>.
     /// </summary>
     public bool AffectsGameState { get; init; }
-
-    /// <summary>Load only in multiplayer, e.g. a stand-in for an <see cref="AffectsGameState"/> plugin that only sends vanilla commands.</summary>
-    public bool MultiplayerOnly { get; init; }
 }
 
 /// <summary>Load this plugin after <paramref name="id"/>; skip it if that plugin is missing or failed.</summary>
@@ -43,6 +41,12 @@ public abstract class Plugin
     public ConfigFile Config { get; internal set; } = null!;
 
     public Logger Log { get; internal set; } = null!;
+
+    /// <summary>
+    /// Whether this load is for a multiplayer game. Every plugin reloads when that changes, so <see cref="Load"/> can pick
+    /// between changing game rules (single player) and sending only vanilla commands (multiplayer).
+    /// </summary>
+    public static bool Multiplayer => Loader.Multiplayer;
 
     /// <summary>Find everything first, then patch through <see cref="Patches"/>. Throwing reverts every patch this plugin made.</summary>
     public abstract void Load();

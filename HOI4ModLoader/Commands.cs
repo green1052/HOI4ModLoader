@@ -42,11 +42,17 @@ public static unsafe class Commands
     public static bool CanExecute(nint cmd) => ((delegate* unmanaged<nint, nint, byte>)(*(nint**)cmd)[CanExecuteSlot])(cmd, 0) != 0;
 
     /// <summary>Hands the command to the session, which owns and eventually frees it.</summary>
-    public static void Post(nint cmd)
+    public static void Post(nint cmd) => Post(cmd, false);
+
+    /// <summary>
+    /// <see cref="Post(nint)"/>; <paramref name="force"/> as the game's own AI posts (PostAICommand): the session takes it even
+    /// where it would drop a player's command. Use it for commands made on an AI country's behalf (single player).
+    /// </summary>
+    public static void Post(nint cmd, bool force)
     {
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_post == null) _post = (delegate* unmanaged<nint, nint, byte, byte>)Sig.Find(PostSig);
-        _post(Session, cmd, 0);
+        _post(Session, cmd, force ? (byte)1 : (byte)0);
     }
 
     /// <summary>The game's CSession (clausewitz session.cpp), or 0 before the game application exists.</summary>
@@ -68,14 +74,17 @@ public static unsafe class Commands
     public static void Free(nint cmd) => Allocator.Free(cmd);
 
     /// <summary>Posts the command if the game would accept it; otherwise frees it.</summary>
-    public static bool TryPost(nint cmd)
+    public static bool TryPost(nint cmd) => TryPost(cmd, false);
+
+    /// <summary><see cref="TryPost(nint)"/>, posting with <paramref name="force"/> (see <see cref="Post(nint, bool)"/>).</summary>
+    public static bool TryPost(nint cmd, bool force)
     {
         if (!CanExecute(cmd))
         {
             Free(cmd);
             return false;
         }
-        Post(cmd);
+        Post(cmd, force);
         return true;
     }
 }

@@ -94,7 +94,10 @@ public static unsafe partial class Patches
         RequireOwner();
         Claim(at, length);
         var hook = Hooks.CreateAsmHook(asm, at, AsmHookBehaviour.DoNotExecuteOriginal, length);
-        Restorable(at, () => hook.Activate(), hook.Disable, hook);
+        var written = Restorable(at, () => hook.Activate(), hook.Disable, hook);
+        // The jump may need more bytes than given; then it cuts into the next instruction, which runs broken when the hook
+        // returns there. Fail the load (reverting it) instead: give a length covering whole instructions past the jump.
+        if (written > length) throw new InvalidOperationException($"asm hook at 0x{at:X} needs {written} bytes, {length} given");
         return hook;
     }
 
@@ -115,7 +118,7 @@ public static unsafe partial class Patches
     /// original), then put back the bytes it overwrote, so the code reads as never hooked and signatures match again
     /// (hot reload loads the plugin anew). Unless something hooked over it since: then it stays in the chain, disabled.
     /// </summary>
-    private static void Restorable(nint at, Action activate, Action disable, object hook)
+    private static int Restorable(nint at, Action activate, Action disable, object hook)
     {
         const int window = 64; // a hook's jump plus the instructions it cut through
         var before = new ReadOnlySpan<byte>((void*)at, window).ToArray();
@@ -129,6 +132,7 @@ public static unsafe partial class Patches
             disable();
             if (new ReadOnlySpan<byte>((void*)at, changed).SequenceEqual(after.AsSpan(0, changed))) WriteCode(at, before[..changed]);
         }, hook); // also keeps the hook's delegates alive: a thread may still be inside it
+        return changed;
     }
 
     private static void RememberOriginal(nint at, byte[] bytes)

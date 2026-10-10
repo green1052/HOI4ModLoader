@@ -39,7 +39,9 @@ public sealed class ConfigFile
         }
         else
         {
-            _lines.InsertRange(sectionAt + 1, entry);
+            var end = sectionAt + 1; // after the section's last entry: the file lists settings in the order they're bound
+            while (end < _lines.Count && !_lines[end].TrimStart().StartsWith('[')) end++;
+            _lines.InsertRange(end, entry);
         }
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         File.WriteAllLines(_path, _lines);

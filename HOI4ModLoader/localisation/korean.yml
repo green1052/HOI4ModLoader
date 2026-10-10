@@ -5,6 +5,5 @@
  HOIMOD_STATUS_RUNNING:0 "실행 중입니다."
  HOIMOD_STATUS_OFF:0 "꺼져 있습니다."
  HOIMOD_STATUS_OFF_MP:0 "활성화됨: 게임 규칙을 바꾸므로 멀티플레이에서는 쉬고, 싱글 플레이에서 다시 실행됩니다."
- HOIMOD_STATUS_MP_ONLY:0 "활성화됨: 멀티플레이에서 자동으로 실행됩니다."
  HOIMOD_STATUS_FAILED:0 "로드하지 못했습니다. HOI4ModLoader/LogOutput.log를 확인하세요."
  HOIMOD_SP_ONLY:0 "게임 규칙을 바꾸므로 싱글 플레이 전용입니다."

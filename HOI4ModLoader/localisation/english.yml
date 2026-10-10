@@ -5,6 +5,5 @@
  HOIMOD_STATUS_RUNNING:0 "Running."
  HOIMOD_STATUS_OFF:0 "Off."
  HOIMOD_STATUS_OFF_MP:0 "Enabled: it changes game rules, so it rests in multiplayer and starts again in single player."
- HOIMOD_STATUS_MP_ONLY:0 "Enabled: starts by itself in multiplayer."
  HOIMOD_STATUS_FAILED:0 "Failed to load: see HOI4ModLoader/LogOutput.log."
  HOIMOD_SP_ONLY:0 "Single player only: it changes game rules."

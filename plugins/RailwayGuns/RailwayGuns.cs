@@ -33,23 +33,64 @@ public static class Signatures
 }
 
 /// <summary>
-/// Right-click with railway guns selected, shared by both marshal plugins: lets a field marshal's card take it like an
-/// army card's, and assigns through the vanilla command. Guns assigned elsewhere are unassigned first, as the army's own
-/// railway gun box does; guns already on the target are left out (one of them would make the game reject the whole batch).
+/// Railway guns can be assigned to a field marshal: right-click his card with railway guns selected (or use his card's
+/// railway gun box, which AirWingFieldMarshal's card patch shows). His guns take positions along all of his armies'
+/// divisions. Army groups owning guns changes the game, so in multiplayer the right-click spreads them over his armies
+/// instead, with the vanilla assign command, and other players need nothing. Either way guns assigned elsewhere are
+/// unassigned first, as the army's own railway gun box does; guns already on the target are left out (one of them would
+/// make the game reject the whole batch).
+///
+/// Movement (single player, it changes the game's distribution): guns keep off the front line and stay on their own rail
+/// network. Candidate provinces next to the enemy (enemy-controlled or with hostile units) get a large penalty, so guns sit
+/// just behind the line instead of being overrun, and guns never ship out by sea (where submarines sink them).
 /// </summary>
-public abstract unsafe class RailwayGunAssign : Plugin
+[Plugin("com.green1052.railwayguns", "Railway Guns", "1.0.0", GameVersion = "1.19.3")]
+public unsafe class RailwayGuns : Plugin
 {
     private const int ViewOfCard = 0x10;
     private const int AssignedTo = 0x440, GunsOfGroup = 0x18; // CRailwayGun -> its orders group's railway gun container (group + 0x18), or 0
+    private const int RecordSize = 48, HostileUnits = 12, ControllerAtWar = 25; // province records of the distribution
 
     [Function(CallingConventions.Microsoft)] public delegate void CardFn(nint card);
     [Function(CallingConventions.Microsoft)] public delegate byte PostFn(nint view, nint guns, nint group);
+    [Function(CallingConventions.Microsoft)] public delegate void DistributeFn(nint controller, int a2, int a3);
+    [Function(CallingConventions.Microsoft)] public delegate nint ScoreFn(nint ctx, nint score, int province);
 
     private IHook<CardFn>? _cardRightClick;
     private IHook<PostFn>? _postAssign;
+    private IHook<DistributeFn>? _distribute;
+    private IHook<ScoreFn>? _score;
     private delegate* unmanaged<nint, nint, nint, byte> _postUnassign;
+    private long _frontPenalty;
 
     public override void Load()
+    {
+        var fieldMarshal = Config.Bind("FieldMarshal", "FieldMarshal", true,
+            "Railway guns can be assigned to field marshals: right-click his card with railway guns selected. Single player: changes the game.");
+        var spread = Config.Bind("Multiplayer", "SpreadOverArmies", true,
+            "In multiplayer, where a field marshal can't hold railway guns: right-clicking his card with railway guns selected assigns them to his armies, spread over them.");
+        _frontPenalty = Math.Max(0, Config.Bind("Movement", "FrontPenalty", 500,
+            "Score taken off provinces on the front line (next to enemy-controlled provinces or hostile units); 0: off. Vanilla bonuses for being near the fighting are about 100-200. Single player.")) * Native.FixedPoint;
+        var noSea = Config.Bind("Movement", "NoSeaTransfer", true, "Never ship railway guns by sea; they only move along their own rail network. Single player.");
+
+        if (fieldMarshal && (!Multiplayer || spread)) LoadFieldMarshal();
+        if (Multiplayer) return; // the rest changes the game
+
+        if (noSea)
+        {
+            var setle = Sig.Find(Signatures.ConvoysOk) + 6;
+            Patches.Bytes(setle, "0F 9E 44 24 3C", "C6 44 24 3C 00"); // setle [rsp+3Ch] -> mov byte [rsp+3Ch],0: never enough convoys
+        }
+        if (_frontPenalty > 0)
+            _score = Patches.Hook<ScoreFn>(Sig.Find(Signatures.ScoreProvince), (ctx, score, province) =>
+            {
+                var result = _score!.OriginalFunction(ctx, score, province);
+                if (IsFront(*(nint*)ctx, province)) *(long*)score -= _frontPenalty;
+                return result;
+            });
+    }
+
+    private void LoadFieldMarshal()
     {
         var at = Sig.Find(Signatures.CardAssign);
         var gunSelected = (delegate* unmanaged<nint, byte>)(at + 9 + *(int*)(at + 5));
@@ -63,15 +104,22 @@ public abstract unsafe class RailwayGunAssign : Plugin
         // Only a marshal's assign is ours; an army's goes through as the game made it.
         _postAssign = Patches.Hook<PostFn>(postAssign, (view, guns, group) =>
             group != 0 && new OrdersGroup(group).IsArmyGroup ? Assign(view, guns, group) : _postAssign!.OriginalFunction(view, guns, group));
-    }
+        if (Multiplayer) return;
 
-    /// <summary>Where guns assigned to <paramref name="group"/> go: each target gets a share, in selection order.</summary>
-    protected abstract nint[] Targets(OrdersGroup group);
+        // An army group has no divisions of its own, so its guns would find no positions: let it see its armies' ones.
+        _distribute = Patches.Hook<DistributeFn>(Sig.Find(Signatures.Distribute), (controller, a2, a3) =>
+        {
+            var group = new OrdersGroup(*(nint*)controller);
+            if (group.Ptr != 0 && group.IsArmyGroup) group.WithArmiesMembers(() => _distribute!.OriginalFunction(controller, a2, a3));
+            else _distribute!.OriginalFunction(controller, a2, a3);
+        });
+    }
 
     private byte Assign(nint view, nint guns, nint group)
     {
         var all = Native.PdxArray(guns).ToArray();
-        var targets = Targets(new OrdersGroup(group));
+        // Each target gets a share, in selection order.
+        nint[] targets = Multiplayer ? [.. new OrdersGroup(group).Armies] : [group];
         var shares = ArmyCard.Spread(all, targets.Length);
         byte posted = 0;
         for (var t = 0; t < shares.Length; t++)
@@ -97,91 +145,12 @@ public abstract unsafe class RailwayGunAssign : Plugin
         return container == 0 ? 0 : container - GunsOfGroup;
     }
 
-}
-
-/// <summary>
-/// Railway guns can be assigned to a field marshal (right-click his card, or his card's railway gun box, which
-/// AirWingFieldMarshal's card patch shows). His guns take positions along all of his armies' divisions. Changes the
-/// game (army groups own guns), so single player only; in multiplayer <see cref="RailwayGunFieldMarshalMultiplayer"/> runs.
-/// </summary>
-[Plugin("com.green1052.railwayguns", "Railway Gun Field Marshal", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
-public unsafe class RailwayGunFieldMarshal : RailwayGunAssign
-{
-    [Function(CallingConventions.Microsoft)] public delegate void DistributeFn(nint controller, int a2, int a3);
-
-    private IHook<DistributeFn>? _distribute;
-
-    public override void Load()
-    {
-        base.Load();
-        // An army group has no divisions of its own, so its guns would find no positions: let it see its armies' ones.
-        _distribute = Patches.Hook<DistributeFn>(Sig.Find(Signatures.Distribute), (controller, a2, a3) =>
-        {
-            var group = new OrdersGroup(*(nint*)controller);
-            if (group.Ptr != 0 && group.IsArmyGroup) group.WithArmiesMembers(() => _distribute!.OriginalFunction(controller, a2, a3));
-            else _distribute!.OriginalFunction(controller, a2, a3);
-        });
-    }
-
-    protected override nint[] Targets(OrdersGroup group) => [group.Ptr];
-}
-
-/// <summary>
-/// Multiplayer stand-in for <see cref="RailwayGunFieldMarshal"/>: right-clicking a field marshal's card with railway guns
-/// selected spreads them over his armies with the vanilla assign command, so other players need nothing.
-/// </summary>
-[Plugin("com.green1052.railwayguns.multiplayer", "Railway Gun Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true)]
-public class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
-{
-    protected override nint[] Targets(OrdersGroup group) => [.. group.Armies];
-}
-
-/// <summary>
-/// Railway guns keep off the front line and stay on their own rail network: candidate provinces next to the enemy
-/// (enemy-controlled or with hostile units) get a large penalty, so guns sit just behind the line instead of being overrun,
-/// and guns never ship out by sea (where submarines sink them). Changes the game's distribution, so single player only.
-/// </summary>
-[Plugin("com.green1052.railwaygunmovement", "Railway Gun Movement", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
-public unsafe class RailwayGunMovement : Plugin
-{
-    private const int RecordSize = 48, HostileUnits = 12, ControllerAtWar = 25; // province records of the distribution
-    private const int ProvincesOfGameState = 8;                                 // gamestate: province container (vtable slot 0 = by id)
-    private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8;
-
-    [Function(CallingConventions.Microsoft)] public delegate nint ScoreFn(nint ctx, nint score, int province);
-
-    private IHook<ScoreFn>? _score;
-    private long _frontPenalty;
-
-    public override void Load()
-    {
-        _frontPenalty = Config.Bind("Movement", "FrontPenalty", 500,
-            "Score taken off provinces on the front line (next to enemy-controlled provinces or hostile units). Vanilla bonuses for being near the fighting are about 100-200.") * Native.FixedPoint;
-        if (Config.Bind("Movement", "NoSeaTransfer", true, "Never ship railway guns by sea; they only move along their own rail network."))
-        {
-            var setle = Sig.Find(Signatures.ConvoysOk) + 6;
-            Patches.Bytes(setle, "0F 9E 44 24 3C", "C6 44 24 3C 00"); // setle [rsp+3Ch] -> mov byte [rsp+3Ch],0: never enough convoys
-        }
-        _score = Patches.Hook<ScoreFn>(Sig.Find(Signatures.ScoreProvince), (ctx, score, province) =>
-        {
-            var result = _score!.OriginalFunction(ctx, score, province);
-            if (IsFront(*(nint*)ctx, province)) *(long*)score -= _frontPenalty;
-            return result;
-        });
-    }
-
     /// <summary>The province or a neighbor has hostile units or an enemy controller, per the distribution's own records.</summary>
     private static bool IsFront(nint records, int province)
     {
         if (Enemy(records, province)) return true;
-        var provinces = Game.State + ProvincesOfGameState;
-        var p = ((delegate* unmanaged<nint, int, nint>)(**(nint**)provinces))(provinces, province);
-        var adjacency = p == 0 ? 0 : *(nint*)(p + AdjacencyOfProvince);
-        if (adjacency == 0) return false;
-        var data = *(nint*)(adjacency + Adjacencies);
-        for (int i = 0, n = *(int*)(adjacency + Adjacencies + 0xC); i < n; i++)
-            if (Enemy(records, *(int*)(data + i * AdjacencySize + NeighbourId))) return true;
-        return false;
+        var p = Game.Province(province);
+        return p != 0 && Game.Neighbours(p).Any(n => Enemy(records, n));
     }
 
     // ponytail: linear scan of the records per lookup; a dictionary per distribution run if it ever shows in a profile.

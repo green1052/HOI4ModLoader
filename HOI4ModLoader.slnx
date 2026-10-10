@@ -2,7 +2,6 @@
     <Folder Name="/plugins/">
         <Project Path="plugins/AirbaseCapacity/AirbaseCapacity.csproj" />
         <Project Path="plugins/AirWingFieldMarshal/AirWingFieldMarshal.csproj" />
-        <Project Path="plugins/AttachedCas/AttachedCas.csproj" />
         <Project Path="plugins/AutoConstruction/AutoConstruction.csproj" />
         <Project Path="plugins/AutoTrade/AutoTrade.csproj" />
         <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />

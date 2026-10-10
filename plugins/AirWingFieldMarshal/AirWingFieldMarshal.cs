@@ -31,27 +31,68 @@ public static class Signatures
     /// CAttachAirWingToArmyCommand for them. The army card's right-click and the army list both end here.
     /// </summary>
     [Signature] public const string PostAttachWings = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 8B FA 48 8B F1 48 8B 0D ? ? ? ? 48 8B 01 FF 90 ? ? ? ? 48 8B D8 B9 48 00 00 00";
+
+    /// <summary>
+    /// CAS target selection (collects CAirMission::STacticalTarget combats in the mission regions), per combat:
+    /// `mov rbp,[rsi+28h]; mov rcx,rbp; call CAirWing::GetAttachedOrdersGroup; test rax,rax; jz take; ...`. Unattached wings
+    /// take the combat; attached ones fall through to the two CAS loops above, which keep it only if a division on either
+    /// side is in their army.
+    /// </summary>
+    [Signature] public const string AttachedCheck = "48 8B 6E 28 48 8B CD E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 8B CD E8";
 }
 
 /// <summary>
-/// Lets air wings be attached to army groups (field marshals), not only armies (generals).
-/// Ships the "AirWingFieldMarshal" HOI4 mod (attach slots on the marshal card), generated into Documents on build.
+/// Attached air wings, two settings that change the game (single player):
+/// - FieldMarshal: air wings can be attached to army groups (field marshals), not only armies (generals); the GuiPatch
+///   above gives the marshal card attach slots. In multiplayer (SpreadOverArmies) right-clicking a field marshal's card
+///   with air wings selected attaches them to his armies instead, spread over them, with the vanilla attach command: the
+///   game then runs their missions and bases like any army's wings, and other players need nothing.
+/// - WholeMissionArea: attached wings give close air support to every combat in their mission regions, like unattached
+///   wings, instead of only to combats their own army's divisions fight in.
 /// </summary>
-[Plugin("com.green1052.airwingfieldmarshal", "Air Wing Field Marshal", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
+[Plugin("com.green1052.airwingfieldmarshal", "Attached Air Wings", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class AirWingFieldMarshal : Plugin
 {
     [Function(CallingConventions.Microsoft)] public delegate void GroupFn(nint group);
     [Function(CallingConventions.Microsoft)] public delegate void CardFn(nint card);
     [Function(CallingConventions.Microsoft)] public delegate void CardGroupFn(nint card, nint group);
+    [Function(CallingConventions.Microsoft)] public delegate byte PostAttachFn(nint wings, nint group);
     [Function(CallingConventions.Microsoft)] public delegate byte ByteFn(); // native bool comes back in al only
 
     private IHook<GroupFn>? _updateAttachedWings;
     private IHook<CardFn>? _createWingSlots, _cardRightClick;
     private IHook<CardGroupFn>? _refreshWingSlots;
+    private IHook<PostAttachFn>? _postAttach;
     private ByteFn? _airWingsSelected;
     private int _cardWingGrid;
 
     public override void Load()
+    {
+        var fieldMarshal = Config.Bind("FieldMarshal", "FieldMarshal", true,
+            "Air wings can be attached to field marshals (army groups), not only to generals. Single player: changes the game.");
+        var spread = Config.Bind("Multiplayer", "SpreadOverArmies", true,
+            "In multiplayer, where a field marshal can't hold air wings: right-clicking his card with air wings selected attaches them to his armies, spread over them.");
+        var wholeArea = Config.Bind("Support", "WholeMissionArea", true,
+            "Air wings attached to a general give close air support to every battle in their mission regions, not only their own divisions' battles. Single player: changes the game.");
+        if (Multiplayer)
+        {
+            if (fieldMarshal && spread) LoadMultiplayer();
+            else Log.Info("multiplayer: nothing to do (spreading over armies is off)");
+            return;
+        }
+        if (wholeArea)
+        {
+            // `jz take` (0F 84 rel32) becomes `jmp take; nop` (E9 rel32+1, 90): every wing takes the combat.
+            var jz = Sig.Find(Signatures.AttachedCheck) + 15;
+            var rel = *(int*)(jz + 2);
+            Patches.Bytes(jz, "0F 84" + Hex(rel), "E9" + Hex(rel + 1) + "90");
+        }
+        if (fieldMarshal) LoadFieldMarshal();
+    }
+
+    private static string Hex(int value) => Convert.ToHexString(BitConverter.GetBytes(value));
+
+    private void LoadFieldMarshal()
     {
         // Resolve everything first: a missing pattern throws before anything is patched.
         var attachStatus = Sig.Find(Signatures.AttachStatus);
@@ -107,33 +148,16 @@ public unsafe class AirWingFieldMarshal : Plugin
         if (g is { IsArmyGroup: true, AttachedWingCount: > 0 }) g.WithArmiesMembers(() => _updateAttachedWings!.OriginalFunction(ptr));
         else _updateAttachedWings!.OriginalFunction(ptr);
     }
-}
 
-/// <summary>
-/// Multiplayer stand-in for <see cref="AirWingFieldMarshal"/>, which changes game rules and so is off in multiplayer.
-/// Right-clicking a field marshal's card with air wings selected attaches them to his armies instead, spread over them,
-/// with the vanilla attach command; the game then runs their missions and bases like any army's wings. Other players
-/// need nothing.
-/// </summary>
-[Plugin("com.green1052.airwingfieldmarshal.multiplayer", "Air Wing Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true)]
-public class AirWingFieldMarshalMultiplayer : Plugin
-{
-    [Function(CallingConventions.Microsoft)] public delegate void CardFn(nint card);
-    [Function(CallingConventions.Microsoft)] public delegate byte PostAttachFn(nint wings, nint group);
-    [Function(CallingConventions.Microsoft)] public delegate byte ByteFn();
-
-    private IHook<CardFn>? _cardRightClick;
-    private IHook<PostAttachFn>? _postAttach;
-
-    public override void Load()
+    private void LoadMultiplayer()
     {
         var rightClick = Sig.Find(ArmyCard.RightClickSig);
         var postAttach = Sig.Find(Signatures.PostAttachWings);
-        var wingsSelected = Patches.Function<ByteFn>(Sig.Find(Signatures.AirWingsSelected));
+        _airWingsSelected = Patches.Function<ByteFn>(Sig.Find(Signatures.AirWingsSelected));
 
         // A marshal's card ignores a right-click with wings selected; as an army card's it gets to the attach below...
         _cardRightClick = Patches.Hook<CardFn>(rightClick, card =>
-            ArmyCard.AsArmyCard(card, wingsSelected() != 0, () => _cardRightClick!.OriginalFunction(card)));
+            ArmyCard.AsArmyCard(card, _airWingsSelected!() != 0, () => _cardRightClick!.OriginalFunction(card)));
         // ...which an army group can't take: attach to its armies instead.
         _postAttach = Patches.Hook<PostAttachFn>(postAttach, (wings, group) =>
             group != 0 && new OrdersGroup(group).IsArmyGroup ? SpreadOverArmies(wings, group) : _postAttach!.OriginalFunction(wings, group));

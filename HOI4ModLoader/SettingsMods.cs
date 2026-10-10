@@ -12,7 +12,8 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// A "Mods" tab in the game's settings window: a checkbox per plugin to switch it on or off (hover for what it does), and
-/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers). Changes are written to the
+/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers; pages of 8, with arrows by
+/// the title when there are more). Changes are written to the
 /// plugin's config and every plugin reloads. The tab comes from the GuiPatch above (built from the
 /// installed game's interface\settings.gui at startup); without it nothing changes.
 /// </summary>
@@ -58,13 +59,14 @@ internal static unsafe class SettingsMods
     private static bool _reportedMissing;
 
     /// <summary>The widgets of the last built Mods page (the settings screen is built once per menu).</summary>
-    private static nint _screen, _page, _list, _settings, _tab, _title, _listTitle;
+    private static nint _screen, _page, _list, _settings, _tab, _title, _listTitle, _prev, _next, _pageText;
     private static readonly nint[] PluginBoxes = new nint[PluginRows], PluginTitles = new nint[PluginRows], PluginArrows = new nint[PluginRows];
     private static readonly nint[] Rows = new nint[SettingRows];
 
     /// <summary>The plugin whose settings are shown, and those settings (section, key, value, description).</summary>
     private static string? _plugin;
     private static List<(string Section, string Key, string Value, string Description)> _entries = [];
+    private static int _first; // the entry in the first row (pages of SettingRows)
 
     internal static void Install()
     {
@@ -130,9 +132,14 @@ internal static unsafe class SettingsMods
             BindCheckBox(Gui.Find(container, CheckBoxSlot, "hoimod_setting_check"), &OnSettingToggle, row);
             var setting = row;
             Gui.SetTooltip(Gui.FindTextBox(container, "hoimod_setting_label"),
-                () => setting < _entries.Count ? SettingTooltip(_entries[setting]) : "");
+                () => _first + setting < _entries.Count ? SettingTooltip(_entries[_first + setting]) : "");
         }
         BindButton(Gui.Find(_settings, ButtonSlot, "hoimod_settings_back"), &OnBack, 0);
+        _prev = Gui.Find(_settings, ButtonSlot, "hoimod_settings_prev");
+        _next = Gui.Find(_settings, ButtonSlot, "hoimod_settings_next");
+        _pageText = Gui.FindTextBox(_settings, "hoimod_settings_page");
+        BindButton(_prev, &OnTurnPage, -1);
+        BindButton(_next, &OnTurnPage, +1);
         BindButton(_tab, &OnTab, 0);
     }
 
@@ -201,7 +208,6 @@ internal static unsafe class SettingsMods
             Loader.IsLoaded(plugin.Id) ? Loc.Get("HOIMOD_STATUS_RUNNING", "Running.") :
             !Loader.IsEnabled(plugin.Id) ? Loc.Get("HOIMOD_STATUS_OFF", "Off.") :
             plugin.AffectsGameState && Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_OFF_MP", "Enabled: it changes game rules, so it rests in multiplayer and starts again in single player.") :
-            plugin.MultiplayerOnly && !Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_MP_ONLY", "Enabled: starts by itself in multiplayer.") :
             Loc.Get("HOIMOD_STATUS_FAILED", "Failed to load: see HOI4ModLoader/LogOutput.log."));
         if (plugin.AffectsGameState && !Loader.Multiplayer) text.Append(' ').Append(Loc.Get("HOIMOD_SP_ONLY", "Single player only: it changes game rules."));
         return text.ToString();
@@ -223,6 +229,7 @@ internal static unsafe class SettingsMods
         var plugins = Loader.Known;
         if (row >= plugins.Count) return;
         _plugin = plugins[(int)row].Id;
+        _first = 0;
         Visible(_list, false);
         Visible(_settings, true);
         Gui.SetText(_title, Gui.Literal(Loader.Name(plugins[(int)row])));
@@ -232,16 +239,31 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnBack(nint unused) => Guard(ShowList);
 
+    [UnmanagedCallersOnly]
+    private static void OnTurnPage(nint direction) => Guard(() =>
+    {
+        var first = _first + (int)direction * SettingRows;
+        if (_plugin == null || first < 0 || first >= _entries.Count) return;
+        _first = first;
+        ShowSettings();
+    });
+
     private static void ShowSettings()
     {
         _entries = Settings(_plugin!);
-        if (_entries.Count > SettingRows) Log.Error($"{_plugin}: {_entries.Count} settings, the Mods tab shows {SettingRows}");
+        if (_first >= _entries.Count) _first = 0;
+        var pages = (_entries.Count + SettingRows - 1) / SettingRows;
+        Shown(_prev, pages > 1);
+        Shown(_next, pages > 1);
+        Shown(_pageText, pages > 1);
+        if (pages > 1) Gui.SetText(_pageText, $"{_first / SettingRows + 1}/{pages}");
         for (var row = 0; row < SettingRows; row++)
         {
             var container = Rows[row];
-            Visible(container, row < _entries.Count);
-            if (row >= _entries.Count) continue;
-            var (_, key, value, _) = _entries[row];
+            var index = _first + row;
+            Visible(container, index < _entries.Count);
+            if (index >= _entries.Count) continue;
+            var (_, key, value, _) = _entries[index];
             Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Gui.Literal(Loc.Get($"{_plugin}.{key}", key)));
             var isBool = bool.TryParse(value, out var on);
             var isNumber = !isBool && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
@@ -265,8 +287,8 @@ internal static unsafe class SettingsMods
     /// <summary>Changes a number by a step that fits its size (1 for 0..99, 10 for 100..999, ...); Shift: 10 steps.</summary>
     private static void Step(nint row, int direction)
     {
-        if (_plugin == null || row >= _entries.Count) return;
-        var (section, key, value, description) = _entries[(int)row];
+        if (_plugin == null || _first + row >= _entries.Count) return;
+        var (section, key, value, description) = _entries[_first + (int)row];
         if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole))
         {
             var step = (long)Math.Max(1, Math.Pow(10, Math.Floor(Math.Log10(Math.Max(1, Math.Abs(whole)))) - 1));
@@ -282,8 +304,8 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnSettingToggle(nint row) => Guard(() =>
     {
-        if (_plugin == null || row >= _entries.Count) return;
-        var (section, key, value, description) = _entries[(int)row];
+        if (_plugin == null || _first + row >= _entries.Count) return;
+        var (section, key, value, description) = _entries[_first + (int)row];
         var on = (*(int*)(Gui.Find(Rows[row], CheckBoxSlot, "hoimod_setting_check") + CheckState) & 1) != 0;
         if (!bool.TryParse(value, out var was) || was == on) return; // called once per observer slot of a click
         Save(section, key, on ? "True" : "False", description);

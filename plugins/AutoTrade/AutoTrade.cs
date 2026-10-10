@@ -57,9 +57,14 @@ public unsafe class AutoTrade : Plugin
     private readonly HashSet<nint> _auto = [];                          // resources with auto trade on
     private readonly Dictionary<nint, (int Balance, long Until)> _sent = []; // by resource: balance when a deal was sent
     private PerGame _game = null!;
+    private int _surplus;
+    private bool _subjectsFirst, _factionFirst;
 
     public override void Load()
     {
+        _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals."));
+        _subjectsFirst = Config.Bind("Sellers", "SubjectsFirst", true, "Buy from your subjects first.");
+        _factionFirst = Config.Bind("Sellers", "FactionFirst", true, "Then from your faction; after that, whoever can sell the most (trade influence breaks ties).");
         var iconClick = Sig.Find(Signatures.ResourceIconClick);
         var update = Sig.Find(Signatures.ResourceItemUpdate);
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
@@ -116,7 +121,7 @@ public unsafe class AutoTrade : Plugin
             var balance = _balance(resources, resource);
             if (_sent.TryGetValue(resource, out var sent) && balance <= sent.Balance && now < sent.Until) continue; // not in yet
             _sent.Remove(resource);
-            if (balance < 0) Import(tag, resource, -balance, balance, now);
+            if (balance < _surplus) Import(tag, resource, _surplus - balance, balance, now);
         }
     }
 
@@ -153,8 +158,9 @@ public unsafe class AutoTrade : Plugin
             var influences = Native.PdxArray<long>(exporter + Influence);
             var index = ((int*)importer)[1];
             var influence = index < influences.Length ? influences[index] : 0;
-            // Our subjects first, then our faction, then whoever can sell the most; trade influence breaks ties.
-            var relation = *(int*)(diplomacy + Overlord) == tag ? 2 : faction != 0 && *(nint*)(diplomacy + Faction) == faction ? 1 : 0;
+            // Our subjects first, then our faction (each if so set), then whoever can sell the most; trade influence breaks ties.
+            var relation = _subjectsFirst && *(int*)(diplomacy + Overlord) == tag ? 2
+                : _factionFirst && faction != 0 && *(nint*)(diplomacy + Faction) == faction ? 1 : 0;
             var rank = (relation, room, influence);
             if (best.Tag == 0 || rank.CompareTo(best.Rank) > 0) best = (exporterTag, rank, room, existing / Native.FixedPoint, step);
         }

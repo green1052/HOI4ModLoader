@@ -559,9 +559,31 @@ ${1}buttonType = {
                         position = { x = 50 y = 18 }
                         font = "hoi_18mbs"
                         text = ""
-                        maxWidth = 380
+                        maxWidth = 300
                         maxHeight = 20
                         format = left
+                    }
+                    # Pages, when a plugin has more settings than rows.
+                    buttonType = {
+                        name = "hoimod_settings_prev"
+                        position = { x = 356 y = 18 }
+                        quadTextureSprite ="button_left"
+                        clicksound = click_scroll
+                    }
+                    instantTextBoxType = {
+                        name = "hoimod_settings_page"
+                        position = { x = 376 y = 18 }
+                        font = "hoi_18mbs"
+                        text = ""
+                        maxWidth = 40
+                        maxHeight = 20
+                        format = centre
+                    }
+                    buttonType = {
+                        name = "hoimod_settings_next"
+                        position = { x = 416 y = 18 }
+                        quadTextureSprite ="button_right"
+                        clicksound = click_scroll
                     }
                     containerWindowType = {
                         name = "hoimod_setting_0"
@@ -964,4 +986,4 @@ ${1}buttonType = {
                         }
                     }
                 }
-            }
+            }

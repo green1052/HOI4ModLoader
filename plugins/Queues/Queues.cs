@@ -130,51 +130,61 @@ public unsafe class Queues : Plugin
             _numberedFocusItems.Clear();
         });
 
-        _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _techClick!.OriginalFunction(view, ev));
-        _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
-        _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
+        // A queue switched off leaves its Shift+click to the game.
+        if (Config.Bind("Queues", "Research", true, "Shift+click a tech to queue it; it starts as soon as a research slot is free."))
         {
-            _game.Check();
-            if (focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
-            else if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
-            else _focusClick!.OriginalFunction(view, focus, a3);
-        });
-        _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
-        {
-            if (!Gui.ShiftHeld) return _agencyClick!.OriginalFunction(entry);
-            _game.Check();
-            AddLevel(*(nint*)(entry + AgencyOfEntry), *(nint*)(entry + UpgradeOfEntry));
-            if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
-            return 0;
-        });
-        _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
-        {
-            _agencyEntryRefresh!.OriginalFunction(entry);
-            Log.Guard("agency numbers", () =>
+            _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _techClick!.OriginalFunction(view, ev));
+            _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
+            _techItemBonus = Patches.Hook<EntryFn>(techItemBonus, item =>
             {
-                ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
-                KeepClickable(entry);
+                _techItemBonus!.OriginalFunction(item);
+                Log.Guard("tech numbers", () => LabelTech(item));
             });
-        });
-        _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
+        }
+        if (Config.Bind("Queues", "Focus", true, "Shift+click a national focus to queue it; it starts as soon as the current one is done."))
         {
-            _agencyWindow = window;
-            _agencyWindowRefresh!.OriginalFunction(window);
-        });
-
-        _techItemBonus = Patches.Hook<EntryFn>(techItemBonus, item =>
+            _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
+            {
+                _game.Check();
+                if (focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
+                else if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
+                else _focusClick!.OriginalFunction(view, focus, a3);
+            });
+            _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
+            {
+                _focusNodeStates!.OriginalFunction(view, dt, cache);
+                Log.Guard("focus numbers", () => LabelFocuses(view));
+            });
+        }
+        if (Config.Bind("Queues", "Agency", true, "Shift+click an intelligence agency upgrade to queue it; it starts as soon as the agency is idle."))
         {
-            _techItemBonus!.OriginalFunction(item);
-            Log.Guard("tech numbers", () => LabelTech(item));
-        });
-        _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
-        {
-            _focusNodeStates!.OriginalFunction(view, dt, cache);
-            Log.Guard("focus numbers", () => LabelFocuses(view));
-        });
+            _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
+            {
+                if (!Gui.ShiftHeld) return _agencyClick!.OriginalFunction(entry);
+                _game.Check();
+                AddLevel(*(nint*)(entry + AgencyOfEntry), *(nint*)(entry + UpgradeOfEntry));
+                if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
+                return 0;
+            });
+            _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
+            {
+                _agencyEntryRefresh!.OriginalFunction(entry);
+                Log.Guard("agency numbers", () =>
+                {
+                    ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
+                    KeepClickable(entry);
+                });
+            });
+            _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
+            {
+                _agencyWindow = window;
+                _agencyWindowRefresh!.OriginalFunction(window);
+            });
+        }
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
-        new PoliticalQueue(Log).Load();
+        if (Config.Bind("Queues", "PoliticalPower", true, "Shift+click an idea, law, advisor or decision to take it as soon as there is the political power."))
+            new PoliticalQueue(Log).Load();
     }
 
     private bool ShiftQueuesTech(nint view, nint ev)
