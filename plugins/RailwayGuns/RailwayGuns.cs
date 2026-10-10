@@ -19,6 +19,9 @@ public static class Signatures
     /// <summary>The army's railway gun box, assign button: posts an unassign for guns assigned elsewhere, then the assign.</summary>
     [Signature] public const string BoxUnassign = "4C 8B C6 48 8D 54 24 20 48 8B 0D ? ? ? ? E8 ? ? ? ? 90 48 8B 54 24 20 48 85 D2 74 ? 44 89 7C 24 2C 48 8B 4C 24 30 48 8B 01 FF 50 10 48 83 C3 08 48 3B DF 0F 85 ? ? ? ? 4C 8B C5 48 8D 54 24 38 48 8B 0D ? ? ? ? E8";
 
+    /// <summary>UnitController::DistributeRailwayGuns(controller, -1, 0): *controller is the orders group whose guns it places.</summary>
+    [Signature] public const string Distribute = "48 89 5C 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 00 DD FF FF B8 00 24 00 00 E8";
+
     /// <summary>
     /// Railway gun distribution, per gun: `mov r13d,eax; cmp eax,r14d; setle [rsp+3Ch]` = "enough convoys to ship it",
     /// which lets a gun target provinces outside its own rail network by sea.
@@ -33,12 +36,11 @@ public static class Signatures
 }
 
 /// <summary>
-/// Right-click a field marshal's card with railway guns selected to assign them to his armies, spread over them in
-/// selection order, with the vanilla assign command (so multiplayer stays in sync and other players need nothing). Guns
-/// assigned elsewhere are unassigned first, as the army's own railway gun box does (a card right-click alone would fail).
+/// Right-click with railway guns selected, shared by both marshal plugins: lets a field marshal's card take it like an
+/// army card's, and assigns through the vanilla command. Guns assigned elsewhere are unassigned first, as the army's own
+/// railway gun box does; guns already on the target are left out (one of them would make the game reject the whole batch).
 /// </summary>
-[Plugin("com.green1052.railwayguns", "Railway Gun Field Marshal", "1.0.0", GameVersion = "1.19.3")]
-public unsafe class RailwayGunFieldMarshal : Plugin
+public abstract unsafe class RailwayGunAssign : Plugin
 {
     private const int ViewOfCard = 0x10;
     private const int AssignedTo = 0x440, GunsOfGroup = 0x18; // CRailwayGun -> its orders group's railway gun container (group + 0x18)
@@ -68,31 +70,31 @@ public unsafe class RailwayGunFieldMarshal : Plugin
             try { _cardRightClick!.OriginalFunction(card); }
             finally { *flag = was; }
         });
-        _postAssign = Patches.Hook<PostFn>(postAssign, Assign);
+        _postAssign = Patches.Hook<PostFn>(postAssign, (view, guns, group) => group == 0 ? _postAssign!.OriginalFunction(view, guns, group) : Assign(view, guns, group));
     }
+
+    /// <summary>Where guns assigned to <paramref name="group"/> go: each target gets a share, in selection order.</summary>
+    protected abstract nint[] Targets(OrdersGroup group);
 
     private byte Assign(nint view, nint guns, nint group)
     {
-        if (group == 0) return _postAssign!.OriginalFunction(view, guns, group);
         var all = Native.PdxArray(guns).ToArray();
-        var og = new OrdersGroup(group);
-        var targets = og.IsArmyGroup ? og.Armies.ToArray() : [group];
-        if (targets.Length == 0) return 0;
-
+        var targets = Targets(new OrdersGroup(group));
         byte posted = 0;
         for (var t = 0; t < targets.Length && t < all.Length; t++)
         {
             // ponytail: round-robin in selection order, not weighted by army size or front.
-            var share = all.Where((_, i) => i % targets.Length == t).ToArray();
             var target = targets[t];
+            var share = all.Where((gun, i) => i % targets.Length == t && *(nint*)(gun + AssignedTo) - GunsOfGroup != target).ToArray();
+            if (share.Length == 0) continue;
             foreach (var gun in share)
             {
                 var from = *(nint*)(gun + AssignedTo) - GunsOfGroup;
-                if (from != -GunsOfGroup && from != target) WithArray([gun], array => _postUnassign(view, array, from));
+                if (from != -GunsOfGroup) WithArray([gun], array => _postUnassign(view, array, from));
             }
             posted |= WithArray(share, array => _postAssign!.OriginalFunction(view, array, target));
         }
-        if (og.IsArmyGroup) Log.Info($"{all.Length} railway guns assigned across {Math.Min(targets.Length, all.Length)} of the marshal's armies");
+        if (new OrdersGroup(group).IsArmyGroup) Log.Info($"{all.Length} railway guns selected for a field marshal, assigned to {targets.Length} group(s)");
         return posted;
     }
 
@@ -107,6 +109,43 @@ public unsafe class RailwayGunFieldMarshal : Plugin
             return post((nint)array);
         }
     }
+}
+
+/// <summary>
+/// Railway guns can be assigned to a field marshal (right-click his card, or his card's railway gun box, which
+/// AirWingFieldMarshal's card patch shows). His guns take positions along all of his armies' divisions. Changes the
+/// game (army groups own guns), so single player only; in multiplayer <see cref="RailwayGunFieldMarshalMultiplayer"/> runs.
+/// </summary>
+[Plugin("com.green1052.railwayguns", "Railway Gun Field Marshal", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
+public unsafe class RailwayGunFieldMarshal : RailwayGunAssign
+{
+    [Function(CallingConventions.Microsoft)] public delegate void DistributeFn(nint controller, int a2, int a3);
+
+    private IHook<DistributeFn>? _distribute;
+
+    public override void Load()
+    {
+        base.Load();
+        // An army group has no divisions of its own, so its guns would find no positions: let it see its armies' ones.
+        _distribute = Patches.Hook<DistributeFn>(Sig.Find(Signatures.Distribute), (controller, a2, a3) =>
+        {
+            var group = new OrdersGroup(*(nint*)controller);
+            if (group.Ptr != 0 && group.IsArmyGroup) group.WithArmiesMembers(() => _distribute!.OriginalFunction(controller, a2, a3));
+            else _distribute!.OriginalFunction(controller, a2, a3);
+        });
+    }
+
+    protected override nint[] Targets(OrdersGroup group) => [group.Ptr];
+}
+
+/// <summary>
+/// Multiplayer stand-in for <see cref="RailwayGunFieldMarshal"/>: right-clicking a field marshal's card with railway guns
+/// selected spreads them over his armies with the vanilla assign command, so other players need nothing.
+/// </summary>
+[Plugin("com.green1052.railwayguns.multiplayer", "Railway Gun Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true)]
+public unsafe class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
+{
+    protected override nint[] Targets(OrdersGroup group) => group.IsArmyGroup ? group.Armies.ToArray() : [group.Ptr];
 }
 
 /// <summary>
