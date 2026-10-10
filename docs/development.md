@@ -27,12 +27,9 @@ dotnet build -c Release -p:DeployDir=out
 ```
 
 ## Releases
-Pushing a version tag builds and publishes a GitHub release (`.github/workflows/release.yml`):
-```
-git tag v1.0.0
-git push origin v1.0.0
-```
-The workflow builds on a Windows runner with the tag as the loader's version, zips `out\` (`version.dll`, `HOI4ModLoader\`) and attaches it to a new release with generated notes. The runner has no game, so the signature tests don't run there: run `dotnet test tests/Signatures.Tests` locally first.
+The loader's version is `<Version>` in `HOI4ModLoader/HOI4ModLoader.csproj`. Raise it and push to `master`: `.github/workflows/release.yml` builds on a Windows runner, zips `out\` (`version.dll`, `HOI4ModLoader\`) and publishes release `v<Version>` with its tag and generated notes. A push that leaves the version as it is releases nothing (the release already exists); the workflow can also be run by hand from the Actions tab.
+
+The runner has no game, so the signature tests don't run there: run `dotnet test tests/Signatures.Tests` locally first.
 
 ## Writing a plugin
 ```csharp
