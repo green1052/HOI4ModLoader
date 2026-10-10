@@ -108,6 +108,7 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 - **Beach defence:** a naval landing is answered at once: free divisions next to it wall the beachhead in and attack into it, instead of waiting for the front to collapse.
 - **Concentration:** fronts with no enemy at war keep a thin screen, the rest goes where the enemy is strong; borders of a country in a warring country's faction keep their garrison, and fronts at war are never thinned.
 - **Air:** planes leave regions where the AI keeps losing the air war badly.
+- **Navy:** task forces pick their fights by the strength they see in their region (outnumbered 2:1 they slip away, clearly stronger they press, pairs of ships only shadow the enemy), and convoy defence gets the naval fuel budget while convoys are being sunk fast.
 - **Leaders:** the biggest, fighting, attacking fronts choose their field marshals and generals first; infantry traits, doctrine and bad status count.
 
 ## Multiplayer

@@ -38,3 +38,7 @@ l_english:
  com.green1052.aiassist.Reserves.desc:0 "A country with divisions to spare keeps reserve posts a province behind its line, on the ground covering the most front; the theatre shuffle leaves those divisions where they are."
  com.green1052.aiassist.BeachDefense:0 "Beach defence"
  com.green1052.aiassist.BeachDefense.desc:0 "Naval landings are answered at once: free divisions next to the beachhead wall it in and attack into it. Vanilla leaves a landing alone until the front collapses."
+ com.green1052.aiassist.NavalSortie:0 "Naval engagement"
+ com.green1052.aiassist.NavalSortie.desc:0 "AI task forces pick their fights by the strength they see in their region: clearly stronger, they press; half as strong, they slip away; pairs of ships only shadow the enemy. Vanilla gives every mission one fixed level."
+ com.green1052.aiassist.NavalEscort:0 "Convoy escort priority"
+ com.green1052.aiassist.NavalEscort.desc:0 "While a country is losing convoys fast, its naval fuel budget for convoy defence is doubled for that pass of the task force allocator: more fleets escort, fewer strike."
