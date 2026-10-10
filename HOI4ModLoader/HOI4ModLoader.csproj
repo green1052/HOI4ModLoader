@@ -74,6 +74,8 @@
         <Delete Condition="!$(DeploySymbols)" Files="$(DeployPath)\HOI4ModLoader\core\$(TargetName).pdb" ContinueOnError="WarnAndContinue" /> <!-- a stale one would not match -->
         <Copy SourceFiles="@(_CoreFile)" DestinationFiles="@(_CoreFile->'$(DeployPath)\HOI4ModLoader\core\%(RecursiveDir)%(Filename)%(Extension)')"
               SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
+        <!-- The licenses travel with the binaries (LGPL, and the third-party notices for what core\ ships). -->
+        <Copy SourceFiles="..\COPYING;..\COPYING.LESSER;..\THIRD-PARTY-NOTICES.md" DestinationFolder="$(DeployPath)\HOI4ModLoader" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
         <Copy Condition="Exists('$(BootstrapDll)')" SourceFiles="$(BootstrapDll)" DestinationFolder="$(DeployPath)" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
     </Target>
 

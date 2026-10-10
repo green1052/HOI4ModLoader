@@ -92,6 +92,9 @@ The game's memory allocations use Microsoft's [mimalloc](https://github.com/micr
 ## Development
 See [docs/development.md](docs/development.md) for building and writing plugins.
 
+## License
+HOI4ModLoader is free software under the [GNU Lesser General Public License v3.0](COPYING.LESSER) (which builds on the [GNU GPL v3.0](COPYING)). The components it ships with keep their own licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 ## Disclaimer
 HOI4ModLoader is an unofficial fan project. It is not affiliated with, endorsed by or sponsored by Paradox Interactive AB. Hearts of Iron and Paradox Interactive are trademarks of Paradox Interactive AB; they are used here only to say which game this works with.
 
