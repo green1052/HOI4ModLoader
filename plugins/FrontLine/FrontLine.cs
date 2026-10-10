@@ -122,6 +122,12 @@ public unsafe class FrontLine : Plugin
         MainThread.Every(TimeSpan.FromSeconds(2), () => Manage(Game.ControlledTag, false));
         if (!ai || Multiplayer) return; // AI decisions exist on one machine only; in multiplayer they'd be the host's to make
         LoadAiFilters();
+        MainThread.Every(TimeSpan.FromMinutes(1), () =>
+        {
+            if (_aiRotations + _aiPlugs + _aiEscapes > 0)
+                Log.Info($"AI, last minute: {_aiRotations} rotation(s), {_aiPlugs} plug(s), {_aiEscapes} escape(s)");
+            _aiRotations = _aiPlugs = _aiEscapes = 0;
+        });
         MainThread.Every(TimeSpan.FromSeconds(5), () =>
         {
             var player = Game.ControlledTag;
@@ -266,6 +272,7 @@ public unsafe class FrontLine : Plugin
             _pending[unit] = now + PendingMs;
             holding[place]--;
             swaps++;
+            Count(ref _aiRotations);
             if (!_ai) Log.Info($"rotation: a division at {Org(unit):0}% organisation, {Str(unit):0}% strength goes to rest");
         }
     }
@@ -300,6 +307,7 @@ public unsafe class FrontLine : Plugin
             _plugged[id] = now + PlugCooldownMs;
             helpersAt[*(nint*)(helper + LocationOfUnit)].Remove(helper);
             plugs++;
+            Count(ref _aiPlugs);
             if (!_ai) Log.Info($"plugging: a fresh division sent into a defence being lost ({progress * 100.0 / Native.FixedPoint:0}% for the attacker)");
         }
     }
@@ -396,12 +404,14 @@ public unsafe class FrontLine : Plugin
     {
         var escapes = 0;
         var checkedPlaces = new Dictionary<nint, bool>(); // province -> narrow
+        var holding = Holding(units.Select(u => u + MemberOfUnit).Where(m => orders.TryGetValue(m, out var o) && IsFront(o)).ToDictionary(m => m, m => orders[m]));
         foreach (var unit in units)
         {
             if (escapes == MaxEscapesPerTurn) break;
             if (!orders.TryGetValue(unit + MemberOfUnit, out var order) || !IsFront(order) || !Free(unit, tag, now)) continue;
             var location = *(nint*)(unit + LocationOfUnit);
             if (location == 0) continue;
+            if (holding[(order, location)] < 2) continue; // alone there: pulling it out opens the line
             if (!checkedPlaces.TryGetValue(location, out var narrow)) checkedPlaces[location] = narrow = Narrow(country, tag, location);
             if (!narrow) continue;
             var rest = RestProvince(country, tag, unit);
@@ -409,7 +419,9 @@ public unsafe class FrontLine : Plugin
             TakeOff(unit, order, tag);
             Move(unit, rest);
             _pending[unit] = now + PendingMs;
+            holding[(order, location)]--;
             escapes++;
+            Count(ref _aiEscapes);
             if (!_ai) Log.Info("escape: a division pulls back from a salient about to be cut off");
         }
     }
@@ -436,10 +448,22 @@ public unsafe class FrontLine : Plugin
             }
             if (next.Count == 0) return false;                                    // cut off already, or an island: nowhere to go
             if (next.Any(p => !NextToEnemy(country, tag, p))) return false;       // safe ground within reach
-            if (next.Count == 1) return true;                                     // the only way back, and it borders the enemy
+            if (next.Count == 1) return EnemyDivisionsNext(country, tag, next[0]); // the only way back, and enemy troops stand next to it
+                                                                                   // (a thin coastal strip borders enemy land everywhere: not a pocket)
             ring = next;
         }
         return false;
+    }
+
+    private bool EnemyDivisionsNext(nint country, int tag, nint province) =>
+        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && *(int*)(p + DivisionsInProvince) > 0 && Enemy(country, tag, p));
+
+    // AI actions per minute, for the log (AI ones aren't logged one by one).
+    private int _aiRotations, _aiPlugs, _aiEscapes;
+
+    private void Count(ref int counter)
+    {
+        if (_ai) counter++;
     }
 
     private bool NextToEnemy(nint country, int tag, nint province) =>
