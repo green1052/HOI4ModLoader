@@ -13,9 +13,6 @@ public static class Signatures
     /// </summary>
     [Signature] public const string CardAssign = "49 8B 4D 10 E8 ? ? ? ? 84 C0 74 ? 41 80 BD ? ? ? ? 00 0F 85 ? ? ? ? 49 8B 55 10 48 8D 4D ? E8 ? ? ? ? 90 4D 8B C6 48 8D 55 ? 49 8B 4D 10 E8";
 
-    /// <summary>Army card right-click (card); the same function AirWingFieldMarshal hooks.</summary>
-    [Signature] public const string CardRightClick = "48 8B C4 48 89 58 ? 48 89 70 ? 48 89 78 ? 55 41 54 41 55 41 56 41 57 48 8D 68 ? 48 81 EC B0 00 00 00 0F 29 70 ? 4C 8B E9 48 83 C1 30";
-
     /// <summary>The army's railway gun box, assign button: posts an unassign for guns assigned elsewhere, then the assign.</summary>
     [Signature] public const string BoxUnassign = "4C 8B C6 48 8D 54 24 20 48 8B 0D ? ? ? ? E8 ? ? ? ? 90 48 8B 54 24 20 48 85 D2 74 ? 44 89 7C 24 2C 48 8B 4C 24 30 48 8B 01 FF 50 10 48 83 C3 08 48 3B DF 0F 85 ? ? ? ? 4C 8B C5 48 8D 54 24 38 48 8B 0D ? ? ? ? E8";
 
@@ -43,7 +40,7 @@ public static class Signatures
 public abstract unsafe class RailwayGunAssign : Plugin
 {
     private const int ViewOfCard = 0x10;
-    private const int AssignedTo = 0x440, GunsOfGroup = 0x18; // CRailwayGun -> its orders group's railway gun container (group + 0x18)
+    private const int AssignedTo = 0x440, GunsOfGroup = 0x18; // CRailwayGun -> its orders group's railway gun container (group + 0x18), or 0
 
     [Function(CallingConventions.Microsoft)] public delegate void CardFn(nint card);
     [Function(CallingConventions.Microsoft)] public delegate byte PostFn(nint view, nint guns, nint group);
@@ -56,21 +53,16 @@ public abstract unsafe class RailwayGunAssign : Plugin
     {
         var at = Sig.Find(Signatures.CardAssign);
         var gunSelected = (delegate* unmanaged<nint, byte>)(at + 9 + *(int*)(at + 5));
-        var isArmyGroup = *(int*)(at + 16);
         var postAssign = at + 57 + *(int*)(at + 53);
         var unassign = Sig.Find(Signatures.BoxUnassign);
         _postUnassign = (delegate* unmanaged<nint, nint, nint, byte>)(unassign + 20 + *(int*)(unassign + 16));
 
         // A marshal's card ignores a right-click with railway guns selected; as an army card's it gets to the assign below.
-        _cardRightClick = Patches.Hook<CardFn>(Sig.Find(Signatures.CardRightClick), card =>
-        {
-            var flag = (byte*)(card + isArmyGroup);
-            var was = *flag;
-            if (gunSelected(*(nint*)(card + ViewOfCard)) != 0) *flag = 0;
-            try { _cardRightClick!.OriginalFunction(card); }
-            finally { *flag = was; }
-        });
-        _postAssign = Patches.Hook<PostFn>(postAssign, (view, guns, group) => group == 0 ? _postAssign!.OriginalFunction(view, guns, group) : Assign(view, guns, group));
+        _cardRightClick = Patches.Hook<CardFn>(Sig.Find(ArmyCard.RightClickSig), card =>
+            ArmyCard.AsArmyCard(card, gunSelected(*(nint*)(card + ViewOfCard)) != 0, () => _cardRightClick!.OriginalFunction(card)));
+        // Only a marshal's assign is ours; an army's goes through as the game made it.
+        _postAssign = Patches.Hook<PostFn>(postAssign, (view, guns, group) =>
+            group != 0 && new OrdersGroup(group).IsArmyGroup ? Assign(view, guns, group) : _postAssign!.OriginalFunction(view, guns, group));
     }
 
     /// <summary>Where guns assigned to <paramref name="group"/> go: each target gets a share, in selection order.</summary>
@@ -80,22 +72,29 @@ public abstract unsafe class RailwayGunAssign : Plugin
     {
         var all = Native.PdxArray(guns).ToArray();
         var targets = Targets(new OrdersGroup(group));
+        var shares = ArmyCard.Spread(all, targets.Length);
         byte posted = 0;
-        for (var t = 0; t < targets.Length && t < all.Length; t++)
+        for (var t = 0; t < shares.Length; t++)
         {
-            // ponytail: round-robin in selection order, not weighted by army size or front.
             var target = targets[t];
-            var share = all.Where((gun, i) => i % targets.Length == t && *(nint*)(gun + AssignedTo) - GunsOfGroup != target).ToArray();
+            var share = shares[t].Where(gun => Owner(gun) != target).ToArray();
             if (share.Length == 0) continue;
             foreach (var gun in share)
             {
-                var from = *(nint*)(gun + AssignedTo) - GunsOfGroup;
-                if (from != -GunsOfGroup) Native.WithPdxArray([gun], array => _postUnassign(view, array, from));
+                var from = Owner(gun);
+                if (from != 0) Native.WithPdxArray([gun], array => _postUnassign(view, array, from));
             }
             posted |= Native.WithPdxArray(share, array => _postAssign!.OriginalFunction(view, array, target));
         }
-        if (new OrdersGroup(group).IsArmyGroup) Log.Info($"{all.Length} railway guns selected for a field marshal, assigned to {targets.Length} group(s)");
+        Log.Info($"{all.Length} railway guns selected for a field marshal, assigned to {shares.Length} group(s)");
         return posted;
+    }
+
+    /// <summary>The orders group the gun is assigned to, or 0.</summary>
+    private static nint Owner(nint gun)
+    {
+        var container = *(nint*)(gun + AssignedTo);
+        return container == 0 ? 0 : container - GunsOfGroup;
     }
 
 }
@@ -134,7 +133,7 @@ public unsafe class RailwayGunFieldMarshal : RailwayGunAssign
 [Plugin("com.green1052.railwayguns.multiplayer", "Railway Gun Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true)]
 public class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
 {
-    protected override nint[] Targets(OrdersGroup group) => group.IsArmyGroup ? [.. group.Armies] : [group.Ptr];
+    protected override nint[] Targets(OrdersGroup group) => [.. group.Armies];
 }
 
 /// <summary>
@@ -146,9 +145,8 @@ public class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
 public unsafe class RailwayGunMovement : Plugin
 {
     private const int RecordSize = 48, HostileUnits = 12, ControllerAtWar = 25; // province records of the distribution
-    private const int ProvincesOfState = 8;                                     // gamestate: province container (vtable slot 0 = by id)
+    private const int ProvincesOfGameState = 8;                                 // gamestate: province container (vtable slot 0 = by id)
     private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8;
-    private const long Fixed = 100_000;
 
     [Function(CallingConventions.Microsoft)] public delegate nint ScoreFn(nint ctx, nint score, int province);
 
@@ -158,7 +156,7 @@ public unsafe class RailwayGunMovement : Plugin
     public override void Load()
     {
         _frontPenalty = Config.Bind("Movement", "FrontPenalty", 500,
-            "Score taken off provinces on the front line (next to enemy-controlled provinces or hostile units). Vanilla bonuses for being near the fighting are about 100-200.") * Fixed;
+            "Score taken off provinces on the front line (next to enemy-controlled provinces or hostile units). Vanilla bonuses for being near the fighting are about 100-200.") * Native.FixedPoint;
         if (Config.Bind("Movement", "NoSeaTransfer", true, "Never ship railway guns by sea; they only move along their own rail network."))
         {
             var setle = Sig.Find(Signatures.ConvoysOk) + 6;
@@ -176,7 +174,7 @@ public unsafe class RailwayGunMovement : Plugin
     private static bool IsFront(nint records, int province)
     {
         if (Enemy(records, province)) return true;
-        var provinces = Game.State + ProvincesOfState;
+        var provinces = Game.State + ProvincesOfGameState;
         var p = ((delegate* unmanaged<nint, int, nint>)(**(nint**)provinces))(provinces, province);
         var adjacency = p == 0 ? 0 : *(nint*)(p + AdjacencyOfProvince);
         if (adjacency == 0) return false;

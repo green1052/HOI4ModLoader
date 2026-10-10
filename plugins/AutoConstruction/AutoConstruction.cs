@@ -70,10 +70,10 @@ public unsafe class AutoConstruction : Plugin
     private delegate* unmanaged<int, nint> _tokenToString;
 
     private readonly Dictionary<nint, int> _targets = [];                    // CBuildingType* -> wanted count
-    private readonly Dictionary<nint, (int Count, long Until)> _sent = [];   // by type: count when a command was sent
+    private readonly Dictionary<nint, (int Count, long Until)> _sent = [];   // by type: count expected once the sent commands land
     private readonly HashSet<nint> _failed = [];                             // types whose last try found nowhere to build (logged once)
     private nint _infrastructure;                                               // its CBuildingType*, once seen on a button
-    private (nint GameState, int Tag) _session;
+    private PerGame _game = null!;
     private bool _reportedBox;
 
     public override void Load()
@@ -84,13 +84,22 @@ public unsafe class AutoConstruction : Plugin
         _canBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInProvince);
         _freeSharedSlots = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FreeSharedSlots);
         _tokenToString = (delegate* unmanaged<int, nint>)Sig.Find(Signatures.TokenToString);
+        _game = new PerGame(() =>
+        {
+            _targets.Clear();
+            _sent.Clear();
+            _failed.Clear();
+        });
 
         _click = Patches.Hook<ClickFn>(Sig.Find(Signatures.BuildingClick), item =>
         {
             var type = *(nint*)(item + TypeOfItem);
-            if (type == 0 || !Gui.ShiftHeld && !Gui.CtrlHeld) return _click!.OriginalFunction(item);
-            var country = Game.Country(Game.PlayerTag);
-            var count = country == 0 ? 0 : Count(country, type);
+            _game.Check();
+            // A plain click, or Ctrl+click without a target to lower, is the game's.
+            if (type == 0 || !Gui.ShiftHeld && !(Gui.CtrlHeld && _targets.ContainsKey(type))) return _click!.OriginalFunction(item);
+            var country = Game.Country(Game.ControlledTag);
+            if (country == 0) return _click!.OriginalFunction(item);
+            var count = Count(country, type);
             // Targets count from what the country has (built and queued): +1 means one more than now.
             var from = Math.Max(count, _targets.GetValueOrDefault(type, count));
             var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? 5 : 1));
@@ -104,7 +113,10 @@ public unsafe class AutoConstruction : Plugin
         _update = Patches.Hook<ViewFn>(Sig.Find(Signatures.UpdateBuildingItems), view =>
         {
             _update!.OriginalFunction(view);
-            foreach (var item in Native.PdxArray(view + Items)) ShowTarget(item);
+            Log.Guard("target labels", () =>
+            {
+                foreach (var item in Native.PdxArray(view + Items)) ShowTarget(item);
+            });
         });
 
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);
@@ -128,33 +140,28 @@ public unsafe class AutoConstruction : Plugin
             if (box == 0) Log.Info($"no '{TargetBox}' element: targets work but don't show (is the Auto Construction UI mod enabled?)");
         }
         if (box == 0) return;
-        var country = Game.Country(Game.PlayerTag);
+        var country = Game.Country(Game.ControlledTag);
         var text = _targets.TryGetValue(type, out var target) && country != 0 ? $"+{Math.Max(0, target - Count(country, type))}" : "";
         if (Native.Utf8(Gui.Text(box)) != text) Gui.SetText(box, text);
     }
 
     private void Pump()
     {
-        var tag = Game.PlayerTag;
+        _game.Check();
+        var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         if (country == 0) return;
-        if (_session != (Game.State, tag)) // another game or country
-        {
-            _session = (Game.State, tag);
-            _targets.Clear();
-            _sent.Clear();
-            _failed.Clear();
-        }
         var now = Environment.TickCount64;
         foreach (var (type, target) in _targets)
         {
             var count = Count(country, type);
-            if (_sent.TryGetValue(type, out var sent) && sent.Count == count && now < sent.Until) continue; // not in the queue yet
+            if (_sent.TryGetValue(type, out var sent) && count < sent.Count && now < sent.Until) continue; // not all in the queue yet
             _sent.Remove(type);
             if (count >= target) continue;
-            if (Queue(country, tag, type, target - count))
+            var queued = Queue(country, tag, type, target - count);
+            if (queued > 0)
             {
-                _sent[type] = (count, now + PendingMs);
+                _sent[type] = (count + queued, now + PendingMs);
                 _failed.Remove(type);
             }
             else if (_failed.Add(type)) Log.Info($"{Name(type)}: {count} of {target}, but no state can take more (or the game refused the command)");
@@ -192,9 +199,9 @@ public unsafe class AutoConstruction : Plugin
     /// <summary>
     /// Queues up to <paramref name="wanted"/> levels, one per place (state, or province for province buildings) from the
     /// best down, places that already have a line of this building last: separate lines are built at the same time, while
-    /// the levels of one line are built one after another. False if nothing could be queued.
+    /// the levels of one line are built one after another. Returns the levels queued.
     /// </summary>
-    private bool Queue(nint country, int tag, nint type, int wanted)
+    private int Queue(nint country, int tag, nint type, int wanted)
     {
         var perProvince = *(int*)(type + ProvinceLevel) > 0;
         var building = new HashSet<nint>(); // containers with a construction line of this type
@@ -206,11 +213,11 @@ public unsafe class AutoConstruction : Plugin
                 if (b != 0 && *(nint*)(b + TypeOfBuilding) == type) building.Add(*(nint*)(b + ContainerOfBuilding));
             }
 
-        var places = new List<(nint Container, int Id, int Free, (int, int, int, int, int) Rank)>();
+        var places = new List<(nint Container, int Id, int Free, (int, int, int, int) Rank)>();
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
         {
             if (_canBuildInState(country, state, type, 1) == 0) continue;
-            var rank = (0, IsCore(state, tag) ? 1 : 0, _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure),
+            var rank = (Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0, _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure),
                 _freeSharedSlots(state), -*(int*)(state + IdOfState));
             if (!perProvince) places.Add((state + BuildingsOfState, *(int*)(state + IdOfState), _freeLevels(state + BuildingsOfState, type), rank));
             else
@@ -232,13 +239,6 @@ public unsafe class AutoConstruction : Plugin
             if (Commands.TryPost(cmd)) queued++;
         }
         if (queued > 0) Log.Info($"{Name(type)}: queued 1 level in each of {queued} {(perProvince ? "provinces" : "states")}");
-        return queued > 0;
-    }
-
-    private static bool IsCore(nint state, int tag)
-    {
-        foreach (var core in new ReadOnlySpan<int>(*(void**)(state + CoresOfState), *(int*)(state + CoresOfState + 0xC)))
-            if (core == tag) return true;
-        return false;
+        return queued;
     }
 }

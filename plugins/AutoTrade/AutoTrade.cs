@@ -43,7 +43,6 @@ public unsafe class AutoTrade : Plugin
     private const int DiplomacyOfCountry = 0xF88, Overlord = 0x188, Faction = 0x290; // diplomacy block: overlord tag (0 = none), faction*
     private const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem
     private const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
-    private const long Fixed = 100_000;
     private const long PendingMs = 10_000;                      // a sent deal shows in the balance at once in single player, a round trip later in multiplayer
 
     [Function(CallingConventions.Microsoft)] public delegate void ItemFn(nint item);
@@ -57,7 +56,7 @@ public unsafe class AutoTrade : Plugin
 
     private readonly HashSet<nint> _auto = [];                          // resources with auto trade on
     private readonly Dictionary<nint, (int Balance, long Until)> _sent = []; // by resource: balance when a deal was sent
-    private (nint GameState, int Tag) _session;
+    private PerGame _game = null!;
 
     public override void Load()
     {
@@ -66,6 +65,11 @@ public unsafe class AutoTrade : Plugin
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
         _maxExport = (delegate* unmanaged<nint, long*, nint, long*, long*, nint, void>)Sig.Find(Signatures.MaxExport);
         _amountForFactories = (delegate* unmanaged<long*, nint, long*, long*, int, void>)Sig.Find(Signatures.AmountForFactories);
+        _game = new PerGame(() =>
+        {
+            _auto.Clear();
+            _sent.Clear();
+        });
 
         _iconClick = Patches.Hook<ItemFn>(iconClick, item =>
         {
@@ -74,6 +78,7 @@ public unsafe class AutoTrade : Plugin
                 _iconClick!.OriginalFunction(item);
                 return;
             }
+            _game.Check();
             var resource = *(nint*)(item + ResourceOfItem);
             var on = _auto.Add(resource) || !_auto.Remove(resource);
             Log.Info($"auto trade {(on ? "on" : "off")} for a resource, {_auto.Count} on");
@@ -83,7 +88,7 @@ public unsafe class AutoTrade : Plugin
         _update = Patches.Hook<UpdateFn>(update, (item, unused) =>
         {
             _update!.OriginalFunction(item, unused);
-            Labels(item);
+            Log.Guard("labels", () => Labels(item));
         });
 
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);
@@ -94,36 +99,22 @@ public unsafe class AutoTrade : Plugin
     {
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "neededType");
         if (box == 0) return;
-        var label = Encoding.UTF8.GetBytes(Loc.Get("com.green1052.autotrade.auto", "Auto") + " ");
-        Labels(box, label, _auto.Contains(*(nint*)(item + ResourceOfItem)));
-    }
-
-    private static void Labels(nint box, ReadOnlySpan<byte> label, bool on)
-    {
-        var text = Gui.Text(box);
-        var labelled = text.StartsWith(label);
-        if (on && !labelled) Gui.SetText(box, [.. label, .. text]);
-        else if (!on && labelled) Gui.SetText(box, [.. text[label.Length..]]);
+        Gui.SetPrefix(box, Encoding.UTF8.GetBytes(Loc.Get("com.green1052.autotrade.auto", "Auto") + " "), _auto.Contains(*(nint*)(item + ResourceOfItem)));
     }
 
     private void Pump()
     {
-        var tag = Game.PlayerTag;
+        _game.Check();
+        var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         if (country == 0) return;
-        if (_session != (Game.State, tag)) // another game or country
-        {
-            _session = (Game.State, tag);
-            _auto.Clear();
-            _sent.Clear();
-        }
         var resources = *(nint*)(country + ResourcesOfCountry);
         if (resources == 0) return;
         var now = Environment.TickCount64;
         foreach (var resource in _auto)
         {
             var balance = _balance(resources, resource);
-            if (_sent.TryGetValue(resource, out var sent) && sent.Balance == balance && now < sent.Until) continue; // not in yet
+            if (_sent.TryGetValue(resource, out var sent) && balance <= sent.Balance && now < sent.Until) continue; // not in yet
             _sent.Remove(resource);
             if (balance < 0) Import(tag, resource, -balance, balance, now);
         }
@@ -132,7 +123,8 @@ public unsafe class AutoTrade : Plugin
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>
     private void Import(int tag, nint resource, int needed, int balance, long now)
     {
-        var faction = *(nint*)(*(nint*)(Game.Country(tag) + DiplomacyOfCountry) + Faction);
+        var ours = *(nint*)(Game.Country(tag) + DiplomacyOfCountry);
+        var faction = ours == 0 ? 0 : *(nint*)(ours + Faction);
         var importer = stackalloc long[1];
         *(int*)importer = tag;
         ((int*)importer)[1] = Game.TagIndex(tag);
@@ -144,27 +136,27 @@ public unsafe class AutoTrade : Plugin
             var exporterTag = exporter == 0 ? 0 : *(int*)(exporter + TagOfCountry);
             if (exporterTag == 0 || exporterTag == tag || *(int*)(exporter + StatesOfCountry) <= 0) continue;
             var exporterResources = *(nint*)(exporter + ResourcesOfCountry);
-            if (exporterResources == 0) continue;
+            var diplomacy = *(nint*)(exporter + DiplomacyOfCountry);
+            if (exporterResources == 0 || diplomacy == 0) continue;
 
             long max, existing;
             _maxExport(exporterResources, importer, resource, &max, &existing, 0);
-            var room = (max - existing) / Fixed;
+            var room = (max - existing) / Native.FixedPoint;
             if (room <= 0) continue;
             *(int*)exporterIdx = exporterTag;
             ((int*)exporterIdx)[1] = Game.TagIndex(exporterTag);
             long step;
             _amountForFactories(&step, resource, importer, exporterIdx, 1);
-            step = Math.Max(1, step / Fixed);
+            step = Math.Max(1, step / Native.FixedPoint);
             if (room < step) continue;
 
-            var influences = Native.PdxArray(exporter + Influence); // longs, read as nints (same size)
+            var influences = Native.PdxArray<long>(exporter + Influence);
             var index = ((int*)importer)[1];
             var influence = index < influences.Length ? influences[index] : 0;
             // Our subjects first, then our faction, then whoever can sell the most; trade influence breaks ties.
-            var diplomacy = *(nint*)(exporter + DiplomacyOfCountry);
             var relation = *(int*)(diplomacy + Overlord) == tag ? 2 : faction != 0 && *(nint*)(diplomacy + Faction) == faction ? 1 : 0;
-            var rank = (relation, room, (long)influence);
-            if (best.Tag == 0 || rank.CompareTo(best.Rank) > 0) best = (exporterTag, rank, room, existing / Fixed, step);
+            var rank = (relation, room, influence);
+            if (best.Tag == 0 || rank.CompareTo(best.Rank) > 0) best = (exporterTag, rank, room, existing / Native.FixedPoint, step);
         }
         if (best.Tag == 0) return; // nobody can sell (or no free civilian factories)
 

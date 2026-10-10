@@ -1,4 +1,3 @@
-using System.Text;
 using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
@@ -98,14 +97,14 @@ public unsafe class Queues : Plugin
     private IHook<NodeStatesFn>? _focusNodeStates;
     private delegate* unmanaged<nint, void> _techViewUpdateAllItems;
     private delegate* unmanaged<nint, nint, byte> _focusCompleted;
-    private readonly Dictionary<nint, (byte[] Name, byte[] Shown)> _labelledFocusItems = []; // the game's name, what we wrote
+    private readonly HashSet<nint> _numberedFocusItems = []; // focus items whose name has our "N. "
     private nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
     private bool _reportedNumberBox;
 
     private readonly Queue _research = new("research", Signatures.ResearchCommand, 0x40);
     private readonly Queue _focus = new("focus", Signatures.FocusCommand, 0x38);
     private readonly Queue _agency = new("agency upgrade", Signatures.AgencyCommand, 0x38);
-    private (nint GameState, int Tag) _session;
+    private PerGame _game = null!;
 
     public override void Load()
     {
@@ -119,11 +118,19 @@ public unsafe class Queues : Plugin
         _techViewUpdateAllItems = (delegate* unmanaged<nint, void>)Sig.Find(Signatures.TechViewUpdateAllItems);
         var focusNodeStates = Sig.Find(Signatures.FocusUpdateNodeStates);
         _focusCompleted = (delegate* unmanaged<nint, nint, byte>)Sig.Find(Signatures.FocusCompleted);
+        _game = new PerGame(() => // another game or country: queued pointers no longer apply
+        {
+            _research.Clear();
+            _focus.Clear();
+            _agency.Clear();
+            _numberedFocusItems.Clear();
+        });
 
         _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _techClick!.OriginalFunction(view, ev));
         _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
         _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
+            _game.Check();
             if (focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
             else if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
             else _focusClick!.OriginalFunction(view, focus, a3);
@@ -131,6 +138,7 @@ public unsafe class Queues : Plugin
         _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
         {
             if (!Gui.ShiftHeld) return _agencyClick!.OriginalFunction(entry);
+            _game.Check();
             AddLevel(*(nint*)(entry + AgencyOfEntry), *(nint*)(entry + UpgradeOfEntry));
             if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
             return 0;
@@ -138,8 +146,11 @@ public unsafe class Queues : Plugin
         _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
         {
             _agencyEntryRefresh!.OriginalFunction(entry);
-            ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
-            KeepClickable(entry);
+            Log.Guard("agency numbers", () =>
+            {
+                ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
+                KeepClickable(entry);
+            });
         });
         _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
         {
@@ -150,12 +161,12 @@ public unsafe class Queues : Plugin
         _techItemBonus = Patches.Hook<EntryFn>(techItemBonus, item =>
         {
             _techItemBonus!.OriginalFunction(item);
-            LabelTech(item);
+            Log.Guard("tech numbers", () => LabelTech(item));
         });
         _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
         {
             _focusNodeStates!.OriginalFunction(view, dt, cache);
-            LabelFocuses(view);
+            Log.Guard("focus numbers", () => LabelFocuses(view));
         });
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
@@ -165,6 +176,7 @@ public unsafe class Queues : Plugin
     {
         var status = *(nint*)(ev + StatusOfEvent);
         if (status == 0 || !Gui.ShiftHeld) return false;
+        _game.Check();
         Toggle(_research, *(nint*)(status + TechOfStatus));
         _techViewUpdateAllItems(view); // renumber every item now
         return true;
@@ -175,7 +187,7 @@ public unsafe class Queues : Plugin
     {
         var status = *(nint*)(item + StatusOfTechItem);
         var viewed = *(int*)(*(nint*)(item + ViewOfTechItem) + ViewedTagOfTechView);
-        if (status == 0 || viewed > 0 && viewed != Game.PlayerTag) return;
+        if (status == 0 || viewed > 0 && viewed != Game.ControlledTag) return;
         var tech = *(nint*)(status + TechOfStatus);
         var state = *(int*)(item + StateOfTechItem);
         if (state == TechResearched && _research.Items.Remove(tech)) Log.Info("research: dropped a queued tech that is already researched");
@@ -183,31 +195,26 @@ public unsafe class Queues : Plugin
         if (position == 0 || state == TechResearching) return;
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "bonus"); // every item but secret weapons has one
         if (box == 0) return;
-        Gui.SetText(box, [.. Encoding.ASCII.GetBytes($"{position}. "), .. Gui.Text(box)]);
+        Gui.Number(box, position);
         if (Gui.IsHidden(box)) Gui.Show(box);
     }
 
     /// <summary>
-    /// Keeps "N. " in front of queued focuses' names (set once by the game when it builds the items), and puts the game's
-    /// name back on focuses no longer queued. Runs every frame while the tree is open; SetText only when something changed.
+    /// Keeps "N. " in front of queued focuses' names (set once by the game when it builds the items), and takes it off
+    /// focuses no longer queued. Runs every frame while the tree is open; SetText only when something changed.
     /// </summary>
     private void LabelFocuses(nint view)
     {
         var viewed = *(nint*)(view + ViewedCountryOfFocusView);
-        if (viewed != 0 && *(int*)(viewed + TagOfCountry) != Game.PlayerTag) return;
+        if (viewed != 0 && *(int*)(viewed + TagOfCountry) != Game.ControlledTag) return;
         foreach (var item in Native.PdxArray(view + FocusItems))
         {
             var position = _focus.Items.IndexOf(*(nint*)(item + FocusOfItem)) + 1;
-            var known = _labelledFocusItems.TryGetValue(item, out var labelled);
-            if (position == 0 && !known) continue;
+            if (position == 0 && !_numberedFocusItems.Remove(item)) continue;
             var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "name");
             if (box == 0) continue;
-            var text = Gui.Text(box);
-            var name = known && text.SequenceEqual(labelled.Shown) ? labelled.Name : [.. text]; // else the game re-set it
-            var shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. name] : name;
-            if (!text.SequenceEqual(shown)) Gui.SetText(box, shown);
-            if (position > 0) _labelledFocusItems[item] = (name, shown);
-            else _labelledFocusItems.Remove(item);
+            Gui.Number(box, position);
+            if (position > 0) _numberedFocusItems.Add(item);
         }
     }
 
@@ -217,7 +224,8 @@ public unsafe class Queues : Plugin
     /// </summary>
     private void UnqueueFocus(nint focus)
     {
-        var country = Game.Country(Game.PlayerTag);
+        _game.Check();
+        var country = Game.Country(Game.ControlledTag);
         var progress = country == 0 ? 0 : *(nint*)(country + FocusOfCountry);
         var removed = new HashSet<nint> { focus };
         _focus.Items.Remove(focus);
@@ -317,24 +325,19 @@ public unsafe class Queues : Plugin
 
     private static int TimesDone(nint agency, nint upgrade)
     {
-        var pairs = *(nint*)(agency + Repetitions);
-        for (int i = 0, n = *(int*)(agency + Repetitions + 0xC); i < n; i++)
-            if (*(nint*)(pairs + 16 * i) == upgrade) return *(int*)(pairs + 16 * i + 8);
+        foreach (var done in Native.PdxArray<Repetition>(agency + Repetitions))
+            if (done.Upgrade == upgrade) return done.Times;
         return 0;
     }
 
+    private readonly record struct Repetition(nint Upgrade, int Times); // 16 bytes, padded like the game's pair
+
     private void Pump()
     {
-        var tag = Game.PlayerTag;
+        _game.Check();
+        var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         if (country == 0) return;
-        if (_session != (Game.State, tag)) // another game or country: queued pointers no longer apply
-        {
-            _session = (Game.State, tag);
-            _research.Clear();
-            _focus.Clear();
-            _agency.Clear();
-        }
 
         var research = *(nint*)(country + ResearchOfCountry);
         if (research != 0)

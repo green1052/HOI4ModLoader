@@ -7,11 +7,14 @@ namespace AirbaseCapacity;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
+    /// <summary>A string only <see cref="SendSelectedWings"/> references, to find it if the pattern stops matching.</summary>
+    public const string SendAnchor = "order_airwing_effect";
+
     /// <summary>
     /// UI: send the selected air wings to an airbase (CAirBase* dest). Every way of doing it ends here: right-clicking an
     /// airbase on the map, a carrier, a naval mission. It posts one vanilla transfer command per wing.
     /// </summary>
-    [Signature(Anchor = "order_airwing_effect")] public const string SendSelectedWings = "48 89 4C 24 ? 55 53 56 57 41 54 41 56 41 57 48 8D 6C 24 ? 48 81 EC B0 00 00 00 45 33 E4 41 8B DC 89 5D";
+    [Signature(Anchor = SendAnchor)] public const string SendSelectedWings = "48 89 4C 24 ? 55 53 56 57 41 54 41 56 41 57 48 8D 6C 24 ? 48 81 EC B0 00 00 00 45 33 E4 41 8B DC 89 5D";
 
     /// <summary>UI: the selected air wings (CPdxArray* out, int role filter); the send above gets its list from it.</summary>
     [Signature] public const string SelectedWings = "40 55 41 56 48 83 EC 38 4C 8B F1 8B EA 48 8B 0D ? ? ? ? 48 85 C9 0F 84 ? ? ? ? 48 81 C1 38 05 00 00";
@@ -42,7 +45,7 @@ public unsafe class AirbaseCapacity : Plugin
 
     public override void Load()
     {
-        var send = Sig.Find(Signatures.SendSelectedWings, "order_airwing_effect");
+        var send = Sig.Find(Signatures.SendSelectedWings, Signatures.SendAnchor);
         var selected = Sig.Find(Signatures.SelectedWings);
         _planesAt = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.PlanesAtBase);
 
@@ -55,7 +58,7 @@ public unsafe class AirbaseCapacity : Plugin
         _selected = Patches.Hook<SelectedFn>(selected, (wings, filter) =>
         {
             _selected!.OriginalFunction(wings, filter);
-            if (_dest != 0) KeepWhatFits(wings, _dest);
+            if (_dest != 0) Log.Guard("trim selection", () => KeepWhatFits(wings, _dest));
         });
     }
 
@@ -66,11 +69,10 @@ public unsafe class AirbaseCapacity : Plugin
         foreach (var wing in Native.PdxArray(dest + Incoming)) room -= *(int*)(wing + Planes);
 
         var id = *(ulong*)(dest + Handle);
-        var data = *(nint**)wings;
-        int count = *(int*)(wings + 0xC), kept = 0;
-        for (var i = 0; i < count; i++)
+        var data = Native.PdxArray<nint>(wings);
+        var kept = 0;
+        foreach (var wing in data)
         {
-            var wing = data[i];
             // Already there (vanilla cancels its transfer) or already flying there (counted above): no new room needed.
             // No pool counts as already there too, as vanilla treats it.
             var pool = *(nint*)(wing + Pool);
@@ -82,7 +84,7 @@ public unsafe class AirbaseCapacity : Plugin
             }
             data[kept++] = wing;
         }
-        if (kept < count) Log.Info($"sending {kept} of {count} air wings: the rest don't fit");
-        *(int*)(wings + 0xC) = kept;
+        if (kept < data.Length) Log.Info($"sending {kept} of {data.Length} air wings: the rest don't fit");
+        Native.SetPdxArraySize(wings, kept);
     }
 }

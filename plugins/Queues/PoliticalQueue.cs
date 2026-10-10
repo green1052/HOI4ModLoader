@@ -69,6 +69,8 @@ public unsafe class PoliticalQueue : Plugin
     private const int TargetTag = 32, TargetExtra = 36;
     private const int EnableSlot = 0x288, SetClickableSlot = 0x168; // CButton vtable: Enable(), SetClickable(bool)
     private const int ButtonState = 0xB0, Disabled = 3, ButtonFlags = 0xE4, Clickable = 0x08;
+    private const int AddIdeaPay = 56, ReplaceIdeaNew = 56, ReplaceIdeaPay = 64;                 // CAddIdeaCommand, CReplaceIdeaCommand
+    private const int TargetedTagOfCmd = 44, TargetedExtraOfCmd = 48, TargetedDecisionOfCmd = 56; // CSelectTargetedDecisionCommand
     private const long WaitMs = 5_000;                    // after a post: until political power changes, at most this long
 
     private enum Kind { Idea, Advisor, Decision, TargetedDecision }
@@ -92,11 +94,17 @@ public unsafe class PoliticalQueue : Plugin
 
     private readonly List<Entry> _queue = [];
     private (long PoliticalPower, long Until)? _waiting;
-    private (nint GameState, int Tag) _session;
+    private PerGame _game = null!;
 
     public override void Load()
     {
         _ideaListRefresh = (delegate* unmanaged<nint, void>)Sig.Find(PoliticalSignatures.IdeaListRefresh);
+        _game = new PerGame(() =>
+        {
+            _queue.Clear();
+            _waiting = null;
+            _forced.Clear();
+        });
 
         _ideaClick = Patches.Hook<OneFn>(Sig.Find(PoliticalSignatures.IdeaClick), impl =>
         {
@@ -104,15 +112,19 @@ public unsafe class PoliticalQueue : Plugin
             if (!Gui.ShiftHeld && _forced.Contains(item)) return 0;
             if (!Gui.ShiftHeld || item == 0 || *(byte*)(item + IdeaActive) != 0) return _ideaClick!.OriginalFunction(impl);
             Toggle(new Entry(Kind.Idea, *(nint*)(item + IdeaOfItem)));
-            var list = *(nint*)(*(nint*)(item + WindowOfIdeaItem) + ListOfIdeasWindow);
+            var window = *(nint*)(item + WindowOfIdeaItem);
+            var list = window == 0 ? 0 : *(nint*)(window + ListOfIdeasWindow);
             if (list != 0) _ideaListRefresh(list); // renumber now
             return 0;
         });
         _ideaUpdate = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.IdeaUpdate), (item, tag, slotIdea) =>
         {
             var result = _ideaUpdate!.OriginalFunction(item, tag, slotIdea);
-            Label(*(nint*)(item + IdeaName), new Entry(Kind.Idea, *(nint*)(item + IdeaOfItem)));
-            Force(item, *(nint*)(item + IdeaButton)); // disabled while unaffordable or not allowed
+            Log.Guard("idea numbers", () =>
+            {
+                Label(*(nint*)(item + IdeaName), new Entry(Kind.Idea, *(nint*)(item + IdeaOfItem)));
+                Force(item, *(nint*)(item + IdeaButton)); // disabled while unaffordable or not allowed
+            });
             return result;
         });
 
@@ -132,13 +144,13 @@ public unsafe class PoliticalQueue : Plugin
         {
             var result = _advisorUpdate!.OriginalFunction(item, status, flag);
             _forced.Remove(item); // a refresh runs Update first, then SetUnselectable or SetSelectable
-            LabelAdvisor(item);
+            Log.Guard("advisor numbers", () => LabelAdvisor(item));
             return result;
         });
         _advisorUnselectable = Patches.Hook<TwoFn>(Sig.Find(PoliticalSignatures.AdvisorUnselectable), (item, iconEnabled) =>
         {
             var result = _advisorUnselectable!.OriginalFunction(item, iconEnabled);
-            Force(item, *(nint*)(item + CharacterButton));
+            Log.Guard("advisor buttons", () => Force(item, *(nint*)(item + CharacterButton)));
             return result;
         });
 
@@ -163,15 +175,21 @@ public unsafe class PoliticalQueue : Plugin
         _decisionSet = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.DecisionSet), (item, decision, tag) =>
         {
             var result = _decisionSet!.OriginalFunction(item, decision, tag);
-            if (decision != 0) Label(*(nint*)(item + DecisionName), new Entry(Kind.Decision, decision));
-            Force(item, *(nint*)(item + DecisionButton)); // unaffordable: enabled but not clickable; unavailable: disabled
+            Log.Guard("decision numbers", () =>
+            {
+                if (decision != 0) Label(*(nint*)(item + DecisionName), new Entry(Kind.Decision, decision));
+                Force(item, *(nint*)(item + DecisionButton)); // unaffordable: enabled but not clickable; unavailable: disabled
+            });
             return result;
         });
         _targetedDecisionSet = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.TargetedDecisionSet), (item, target, tag) =>
         {
             var result = _targetedDecisionSet!.OriginalFunction(item, target, tag);
-            if (TargetedEntry(target) is { } entry) Label(*(nint*)(item + TargetedDecisionName), entry);
-            Force(item, *(nint*)(item + DecisionButton));
+            Log.Guard("targeted decision numbers", () =>
+            {
+                if (TargetedEntry(target) is { } entry) Label(*(nint*)(item + TargetedDecisionName), entry);
+                Force(item, *(nint*)(item + DecisionButton));
+            });
             return result;
         });
 
@@ -215,6 +233,7 @@ public unsafe class PoliticalQueue : Plugin
 
     private void Toggle(Entry entry)
     {
+        _game.Check();
         var index = _queue.FindIndex(e => Same(e, entry));
         if (index >= 0)
         {
@@ -233,29 +252,16 @@ public unsafe class PoliticalQueue : Plugin
     /// <summary>Puts "N. " in front of the name box's text if the entry is queued, and takes an old one off otherwise.</summary>
     private void Label(nint box, Entry entry)
     {
-        if (box == 0) return;
-        var text = Gui.Text(box);
-        var digits = 0;
-        while (digits < text.Length && char.IsAsciiDigit((char)text[digits])) digits++;
-        var name = digits > 0 && text[digits..].StartsWith(". "u8) ? text[(digits + 2)..] : text;
-        var position = _queue.FindIndex(e => Same(e, entry)) + 1;
-        var shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. name] : name.ToArray();
-        if (!text.SequenceEqual(shown)) Gui.SetText(box, shown);
+        if (box != 0) Gui.Number(box, _queue.FindIndex(e => Same(e, entry)) + 1);
     }
 
     private void Pump()
     {
-        var tag = Game.PlayerTag;
+        _game.Check();
+        var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         var politics = country == 0 ? 0 : *(nint*)(country + PoliticsOfCountry);
         if (politics == 0) return;
-        if (_session != (Game.State, tag)) // another game or country
-        {
-            _session = (Game.State, tag);
-            _queue.Clear();
-            _waiting = null;
-            _forced.Clear();
-        }
 
         // One at a time: the cost is paid when the command runs (a round trip later in multiplayer), so a second post could
         // pass the same check with the same political power.
@@ -269,9 +275,11 @@ public unsafe class PoliticalQueue : Plugin
         foreach (var entry in _queue)
         {
             if (!Post(entry, tag, active)) continue;
-            _queue.Remove(entry); // decisions can be repeatable: never post one twice
+            // Decisions can be repeatable: never post one twice. An idea stays until it shows up active (above), so one the
+            // game turns down when the command runs is tried again.
+            if (entry.Kind != Kind.Idea) _queue.Remove(entry);
             _waiting = (power, now + WaitMs);
-            Log.Info($"{entry.Kind}: taken, {_queue.Count} left");
+            Log.Info($"{entry.Kind}: taken");
             return;
         }
     }
@@ -283,15 +291,15 @@ public unsafe class PoliticalQueue : Plugin
             case Kind.Idea:
             {
                 var add = Commands.New(PoliticalSignatures.AddIdea, 0x40, tag, entry.Item);
-                *(byte*)(add + 56) = 1; // pay the cost
+                *(byte*)(add + AddIdeaPay) = 1;
                 if (Commands.TryPost(add)) return true;
                 var slot = *(nint*)(entry.Item + SlotOfIdea);
                 foreach (var old in activeIdeas) // a full slot (laws always are): replace what's in it
                 {
                     if (*(nint*)(old + SlotOfIdea) != slot) continue;
                     var replace = Commands.New(PoliticalSignatures.ReplaceIdea, 0x48, tag, old);
-                    *(nint*)(replace + 56) = entry.Item;
-                    *(byte*)(replace + 64) = 1;
+                    *(nint*)(replace + ReplaceIdeaNew) = entry.Item;
+                    *(byte*)(replace + ReplaceIdeaPay) = 1;
                     if (Commands.TryPost(replace)) return true;
                 }
                 return false;
@@ -304,9 +312,9 @@ public unsafe class PoliticalQueue : Plugin
             case Kind.TargetedDecision:
             {
                 var cmd = Commands.New(PoliticalSignatures.SelectTargetedDecision, 0x40, tag, 0);
-                *(int*)(cmd + 44) = entry.Target;
-                *(int*)(cmd + 48) = entry.Extra;
-                *(nint*)(cmd + 56) = entry.Item;
+                *(int*)(cmd + TargetedTagOfCmd) = entry.Target;
+                *(int*)(cmd + TargetedExtraOfCmd) = entry.Extra;
+                *(nint*)(cmd + TargetedDecisionOfCmd) = entry.Item;
                 return Commands.TryPost(cmd);
             }
             default: throw new System.Diagnostics.UnreachableException();
