@@ -120,13 +120,16 @@ public unsafe class FrontLine : Plugin
 
         if (!_rotation && !_plugging && !_escape && !_opportunity && !_mopUp) return;
         MainThread.Every(TimeSpan.FromSeconds(2), () => Manage(Game.ControlledTag, false));
-        if (!ai || Multiplayer) return; // AI decisions exist on one machine only; in multiplayer they'd be the host's to make
-        LoadAiFilters();
+        _aiOpportunity = Config.Bind("AI", "AiOpportunity", true,
+            "AI countries take empty enemy provinces next to their line with a fresh division (single player); vanilla's local attacks often skip them.");
+        _aiFront = ai;
+        if (!ai && !_aiOpportunity || Multiplayer) return; // AI decisions exist on one machine only; in multiplayer they'd be the host's to make
+        if (ai) LoadAiFilters(); // only rotation and plugging take divisions off fronts
         MainThread.Every(TimeSpan.FromMinutes(1), () =>
         {
-            if (_aiRotations + _aiPlugs + _aiEscapes > 0)
-                Log.Info($"AI, last minute: {_aiRotations} rotation(s), {_aiPlugs} plug(s), {_aiEscapes} escape(s)");
-            _aiRotations = _aiPlugs = _aiEscapes = 0;
+            if (_aiRotations + _aiPlugs + _aiEscapes + _aiAttacks > 0)
+                Log.Info($"AI, last minute: {_aiRotations} rotation(s), {_aiPlugs} plug(s), {_aiEscapes} escape(s), {_aiAttacks} empty province(s) taken");
+            _aiRotations = _aiPlugs = _aiEscapes = _aiAttacks = 0;
         });
         MainThread.Every(TimeSpan.FromSeconds(5), () =>
         {
@@ -225,10 +228,10 @@ public unsafe class FrontLine : Plugin
         foreach (var member in Native.PdxArray(order + MembersOfOrder))
             orders[member] = order;
 
-        if (_rotation) foreach (var group in groups) RotateArmy(country, tag, group, orders, now);
-        if (_plugging) Plug(country, tag, units, orders, now);
+        if (_rotation && (!_ai || _aiFront)) foreach (var group in groups) RotateArmy(country, tag, group, orders, now);
+        if (_plugging && (!_ai || _aiFront)) Plug(country, tag, units, orders, now);
         if (_escape && !_ai) Escape(country, tag, units, orders, now); // the AI re-places its own fronts: a pulled-out division leaves a hole
-        if ((_opportunity || _mopUp) && !_ai) Attack(country, tag, units, now); // the AI makes its own local attacks
+        if (_ai ? _aiOpportunity : _opportunity || _mopUp) Attack(country, tag, units, now); // AI: empty provinces only
     }
 
     private void RotateArmy(nint country, int tag, nint group, Dictionary<nint, nint> orders, long now)
@@ -378,7 +381,7 @@ public unsafe class FrontLine : Plugin
                 var target = Game.Province(id);
                 if (target == 0 || !Enemy(country, tag, target)) continue;
                 var empty = *(int*)(target + DivisionsInProvince) == 0;
-                var send = empty ? (_opportunity ? 1 : 0) : _mopUp && Surrounded(country, tag, target) ? 2 : 0;
+                var send = empty ? (_ai ? _aiOpportunity : _opportunity) ? 1 : 0 : !_ai && _mopUp && Surrounded(country, tag, target) ? 2 : 0;
                 for (var i = 0; i < send && spare > 0 && fresh.Count > 0; i++)
                 {
                     var unit = fresh[0];
@@ -390,6 +393,7 @@ public unsafe class FrontLine : Plugin
                 if (send == 0) continue;
                 _plugged[id] = now + PlugCooldownMs;
                 attacks++;
+                Count(ref _aiAttacks);
                 if (!_ai) Log.Info(empty ? "opportunity: a fresh division takes an empty enemy province" : "mop-up: fresh divisions attack surrounded enemy divisions");
             }
         }
@@ -459,7 +463,8 @@ public unsafe class FrontLine : Plugin
         Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && *(int*)(p + DivisionsInProvince) > 0 && Enemy(country, tag, p));
 
     // AI actions per minute, for the log (AI ones aren't logged one by one).
-    private int _aiRotations, _aiPlugs, _aiEscapes;
+    private int _aiRotations, _aiPlugs, _aiEscapes, _aiAttacks;
+    private bool _aiFront, _aiOpportunity;
 
     private void Count(ref int counter)
     {

@@ -15,3 +15,4 @@
  com.green1052.frontline.Opportunity:0 "Opportunity attack"
  com.green1052.frontline.MopUp:0 "Pocket mop-up"
  com.green1052.frontline.ApplyToAi:0 "AI too (single player)"
+ com.green1052.frontline.AiOpportunity:0 "AI: take empty provinces (single player)"

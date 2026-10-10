@@ -87,7 +87,7 @@ Front line micro a player does by hand. Divisions taken off a front go back onto
 - **Plugging:** a defence of ours that is being lost gets the nearest fresh division (resting, unassigned, or spare on a quiet part of a front).
 - **Escape:** a division in a salient whose way back narrows to one province next to the enemy pulls back before the pocket closes.
 - **Opportunity attack / mop-up:** empty enemy provinces next to the line are taken, surrounded enemy divisions attacked.
-- Settings: every threshold, each feature on/off, and rotation, plugging and escape for AI countries too (single player; their army management is kept off the divisions it handles).
+- Settings: every threshold, each feature on/off, rotation and plugging for AI countries too (single player; their army management is kept off the divisions it handles), and AI countries taking empty enemy provinces (single player, on by default).
 
 ### ChecksumPatcher
 Keeps achievements and ironman available when the checksum changes. Patched in memory only.
