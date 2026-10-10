@@ -3,3 +3,5 @@ obj/
 out/
 .idea/
 *.DotSettings.user
+# IDA database of hoi4.exe (the game's binary): never commit
+ida/
