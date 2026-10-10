@@ -142,7 +142,9 @@ public unsafe class AiAssist : Plugin
             "Armored and motorized divisions don't make local attacks into terrain that cripples them (forest, hills, marsh...) or across a river into mountains, marsh, jungle or cities.");
         _roles = Config.Bind("AI", "Roles", false,
             "Line infantry holds the line: provinces with only infantry make local attacks only into empty provinces or pockets; armored and breakthrough divisions do the pushing (not for armies with no such divisions).");
-        var concentration = Config.Bind("AI", "Concentration", true,
+        _holdLine = Config.Bind("AI", "HoldTheLine", true,
+            "At war, the AI keeps a division in every province of a front that faces enemy divisions; it no longer ships them all off (supply crisis, another front) and leaves the line empty while fighting.");
+        _concentration = Config.Bind("AI", "Concentration", true,
             "The AI keeps only a thin screen on fronts with no enemy at war (neutral or friendly borders) and sends the rest to fronts facing more enemy divisions than they hold; fronts at war are never thinned.");
         _targetValue = Config.Bind("AI", "TargetValue", true,
             "The AI's local attacks go for valuable provinces first: victory points, capitals, supply hubs, airfields, resources, empty or worn-out defences (after pockets, before front shortening).");
@@ -156,7 +158,7 @@ public unsafe class AiAssist : Plugin
         if (_pocketClosing || _frontShortening || _armorTerrain || _roles || _targetValue) LoadPockets();
         if (airRetreat) LoadAirRetreat();
         if (leaders) LoadLeaders();
-        if (concentration) LoadConcentration();
+        if (_concentration || _holdLine) LoadConcentration();
         MainThread.Every(TimeSpan.FromMinutes(1), () =>
         {
             var (held, steered, pulled, concentrated) = (Interlocked.Exchange(ref _held, 0), Interlocked.Exchange(ref _steered, 0), Interlocked.Exchange(ref _pulled, 0), Interlocked.Exchange(ref _concentrated, 0));
@@ -765,6 +767,7 @@ public unsafe class AiAssist : Plugin
 
     private IHook<GeneralRetFn>? _unitRequests;
     private int _concentrated;
+    private static bool _concentration, _holdLine;
     private const int FactorHours = 24, CalmHours = 168;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, double Factor)> Factors = new(); // AI front -> its factor, for a day
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> LastBattle = new();                 // AI front -> hour of its last battle
@@ -832,20 +835,21 @@ public unsafe class AiAssist : Plugin
             // So a factor holds for a day, and a front gives divisions away only a week after its last battle.
             var hour = *(int*)(Game.State + HourOfGameState);
             if (fighting) LastBattle[front] = hour;
-            double factor;
-            if (Factors.TryGetValue(front, out var kept) && hour - kept.Hour is >= 0 and < FactorHours) factor = kept.Factor; // (negative: another save)
-            else
+            var factor = 1.0;
+            if (_concentration)
             {
-                factor = !hostile ? QuietFactor
-                    : enemy > min ? HotBoost : 1;
-                Factors[front] = (hour, factor);
+                if (Factors.TryGetValue(front, out var kept) && hour - kept.Hour is >= 0 and < FactorHours) factor = kept.Factor; // (negative: another save)
+                else Factors[front] = (hour, factor = !hostile ? QuietFactor : enemy > min ? HotBoost : 1);
+                if (fighting || LastBattle.TryGetValue(front, out var battle) && hour - battle is >= 0 and < CalmHours) factor = Math.Max(factor, 1);
             }
-            if (fighting || LastBattle.TryGetValue(front, out var battle) && hour - battle is >= 0 and < CalmHours) factor = Math.Max(factor, 1);
-            if (factor == 1) continue;
+            // Hold the line: at war, every province of ours facing enemy divisions keeps a defender, whatever else (a supply
+            // crisis, another front) the game weighs; it would ship them off and leave the line empty while fighting.
+            var floor = _holdLine && hostile ? threatened.Count : 0;
+            if (factor == 1 && min >= floor) continue;
             min = (int)Math.Ceiling(min * factor);
             desired = (int)Math.Ceiling(desired * factor);
             if (factor < 1) max = (int)Math.Ceiling(max * factor); // the rest goes to the fronts that need it
-            min = Math.Max(min, Math.Max(threatened.Count, enemyProvinces > 0 ? 1 : 0)); // a defender for every province facing enemy divisions
+            min = Math.Max(min, Math.Max(floor, enemyProvinces > 0 && factor != 1 ? 1 : 0));
             desired = Math.Max(desired, min);
             max = Math.Max(max, desired);
             (*(int*)(front + MinWanted), *(int*)(front + DesiredWanted), *(int*)(front + MaxWanted)) = (min, desired, max);
