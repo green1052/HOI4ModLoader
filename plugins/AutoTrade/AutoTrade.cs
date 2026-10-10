@@ -30,8 +30,8 @@ public static class Signatures
 
 /// <summary>
 /// Shift+click a resource's icon in the trade view to switch auto trade on or off for it ("Auto" shows under it). While on,
-/// a shortage of that resource is imported from the country with the most trade influence that can sell it, with the trade
-/// view's own command (so multiplayer stays in sync).
+/// a shortage of that resource is imported with the trade view's own command (so multiplayer stays in sync), from our
+/// subjects first, then our faction, then the country that can sell the most.
 /// </summary>
 [Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class AutoTrade : Plugin
@@ -39,6 +39,7 @@ public unsafe class AutoTrade : Plugin
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.
     private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484, TagOfCountry = 8;
     private const int Influence = 0xF0;                         // CCountry: CPdxArray<long> trade influence, by importer TagIndex
+    private const int DiplomacyOfCountry = 0xF88, Overlord = 0x188, Faction = 0x290; // diplomacy block: overlord tag (0 = none), faction*
     private const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem
     private const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
     private const long Fixed = 100_000;
@@ -126,12 +127,13 @@ public unsafe class AutoTrade : Plugin
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>
     private void Import(int tag, nint resource, int needed, int balance, long now)
     {
+        var faction = *(nint*)(*(nint*)(Game.Country(tag) + DiplomacyOfCountry) + Faction);
         var importer = stackalloc long[1];
         *(int*)importer = tag;
         ((int*)importer)[1] = Game.TagIndex(tag);
 
         var exporterIdx = stackalloc long[1];
-        (int Tag, long Influence, long Room, long Existing, long Step) best = default;
+        (int Tag, (int Relation, long Room, long Influence) Rank, long Room, long Existing, long Step) best = default;
         foreach (var exporter in Game.Countries)
         {
             var exporterTag = exporter == 0 ? 0 : *(int*)(exporter + TagOfCountry);
@@ -153,8 +155,11 @@ public unsafe class AutoTrade : Plugin
             var influences = Native.PdxArray(exporter + Influence); // longs, read as nints (same size)
             var index = ((int*)importer)[1];
             var influence = index < influences.Length ? influences[index] : 0;
-            if (best.Tag == 0 || influence > best.Influence || influence == best.Influence && room > best.Room)
-                best = (exporterTag, influence, room, existing / Fixed, step);
+            // Our subjects first, then our faction, then whoever can sell the most; trade influence breaks ties.
+            var diplomacy = *(nint*)(exporter + DiplomacyOfCountry);
+            var relation = *(int*)(diplomacy + Overlord) == tag ? 2 : faction != 0 && *(nint*)(diplomacy + Faction) == faction ? 1 : 0;
+            var rank = (relation, room, (long)influence);
+            if (best.Tag == 0 || rank.CompareTo(best.Rank) > 0) best = (exporterTag, rank, room, existing / Fixed, step);
         }
         if (best.Tag == 0) return; // nobody can sell (or no free civilian factories)
 
