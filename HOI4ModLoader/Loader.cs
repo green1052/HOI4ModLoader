@@ -18,7 +18,7 @@ public static class Loader
 
     /// <summary>Every plugin found in the plugins folder at the last load, loaded or not, by id.</summary>
     internal static IReadOnlyList<PluginAttribute> Known { get; private set; } = [];
-    private static volatile bool _reloadRequested;
+    private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
     private static string _loadedFiles = "", _changedFiles = "";
     private static int _generation;
     private static bool _multiplayer;
@@ -63,8 +63,8 @@ public static class Loader
             if (hotReload) MainThread.Every(TimeSpan.FromSeconds(1), ReloadIfChanged);
             MainThread.Every(TimeSpan.FromMilliseconds(100), () =>
             {
-                if (!_reloadRequested) return;
-                _reloadRequested = false;
+                if (Environment.TickCount64 < _reloadAt) return;
+                _reloadAt = long.MaxValue;
                 Reload();
             });
             try { SettingsMods.Install(); }
@@ -72,7 +72,7 @@ public static class Loader
             try
             {
                 var version = typeof(Loader).Assembly.GetName().Version!.ToString(3);
-                VersionLabel.Install(() => $" | {Loaded.Count} plugins",
+                VersionLabel.Install(() => $" +{Loaded.Count}",
                     () => $"HOI4ModLoader {version}\n" + (Loaded.Count == 0 ? "No plugins loaded" : string.Join("\n", Loaded.Select(p => $"- {p.Info.Name} {p.Info.Version}"))));
             }
             catch (Exception e) { Log.Error($"version label: {e.Message}"); }
@@ -119,8 +119,11 @@ public static class Loader
         Reload();
     }
 
-    /// <summary>Reloads every plugin on the next main thread tick (e.g. after a plugin was switched on or off).</summary>
-    internal static void RequestReload() => _reloadRequested = true;
+    /// <summary>
+    /// Reloads every plugin shortly (e.g. after a plugin was switched on or off): once no further request came for half a
+    /// second, so a burst of clicks costs one reload.
+    /// </summary>
+    internal static void RequestReload() => _reloadAt = Environment.TickCount64 + 500;
 
     /// <summary>A plugin's config file.</summary>
     internal static ConfigFile Config(string id) => new(Path.Combine(ModsDir, "config", id + ".cfg"));

@@ -6,8 +6,8 @@ using Reloaded.Hooks.Definitions.X64;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Adds the loader to the main menu's version label: " | N plugins" on its line (a second line would run out of the menu
-/// frame), and a tooltip with the loader's version and the loaded plugins. Only that label changes: the game's version
+/// Adds the loader to the main menu's version label: " +N" (plugins) on its line (the label has room for little more,
+/// and a second line would run out of the menu frame), and a tooltip with the loader's version and the loaded plugins. Only that label changes: the game's version
 /// string (saves, multiplayer) is untouched.
 /// </summary>
 public static unsafe class VersionLabel

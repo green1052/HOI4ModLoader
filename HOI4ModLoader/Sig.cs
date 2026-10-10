@@ -41,6 +41,8 @@ public sealed unsafe class Image
     private readonly List<(nint Start, int Size, bool Code)> _sections = new();
     private readonly (int Begin, int End)[] _functions;
     private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = new(); // code sections with patched bytes put back
+    private readonly Dictionary<(string, int, string?), nint[]> _found = new();          // FindAll results
+    private readonly Dictionary<string, nint> _vtables = new();                          // VTable results
 
     private Image(nint b, bool relocated = true)
     {
@@ -75,6 +77,9 @@ public sealed unsafe class Image
     /// </summary>
     public nint[] FindAll(string pattern, int count = 1, string? anchor = null)
     {
+        // Code never moves and scans see it unpatched, so a result holds for the whole run (plugin reloads look it up again).
+        var key = (pattern, count, anchor);
+        if (_found.TryGetValue(key, out var found)) return found;
         var hits = Scan(pattern);
         if (anchor != null)
         {
@@ -83,7 +88,7 @@ public sealed unsafe class Image
         }
         if (hits.Count != count)
             throw new InvalidOperationException($"pattern matched {hits.Count}x (expected {count}): {pattern}{(anchor != null ? $" in functions using \"{anchor}\"" : "")}");
-        return hits.ToArray();
+        return _found[key] = hits.ToArray();
     }
 
     private List<nint> Scan(string pattern)
@@ -134,6 +139,7 @@ public sealed unsafe class Image
     /// </summary>
     public nint VTable(string className)
     {
+        if (_vtables.TryGetValue(className, out var known)) return known;
         var name = FindData(Encoding.ASCII.GetBytes($".?AV{className}@@\0"));
         if (name.Count != 1) throw new InvalidOperationException($"RTTI for {className} found {name.Count}x");
         var td = (int)(name[0] - 16 - _base);
@@ -141,7 +147,7 @@ public sealed unsafe class Image
         var locators = FindData(BitConverter.GetBytes(td)).Where(a => *(int*)(a - 12) == 1 && *(int*)(a - 8) == 0).Select(a => a - 12).ToList();
         var vtables = locators.SelectMany(col => FindData(BitConverter.GetBytes(_pointerBase + (col - _base)))).Select(a => a + 8).ToList();
         if (vtables.Count != 1) throw new InvalidOperationException($"vtable of {className} found {vtables.Count}x");
-        return vtables[0];
+        return _vtables[className] = vtables[0];
     }
 
     /// <summary>
