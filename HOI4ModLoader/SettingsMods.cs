@@ -192,7 +192,7 @@ internal static unsafe class SettingsMods
             !Loader.IsEnabled(plugin.Id) ? "Off." :
             plugin.AffectsGameState && Loader.Multiplayer ? "Off in multiplayer: it changes game rules." :
             plugin.MultiplayerOnly && !Loader.Multiplayer ? "Runs in multiplayer only." :
-            "Failed to load: see hoi4mods\\hoimod.log.");
+            "Failed to load: see HOI4ModLoader\\LogOutput.log.");
         if (plugin.AffectsGameState && !Loader.Multiplayer) text.Append(" Single player only: it changes game rules.");
         return text.ToString();
     }

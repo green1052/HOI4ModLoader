@@ -3,7 +3,7 @@
     <PropertyGroup>
         <!-- Game folder: Steam's uninstall entry for app 394360. Override with -p:HOI4Dir=... or the HOI4Dir environment variable. -->
         <HOI4Dir Condition="'$(HOI4Dir)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 394360', 'InstallLocation', null, RegistryView.Registry64, RegistryView.Registry32))</HOI4Dir>
-        <!-- Every build deploys into the game (version.dll + hoi4mods\). publish.bat points these at out\ for a release zip. -->
+        <!-- Every build deploys into the game (version.dll + HOI4ModLoader\). publish.bat points these at out\ for a release zip. -->
         <DeployDir Condition="'$(DeployDir)' == ''">$(HOI4Dir)</DeployDir>
         <!-- Regular HOI4 (Paradox) mods that some plugins ship, e.g. GUI files. -->
         <HOI4ModDir Condition="'$(HOI4ModDir)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.MyDocuments))\Paradox Interactive\Hearts of Iron IV\mod</HOI4ModDir>

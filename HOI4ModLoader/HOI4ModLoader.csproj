@@ -68,18 +68,18 @@
         <Exec Command="tar -xzf mimalloc.tar.gz" WorkingDirectory="$(MimallocDir)" />
     </Target>
 
-    <!-- Every build copies the loader into <DeployDir>\hoi4mods\core and version.dll next to hoi4.exe. Locked files (game running) only warn. -->
+    <!-- Every build copies the loader into <DeployDir>\HOI4ModLoader\core and version.dll next to hoi4.exe. Locked files (game running) only warn. -->
     <Target Name="DeployCore" AfterTargets="Build" Condition="'$(DeployDir)' != ''">
         <ItemGroup>
             <!-- FASM.DLL is the 32-bit assembler; hoi4.exe is 64-bit and uses FASMX64.DLL. -->
             <_CoreFile Include="$(OutDir)**\*" Exclude="$(OutDir)**\*.targets;$(OutDir)FASM.DLL" />
         </ItemGroup>
-        <Copy SourceFiles="@(_CoreFile)" DestinationFiles="@(_CoreFile->'$(DeployDir)\hoi4mods\core\%(RecursiveDir)%(Filename)%(Extension)')"
+        <Copy SourceFiles="@(_CoreFile)" DestinationFiles="@(_CoreFile->'$(DeployDir)\HOI4ModLoader\core\%(RecursiveDir)%(Filename)%(Extension)')"
               SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
         <Copy Condition="Exists('$(BootstrapDll)')" SourceFiles="$(BootstrapDll)" DestinationFolder="$(DeployDir)" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
     </Target>
 
-    <!-- -p:BundleRuntime=true ships the .NET runtime in hoi4mods\dotnet, so players don't need it installed. -->
+    <!-- -p:BundleRuntime=true ships the .NET runtime in HOI4ModLoader\dotnet, so players don't need it installed. -->
     <Target Name="BundleRuntime" AfterTargets="DeployCore" Condition="'$(BundleRuntime)' == 'true' And '$(DeployDir)' != ''">
         <PropertyGroup>
             <_Fxr>host\fxr\$(BundledNETCoreAppPackageVersion)\</_Fxr>
@@ -90,8 +90,8 @@
             <_Shared Include="$(NetCoreRoot)$(_Shared)**\*" />
         </ItemGroup>
         <Error Condition="'@(_Fxr)' == '' Or '@(_Shared)' == ''" Text=".NET runtime $(BundledNETCoreAppPackageVersion) not found under $(NetCoreRoot)." />
-        <Copy SourceFiles="@(_Fxr)" DestinationFiles="@(_Fxr->'$(DeployDir)\hoi4mods\dotnet\$(_Fxr)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-        <Copy SourceFiles="@(_Shared)" DestinationFiles="@(_Shared->'$(DeployDir)\hoi4mods\dotnet\$(_Shared)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(_Fxr)" DestinationFiles="@(_Fxr->'$(DeployDir)\HOI4ModLoader\dotnet\$(_Fxr)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(_Shared)" DestinationFiles="@(_Shared->'$(DeployDir)\HOI4ModLoader\dotnet\$(_Shared)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     </Target>
 
 </Project>

@@ -7,7 +7,7 @@ namespace HOI4ModLoader;
 
 public static class Loader
 {
-    /// <summary>&lt;game&gt;\hoi4mods (HOI4ModLoader.dll lives in hoi4mods\core).</summary>
+    /// <summary>&lt;game&gt;\HOI4ModLoader (HOI4ModLoader.dll lives in HOI4ModLoader\core).</summary>
     public static readonly string ModsDir = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(typeof(Loader).Assembly.Location)!, ".."));
 
     private static readonly string PluginsDir = Path.Combine(ModsDir, "plugins");
@@ -39,7 +39,7 @@ public static class Loader
             if (config.Bind("Debug", "WaitForDebugger", false, "Pause startup until a debugger attaches (Rider: Run > Attach to Process > hoi4.exe)."))
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
-                "Reload all plugins when a DLL in hoi4mods\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
+                "Reload all plugins when a DLL in HOI4ModLoader\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
             if (config.Bind("Performance", "Mimalloc", true, "Use mimalloc for the game's memory allocations instead of the Windows heap (takes effect at the next start)."))
             {
                 Patches.Owner = "HOI4ModLoader"; // never reverted: mimalloc's blocks can't go back to the Windows heap

@@ -1,6 +1,6 @@
 # HOI4ModLoader: HOI4 네이티브 C# 플러그인 로더
 
-BepInEx처럼 `hoi4.exe`에 C# 플러그인을 로드합니다. 플레이어는 `version.dll`과 `hoi4mods\` 폴더를 게임 폴더에 넣기만 하면 됩니다. 함수 훅은 [Reloaded.Hooks](https://github.com/Reloaded-Project/Reloaded.Hooks)를 씁니다.
+BepInEx처럼 `hoi4.exe`에 C# 플러그인을 로드합니다. 플레이어는 `version.dll`과 `HOI4ModLoader\` 폴더를 게임 폴더에 넣기만 하면 됩니다. 함수 훅은 [Reloaded.Hooks](https://github.com/Reloaded-Project/Reloaded.Hooks)를 씁니다.
 
 | 경로 | 역할 |
 |---|---|
@@ -13,21 +13,21 @@ BepInEx처럼 `hoi4.exe`에 C# 플러그인을 로드합니다. 플레이어는 
 게임 폴더 구성:
 ```
 version.dll
-hoi4mods\core\       로더 + Reloaded.Hooks
-hoi4mods\plugins\    플러그인 DLL
-hoi4mods\config\     플러그인별 .cfg (처음 실행 시 생성. Enabled, IgnoreGameVersion 등)
-hoi4mods\hoimod.log  실행마다 새로 씁니다
-hoi4mods\dotnet\     (선택) 동봉 런타임. 없으면 설치된 .NET 10을 씁니다
+HOI4ModLoader\core\       로더 + Reloaded.Hooks
+HOI4ModLoader\plugins\    플러그인 DLL
+HOI4ModLoader\config\     플러그인별 .cfg (처음 실행 시 생성. Enabled, IgnoreGameVersion 등)
+HOI4ModLoader\LogOutput.log  실행마다 새로 씁니다
+HOI4ModLoader\dotnet\     (선택) 동봉 런타임. 없으면 설치된 .NET 10을 씁니다
 ```
 
 ## 빌드
-Rider에서 `HOI4ModLoader.slnx`를 빌드하거나 `dotnet build`를 실행합니다. 빌드할 때마다 게임 폴더(Steam 레지스트리로 자동 탐색, `HOI4Dir`로 변경 가능)에 바로 배포됩니다. 게임이 켜져 있으면 플러그인은 핫 리로드되고, 코어(`hoi4mods\core`)처럼 잠긴 파일은 경고만 내고 넘어갑니다.
+Rider에서 `HOI4ModLoader.slnx`를 빌드하거나 `dotnet build`를 실행합니다. 빌드할 때마다 게임 폴더(Steam 레지스트리로 자동 탐색, `HOI4Dir`로 변경 가능)에 바로 배포됩니다. 게임이 켜져 있으면 플러그인은 핫 리로드되고, 코어(`HOI4ModLoader\core`)처럼 잠긴 파일은 경고만 내고 넘어갑니다.
 
 `bootstrap`(C++)은 C# 빌드가 `vswhere`로 VS C++ 도구를 찾아 소스가 바뀌었을 때만 빌드합니다. C++ MSBuild와 SDK 스타일 MSBuild를 한 솔루션에서 함께 쓸 수 없어서 `.slnx`에는 넣지 않았습니다.
 
 ### mimalloc
 게임의 메모리 할당(정적 링크된 CRT의 `malloc`/`free` 등)을 Windows 힙 대신 [mimalloc](https://github.com/microsoft/mimalloc)으로 처리합니다. `[Performance] Mimalloc = true`(기본값, 다음 실행부터 적용)로 켜고 끕니다.
-- 빌드할 때 Microsoft 공식 릴리스(Windows x64, 버전과 SHA-256 고정)를 받아 `hoi4mods\core\mimalloc.dll`(+ 의존하는 `mimalloc-redirect.dll`)로 배포합니다. 저장소에는 소스도 바이너리도 넣지 않습니다.
+- 빌드할 때 Microsoft 공식 릴리스(Windows x64, 버전과 SHA-256 고정)를 받아 `HOI4ModLoader\core\mimalloc.dll`(+ 의존하는 `mimalloc-redirect.dll`)로 배포합니다. 저장소에는 소스도 바이너리도 넣지 않습니다.
 - 게임 CRT가 시작되기 전에 로더가 게임의 할당 함수 5개를 `version.dll` 안의 짧은 네이티브 코드(`bootstrap\allocator.c`)로 돌립니다. 할당마다 관리 코드를 거치지 않게 하려고 네이티브로 두었습니다. mimalloc이 할당하지 않은 메모리는 원래 CRT 힙으로 돌려보냅니다.
 - 프로세스 전체(ucrtbase)의 malloc 교체는 끕니다(`MIMALLOC_DISABLE_REDIRECT=1`). 게임 본체는 정적 CRT라 영향이 없고, 다른 DLL만 바뀌어 이득 없이 위험만 커지기 때문입니다.
 - 측정으로는 차이가 오차 범위 안이었습니다(게임 하루 처리 시간 평균 약 11% 감소, 회차 간 편차 최대 ±15%).
@@ -69,14 +69,14 @@ public class MyPlugin : Plugin
 - `Patches`는 플러그인별로 패치를 기록합니다. 같은 바이트를 두 플러그인이 패치하면 거부하고, 로드에 실패하면 되돌립니다.
 
 ## 디버깅
-`hoi4mods\config\HOI4ModLoader.cfg`에서 `WaitForDebugger = True`로 두고 게임을 켭니다. 그다음 Rider의 **Run → Attach to Process → hoi4.exe**로 붙이면 `Load()`부터 브레이크포인트가 걸립니다.
+`HOI4ModLoader\config\HOI4ModLoader.cfg`에서 `WaitForDebugger = True`로 두고 게임을 켭니다. 그다음 Rider의 **Run → Attach to Process → hoi4.exe**로 붙이면 `Load()`부터 브레이크포인트가 걸립니다.
 
 ## 핫 리로드
-게임이 켜진 채로 플러그인을 다시 빌드하면, 로더가 `hoi4mods\plugins`의 DLL이 바뀐 것을 감지해(1초 간격, 복사가 끝날 때까지 대기) 모든 플러그인을 다시 로드합니다.
+게임이 켜진 채로 플러그인을 다시 빌드하면, 로더가 `HOI4ModLoader\plugins`의 DLL이 바뀐 것을 감지해(1초 간격, 복사가 끝날 때까지 대기) 모든 플러그인을 다시 로드합니다.
 - 기존 패치를 모두 되돌립니다. 훅이 덮어쓴 바이트까지 원래대로 돌려놓으므로 시그니처가 다시 맞습니다. 그다음 새 DLL로 `Load()`를 다시 실행합니다.
 - 플러그인은 메모리로 읽어 로드하므로 DLL 파일이 잠기지 않습니다. 이전 버전은 메모리에 남습니다(재시작하면 정리됨).
 - 플러그인 상태(예: 대기열)는 초기화됩니다.
-- 끄려면 `hoi4mods\config\HOI4ModLoader.cfg`에서 `HotReload = False`로 둡니다.
+- 끄려면 `HOI4ModLoader\config\HOI4ModLoader.cfg`에서 `HotReload = False`로 둡니다.
 - `MainThread.Every`와 패치는 `Load()` 안에서 등록해야 리로드 때 함께 정리됩니다.
 
 ## 멀티플레이

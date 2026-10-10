@@ -1,6 +1,6 @@
 // version.dll proxy, the only native piece (like BepInEx's Doorstop).
 // Forwards the real version.dll exports, and right before hoi4.exe's entry point boots .NET
-// and calls HOI4ModLoader.Loader.Init from hoi4mods\core\HOI4ModLoader.dll.
+// and calls HOI4ModLoader.Loader.Init from HOI4ModLoader\core\HOI4ModLoader.dll.
 #include <windows.h>
 #include <cstdint>
 #include <string>
@@ -74,9 +74,9 @@ static std::wstring FindHostFxr(const std::wstring& root) {
 static void BootDotnet() {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    std::wstring mods = std::wstring(exe, wcsrchr(exe, L'\\')) + L"\\hoi4mods";
+    std::wstring mods = std::wstring(exe, wcsrchr(exe, L'\\')) + L"\\HOI4ModLoader";
 
-    // A runtime shipped in hoi4mods\dotnet wins; otherwise the installed one.
+    // A runtime shipped in HOI4ModLoader\dotnet wins; otherwise the installed one.
     std::wstring root = mods + L"\\dotnet";
     if (!IsDir(root)) {
         wchar_t env[MAX_PATH];
@@ -85,7 +85,7 @@ static void BootDotnet() {
     }
     std::wstring fxrPath = FindHostFxr(root);
     HMODULE fxr = fxrPath.empty() ? nullptr : LoadLibraryW(fxrPath.c_str());
-    if (!fxr) return Fail(L".NET 10 runtime not found. Install the .NET 10 Runtime (x64) or use a release that bundles hoi4mods\\dotnet.");
+    if (!fxr) return Fail(L".NET 10 runtime not found. Install the .NET 10 Runtime (x64) or use a release that bundles HOI4ModLoader\\dotnet.");
 
     auto init = (hostfxr_initialize_for_runtime_config_fn)GetProcAddress(fxr, "hostfxr_initialize_for_runtime_config");
     auto getDelegate = (hostfxr_get_runtime_delegate_fn)GetProcAddress(fxr, "hostfxr_get_runtime_delegate");

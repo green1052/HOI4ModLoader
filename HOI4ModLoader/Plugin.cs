@@ -36,12 +36,12 @@ public sealed class DependencyAttribute(string id) : Attribute
     public string Id { get; } = id;
 }
 
-/// <summary>Base class for plugins. Every subclass in hoi4mods\plugins\*.dll is loaded before the game's entry point, and anew on hot reload.</summary>
+/// <summary>Base class for plugins. Every subclass in HOI4ModLoader\plugins\*.dll is loaded before the game's entry point, and anew on hot reload.</summary>
 public abstract class Plugin
 {
     public PluginAttribute Info { get; internal set; } = null!;
 
-    /// <summary>hoi4mods\config\&lt;Id&gt;.cfg</summary>
+    /// <summary>HOI4ModLoader\config\&lt;Id&gt;.cfg</summary>
     public ConfigFile Config { get; internal set; } = null!;
 
     public Logger Log { get; internal set; } = null!;

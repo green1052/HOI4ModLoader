@@ -12,7 +12,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Provided at runtime by hoi4mods\core. -->
+        <!-- Provided at runtime by HOI4ModLoader\core. -->
         <ProjectReference Include="$(MSBuildThisFileDirectory)..\HOI4ModLoader\HOI4ModLoader.csproj" Private="false" />
     </ItemGroup>
 
