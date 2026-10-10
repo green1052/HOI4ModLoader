@@ -1,0 +1,5 @@
+﻿l_korean:
+ com.green1052.supplyoverlay.name:0 "보급 오버레이"
+ com.green1052.supplyoverlay.desc:0 "Ctrl+Alt+S를 누르면 보급을 잃은 사단마다 자기를 먹이는 허브까지 화살표를 그립니다. 어떤 지도 모드에서도 됩니다."
+ com.green1052.supplyoverlay.Toggle:0 "토글 키"
+ com.green1052.supplyoverlay.Toggle.desc:0 "Ctrl+Alt+S를 누르면 보급을 잃은 사단의 보급이 어디서 오는지 보여줍니다."

@@ -46,6 +46,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 | PlanTools | Batch stance and battle-plan controls for all your armies at once | ✅ |
 | WarStats | A war ledger: casualties, war score and equipment stockpile trends of every war, in one window | ✅ |
+| SupplyOverlay | Where a starving division's supply comes from, drawn on any map mode | ✅ |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show `N. ` in front of their name.
@@ -104,6 +105,9 @@ Hotkeys for all your armies and army groups at once, each posting the same comma
 
 ### WarStats
 A button under the topbar's flag opens a war ledger: every war with the casualties both sides have taken and the war score, biggest wars first, plus each produced equipment's stockpile as a 30-day trend line. Read-only, updated every second.
+
+### SupplyOverlay
+**Ctrl+Alt+S** draws an arrow from the supply hub feeding each of your starving divisions to the division itself, in the supply map's own arrow style — in any map mode, without switching. Read-only, refreshed while on.
 
 ### AiAssist
 An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.
