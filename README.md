@@ -45,7 +45,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | NoTelemetry | Blocks gameplay telemetry | ✅ |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 | PlanTools | Batch stance and battle-plan controls for all your armies at once | ✅ |
-| WarStats | A war ledger: casualties and war score of every war, in one window | ✅ |
+| WarStats | A war ledger: casualties, war score and equipment stockpile trends of every war, in one window | ✅ |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show `N. ` in front of their name.
@@ -103,7 +103,7 @@ Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports 
 Hotkeys for all your armies and army groups at once, each posting the same command the battle-plan window's button posts: Ctrl+Alt+1/2/3 sets every stance (careful, balanced, rush), Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them. Each key is a setting.
 
 ### WarStats
-A button under the topbar's flag opens a war ledger: every war with the casualties both sides have taken and the war score, biggest wars first. Read-only, updated every second.
+A button under the topbar's flag opens a war ledger: every war with the casualties both sides have taken and the war score, biggest wars first, plus each produced equipment's stockpile as a 30-day trend line. Read-only, updated every second.
 
 ### AiAssist
 An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.

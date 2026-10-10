@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
@@ -17,6 +18,9 @@ public static class Signatures
     /// <summary>The class of every .gui container window: the implementation of its Find-text-box vtable slot is hooked
     /// to catch the topbar's pointer, the first time the game looks a topbar text box up by name.</summary>
     [VTable] public const string ContainerWindow = "CContainerWindow";
+
+    /// <summary>CLogistics::GetBalance(logistics, long* out, CEquipmentType* archetype): stockpile - need - net lend-lease (fixed point).</summary>
+    [Signature] public const string GetBalance = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 49 8B D8 48 8B F2 48 8B F9 E8 ? ? ? ? 45 33 C9";
 }
 
 /// <summary>
@@ -37,23 +41,50 @@ public unsafe class WarStats : Plugin
     private const int ButtonSlot = 13, WindowSlot = 55;
     private const int NameOfWindow = 0x15D0;        // container: descriptor whose +0x48 std::string is the .gui name
     private const int War = 14346;
+    private const int ProductionOfCountry = 0xF68, LogisticsOfCountry = 0xF98, MilitaryLines = 88; // AutoProduction's layouts
+    private const int VariantOfLine = 136, TypeOfVariant = 1008, ArchetypeOfType = 1240;
+    private const int Days = 30;                    // days of equipment stockpile history kept
 
     [Function(CallingConventions.Microsoft)] private delegate nint FindFn(nint window, nint name, byte logIfMissing);
 
+    private delegate* unmanaged<nint, long*, nint, long*> _balance;
     private IHook<FindFn>? _find;
-    private nint _window, _text;
+    private nint _window, _text, _date;
+    private byte[] _day = [];                       // the date part of the topbar's date text, last seen
+    private readonly Dictionary<nint, List<long>> _history = []; // archetype -> stockpile per day (fixed point)
+    private readonly Dictionary<nint, string> _names = [];       // archetype -> its loc key
     private bool _shown, _capturing, _reportedMissing;
 
     public override void Load()
     {
         var enabled = Config.Bind("Window", "Enabled", true, "The war statistics button under the topbar's flag.");
+        _balance = (delegate* unmanaged<nint, long*, nint, long*>)Sig.Find(Signatures.GetBalance);
         _find = Patches.Hook<FindFn>(*(nint*)(Sig.VTable(Signatures.ContainerWindow) + FindTextBoxSlot * 8),
             (window, name, log) =>
             {
                 if (_window == 0 && !_capturing) Capture(window, enabled);
                 return _find!.OriginalFunction(window, name, log);
             });
-        MainThread.Every(TimeSpan.FromSeconds(1), () => { if (_shown) Refresh(); }); // casualties are cumulative: live reading needs no history
+        MainThread.Every(TimeSpan.FromSeconds(1), Tick);
+    }
+
+    /// <summary>Casualties are cumulative (read live); the equipment flow needs a sample a day, off the topbar's date text.</summary>
+    private void Tick()
+    {
+        if (_window == 0 || Game.ControlledTag == 0)
+        { // the menu: the topbar is gone, and the game rebuilds it (our hook catches it) when a game starts
+            if (_window != 0) { _window = 0; _shown = false; _day = []; _history.Clear(); }
+            return;
+        }
+        var text = Gui.Text(_date);
+        var afterTime = text.IndexOf((byte)' ') + 1; // "7:00 29, September 1939": the date is everything past the time
+        var day = text[Math.Min(afterTime, text.Length)..];
+        if (!day.SequenceEqual(_day))
+        {
+            _day = [.. day];
+            Sample();
+        }
+        if (_shown) Refresh();
     }
 
     /// <summary>The game looks its topbar text boxes up by name: the first such lookup hands us the topbar itself.</summary>
@@ -78,6 +109,7 @@ public unsafe class WarStats : Plugin
                 return;
             }
             if (!enabled) Gui.Hide(button);
+            _date = Gui.FindTextBox(Gui.Find(topbar, WindowSlot, "time_control_window"), "DateText");
             Gui.ShowWindow(_window, false);
             Gui.OnClick(button, Toggle);
         }
@@ -121,7 +153,76 @@ public unsafe class WarStats : Plugin
                 .Append("    ").Append(Loc.Get("com.green1052.warstats.score", "war score")).Append(' ').Append(war.Score)
                 .Append('\n');
         if (text.Length == 0) text.Append(Loc.Get("com.green1052.warstats.none", "No wars."));
+        if (_history.Count > 0)
+        {
+            text.Append('\n').Append(Loc.Get("com.green1052.warstats.equipment", "Equipment stockpile")).Append(" (").Append(Days).Append(')').Append('\n');
+            var index = 0;
+            foreach (var (archetype, run) in _history)
+                text.Append("  ").Append(Name(archetype, index++)).Append(' ', 2).Append(Fmt(run[^1] / Native.FixedPoint))
+                    .Append("  ").Append(Bar(run)).Append('\n');
+        }
         Gui.SetText(_text, Gui.Literal(text.ToString()));
+    }
+
+    /// <summary>One stockpile sample per equipment archetype the country produces lines for.</summary>
+    private void Sample()
+    {
+        var country = Game.Country(Game.ControlledTag);
+        if (country == 0) { _history.Clear(); return; } // back to the menu: a new game's history starts over
+        var production = *(nint*)(country + ProductionOfCountry);
+        var logistics = *(nint*)(country + LogisticsOfCountry);
+        if (production == 0 || logistics == 0) return;
+        var seen = new HashSet<nint>();
+        foreach (var line in Native.PdxArray(production + MilitaryLines).ToArray())
+        {
+            var variant = *(nint*)(line + VariantOfLine);
+            var type = variant == 0 ? 0 : *(nint*)(variant + TypeOfVariant);
+            var archetype = type == 0 ? 0 : *(nint*)(type + ArchetypeOfType);
+            if (archetype == 0 || !seen.Add(archetype)) continue;
+            long balance;
+            _balance(logistics, &balance, archetype);
+            var run = _history.TryGetValue(archetype, out var list) ? list : _history[archetype] = [];
+            run.Add(balance);
+            if (run.Count > Days) run.RemoveAt(0);
+        }
+        foreach (var gone in _history.Keys.Where(k => !seen.Contains(k)).ToArray()) _history.Remove(gone);
+    }
+
+    /// <summary>The archetype's loc key: the std::string it holds (equipment ids are [a-z0-9_]); else a placeholder.</summary>
+    private string Name(nint archetype, int index)
+    {
+        if (_names.TryGetValue(archetype, out var known)) return known;
+        var guessed = TryName(archetype + 0x440) ?? TryName(archetype + 0x468) ?? $"equipment {index}";
+        if (guessed.StartsWith("equipment "))
+            Log.Info($"equipment name field not found at 0x{(archetype + 0x440):X} or 0x{(archetype + 0x468):X}: "
+                + $"size0 {*(long*)(archetype + 0x450)}, size1 {*(long*)(archetype + 0x478)}");
+        var name = Loc.Get(guessed, guessed);
+        _names[archetype] = name;
+        return name;
+    }
+
+    /// <summary>The std::string at <paramref name="at"/> when it plausibly is one holding an equipment id, else null.</summary>
+    private static string? TryName(nint at)
+    {
+        var size = *(long*)(at + 0x10);
+        var cap = *(long*)(at + 0x18);
+        if (size is < 1 or > 0x100 || cap < 15 || cap < size) return null; // a sane std::string: SSO or a heap buffer
+        var bytes = Native.MsvcString(at);
+        foreach (var b in bytes) // an equipment id: [a-z0-9_]
+            if (b < '0' || b > 'z' || (b > '9' && b < 'a' && b != '_')) return null;
+        return bytes.IsEmpty ? null : Native.Utf8(bytes);
+    }
+
+    /// <summary>The run as a text sparkline: '.' when out of stock, then rising through ":-=+*#".</summary>
+    private static string Bar(List<long> run)
+    {
+        const string ramp = ".:-=+*#";
+        var min = run.Min();
+        var max = run.Max();
+        var bar = new char[run.Count];
+        for (var i = 0; i < run.Count; i++)
+            bar[i] = run[i] <= 0 ? '.' : ramp[Math.Clamp((int)((run[i] - min) * (ramp.Length - 1) / Math.Max(1, max - min)), 1, ramp.Length - 1)];
+        return new string(bar);
     }
 
     /// <summary>The weighted points of one side's war score breakdown (land, occupation, bombing, sinkings, ...).</summary>
