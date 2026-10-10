@@ -17,6 +17,14 @@ HOI4ModLoader\LogOutput.log  실행마다 새로 씁니다
 
 게임 설정 창의 **모드** 탭에서 플러그인을 켜고 끄고, 플러그인별 설정을 바꿀 수 있습니다. 메인 메뉴 버전 표시에 마우스를 올리면 로드된 플러그인 목록이 보입니다.
 
+## mimalloc
+게임이 메모리를 할당하고 해제할 때 Windows 기본 힙 대신 Microsoft의 [mimalloc](https://github.com/microsoft/mimalloc)을 씁니다.
+- **끄기:** `config\HOI4ModLoader.cfg`에서 `[Performance] Mimalloc = False`로 두면 다음 실행부터 적용됩니다. 튕김이나 메모리 문제가 의심될 때 먼저 꺼 보세요.
+- **효과:** 게임 속도를 측정해 보니 차이가 오차 범위 안이었습니다. 눈에 띄게 빨라지지는 않습니다.
+- **파일:** `core\mimalloc.dll`, `core\mimalloc-redirect.dll`. 빌드할 때 Microsoft 공식 릴리스(버전과 SHA-256 고정)를 받아 넣으며, 저장소에는 들어 있지 않습니다.
+- **동작:** 게임 exe는 할당 함수(`malloc`, `calloc`, `realloc`, `free`, `_msize`)를 자체적으로 들고 있습니다(정적 CRT). 로더가 게임 시작 전에 이 함수들을 `version.dll` 안의 짧은 네이티브 코드(`bootstrap\allocator.c`)로 돌립니다. mimalloc 이전에 할당된 메모리는 원래 힙으로 해제하므로 섞여도 안전합니다.
+- 게임 exe 밖의 DLL은 그대로 둡니다(`MIMALLOC_DISABLE_REDIRECT=1`). 바꿔도 게임 본체에는 영향이 없고 위험만 늘기 때문입니다.
+
 ## 구조
 | 경로 | 역할 |
 |---|---|
@@ -34,13 +42,6 @@ HOI4ModLoader\LogOutput.log  실행마다 새로 씁니다
 ```
 dotnet build -c Release -p:DeployDir=%CD%\out -p:HOI4ModDir=%CD%\out\mod
 ```
-
-### mimalloc
-게임의 `malloc`/`free`(정적 CRT)를 [mimalloc](https://github.com/microsoft/mimalloc)으로 돌립니다. `[Performance] Mimalloc`(기본 켜짐, 다음 실행부터 적용)으로 끕니다.
-- 빌드할 때 공식 릴리스(버전, SHA-256 고정)를 받아 배포합니다.
-- 할당 함수는 `version.dll` 안의 네이티브 코드(`bootstrap\allocator.c`)로 처리합니다. mimalloc이 할당하지 않은 메모리는 CRT 힙으로 돌려보냅니다.
-- 프로세스 전체 교체(ucrtbase)는 끕니다. 게임 본체에는 영향이 없고 다른 DLL만 바뀌기 때문입니다.
-- 측정한 성능 차이는 오차 범위 안이었습니다.
 
 ## 플러그인 작성
 ```csharp
