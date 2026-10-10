@@ -14,7 +14,7 @@ public static class MainThread
     public delegate int PeekMessageFn(nint msg, nint hwnd, uint min, uint max, uint remove);
 
     private static readonly int Id = Environment.CurrentManagedThreadId; // plugins load on the main thread
-    private static readonly List<Timer> Timers = new();
+    private static readonly List<Timer> Timers = [];
     private static IHook<PeekMessageFn>? _hook;
     private static readonly Logger Log = new("MainThread");
 

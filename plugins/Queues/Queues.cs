@@ -98,7 +98,7 @@ public unsafe class Queues : Plugin
     private IHook<NodeStatesFn>? _focusNodeStates;
     private delegate* unmanaged<nint, void> _techViewUpdateAllItems;
     private delegate* unmanaged<nint, nint, byte> _focusCompleted;
-    private readonly Dictionary<nint, (byte[] Name, byte[] Shown)> _labelledFocusItems = new(); // the game's name, what we wrote
+    private readonly Dictionary<nint, (byte[] Name, byte[] Shown)> _labelledFocusItems = []; // the game's name, what we wrote
     private nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
     private bool _reportedNumberBox;
 
@@ -203,8 +203,8 @@ public unsafe class Queues : Plugin
             var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "name");
             if (box == 0) continue;
             var text = Gui.Text(box);
-            var name = known && text.SequenceEqual(labelled.Shown) ? labelled.Name : text.ToArray(); // else the game re-set it
-            byte[] shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. name] : name;
+            var name = known && text.SequenceEqual(labelled.Shown) ? labelled.Name : [.. text]; // else the game re-set it
+            var shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. name] : name;
             if (!text.SequenceEqual(shown)) Gui.SetText(box, shown);
             if (position > 0) _labelledFocusItems[item] = (name, shown);
             else _labelledFocusItems.Remove(item);
@@ -399,9 +399,9 @@ public unsafe class Queues : Plugin
         public string Name { get; } = name;
         public string Command { get; } = command;
         public int CommandSize { get; } = commandSize;
-        public List<nint> Items { get; } = new();
-        public Dictionary<int, (nint Item, long Until)> Sent { get; } = new(); // by slot: sent, not seen running yet
-        private readonly Dictionary<int, nint> _running = new(); // by slot: what was running at the last pump
+        public List<nint> Items { get; } = [];
+        public Dictionary<int, (nint Item, long Until)> Sent { get; } = []; // by slot: sent, not seen running yet
+        private readonly Dictionary<int, nint> _running = []; // by slot: what was running at the last pump
 
         /// <summary>
         /// <paramref name="item"/> is running in <paramref name="slot"/>, whether we sent it or the player started it. Takes one

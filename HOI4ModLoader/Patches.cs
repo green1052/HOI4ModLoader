@@ -16,15 +16,17 @@ public static unsafe partial class Patches
     /// <summary>Plugin id patches are recorded against (set by the loader around <see cref="Plugin.Load"/>).</summary>
     internal static string? Owner;
 
-    private static readonly Dictionary<long, string> Claims = new();
-    private static readonly Dictionary<string, List<Action>> Undo = new();
-    private static readonly List<object> KeepAlive = new();
+    private static readonly Dictionary<long, string> Claims = [];
+    private static readonly Dictionary<string, List<Action>> Undo = [];
+    // Holding them is the point: a thread may still be inside a reverted hook.
+    // ReSharper disable once CollectionNeverQueried.Local
+    private static readonly List<object> KeepAlive = [];
 
     /// <summary>
     /// The game's own bytes at every address a patch or hook changed (first one wins: a hook over a hook keeps the game's),
     /// so signature scans still find functions another plugin already hooked.
     /// </summary>
-    internal static readonly Dictionary<nint, byte[]> Originals = new();
+    internal static readonly Dictionary<nint, byte[]> Originals = [];
     internal static int OriginalsVersion;
     private static readonly Logger Log = new("Patches");
 
@@ -69,6 +71,7 @@ public static unsafe partial class Patches
         var args = typeof(T).GetMethod("Invoke")!.GetParameters().Select(p => Expression.Parameter(p.ParameterType, p.Name)).ToArray();
         IEnumerable<Expression> argValues = args;
         var ex = Expression.Parameter(typeof(Exception), "e");
+        // ReSharper disable once AccessToModifiedClosure
         Expression<Func<T>> original = () => hook!.OriginalFunction; // reads `hook` when called, i.e. after it's assigned below
         var guarded = Expression.Lambda<T>(Expression.TryCatch(
             Expression.Invoke(Expression.Constant(detour), argValues),
@@ -112,11 +115,11 @@ public static unsafe partial class Patches
     /// </summary>
     private static void Restorable(nint at, Action activate, Action disable, object hook)
     {
-        const int Window = 64; // a hook's jump plus the instructions it cut through
-        var before = new ReadOnlySpan<byte>((void*)at, Window).ToArray();
+        const int window = 64; // a hook's jump plus the instructions it cut through
+        var before = new ReadOnlySpan<byte>((void*)at, window).ToArray();
         activate();
-        var after = new ReadOnlySpan<byte>((void*)at, Window).ToArray();
-        var changed = Window;
+        var after = new ReadOnlySpan<byte>((void*)at, window).ToArray();
+        var changed = window;
         while (changed > 0 && before[changed - 1] == after[changed - 1]) changed--;
         RememberOriginal(at, before[..changed]);
         Record(() =>
@@ -137,7 +140,7 @@ public static unsafe partial class Patches
     {
         if (keepAlive != null) KeepAlive.Add(keepAlive);
         var owner = Owner ?? "?";
-        if (!Undo.TryGetValue(owner, out var list)) Undo[owner] = list = new();
+        if (!Undo.TryGetValue(owner, out var list)) Undo[owner] = list = [];
         list.Add(undo);
     }
 
@@ -145,7 +148,7 @@ public static unsafe partial class Patches
     internal static void Revert(string owner)
     {
         if (!Undo.Remove(owner, out var list)) return;
-        for (int i = list.Count - 1; i >= 0; i--) list[i]();
+        for (var i = list.Count - 1; i >= 0; i--) list[i]();
         foreach (var a in Claims.Where(c => c.Value == owner).Select(c => c.Key).ToList()) Claims.Remove(a);
     }
 
@@ -155,7 +158,7 @@ public static unsafe partial class Patches
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), $"VirtualProtect 0x{at:X}");
         bytes.CopyTo(new Span<byte>((void*)at, bytes.Length));
         VirtualProtect(at, bytes.Length, old, out _);
-        FlushInstructionCache(-1, at, bytes.Length);
+        _ = FlushInstructionCache(-1, at, bytes.Length);
     }
 
     [LibraryImport("kernel32.dll", SetLastError = true)]

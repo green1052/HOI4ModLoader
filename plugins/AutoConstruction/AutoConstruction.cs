@@ -69,9 +69,9 @@ public unsafe class AutoConstruction : Plugin
     private delegate* unmanaged<nint, int> _freeSharedSlots;
     private delegate* unmanaged<int, nint> _tokenToString;
 
-    private readonly Dictionary<nint, int> _targets = new();                    // CBuildingType* -> wanted count
-    private readonly Dictionary<nint, (int Count, long Until)> _sent = new();   // by type: count when a command was sent
-    private readonly HashSet<nint> _failed = new();                             // types whose last try found nowhere to build (logged once)
+    private readonly Dictionary<nint, int> _targets = [];                    // CBuildingType* -> wanted count
+    private readonly Dictionary<nint, (int Count, long Until)> _sent = [];   // by type: count when a command was sent
+    private readonly HashSet<nint> _failed = [];                             // types whose last try found nowhere to build (logged once)
     private nint _infrastructure;                                               // its CBuildingType*, once seen on a button
     private (nint GameState, int Tag) _session;
     private bool _reportedBox;

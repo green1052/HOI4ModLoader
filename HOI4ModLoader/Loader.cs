@@ -14,7 +14,7 @@ public static class Loader
     private static readonly Logger Log = new("Loader");
 
     // Plugins loaded now, in load order (hooks keep reverted ones' detours alive: a game thread may still be in one).
-    private static readonly List<Plugin> Loaded = new();
+    private static readonly List<Plugin> Loaded = [];
 
     /// <summary>The loader's version, e.g. "1.0.0".</summary>
     internal static readonly string Version = typeof(Loader).Assembly.GetName().Version!.ToString(3);
@@ -27,7 +27,6 @@ public static class Loader
     private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
     private static string _loadedFiles = "", _changedFiles = "";
     private static int _generation;
-    private static bool _multiplayer;
 
     /// <summary>Called once by the native bootstrap (version.dll), before the game's entry point.</summary>
     [UnmanagedCallersOnly]
@@ -59,7 +58,7 @@ public static class Loader
             catch (Exception e)
             {
                 followMultiplayer = false;
-                _multiplayer = true; // fail closed: unable to tell, game rule plugins could desync a multiplayer game
+                Multiplayer = true; // fail closed: unable to tell, game rule plugins could desync a multiplayer game
                 Log.Error($"multiplayer check unavailable, game rule plugins stay off: {e.Message}");
             }
             LoadPlugins();
@@ -116,11 +115,11 @@ public static class Loader
         catch (Exception e)
         {
             multiplayer = true; // fail closed
-            if (!_multiplayer) Log.Error($"multiplayer check failed: {e.Message}");
+            if (!Multiplayer) Log.Error($"multiplayer check failed: {e.Message}");
         }
-        if (multiplayer == _multiplayer) return;
-        _multiplayer = !_multiplayer;
-        Log.Info(_multiplayer ? "multiplayer: game rule plugins off" : "single player: game rule plugins on");
+        if (multiplayer == Multiplayer) return;
+        Multiplayer = multiplayer;
+        Log.Info(Multiplayer ? "multiplayer: game rule plugins off" : "single player: game rule plugins on");
         Reload();
     }
 
@@ -137,7 +136,7 @@ public static class Loader
     internal static bool IsLoaded(string id) => Loaded.Any(p => p.Info.Id == id);
 
     /// <summary>Whether the game is a multiplayer one (as the plugins were last loaded for).</summary>
-    internal static bool Multiplayer => _multiplayer;
+    internal static bool Multiplayer { get; private set; }
 
     /// <summary>Whether the plugin's config lets it load ([General] Enabled).</summary>
     internal static bool IsEnabled(string id) => Config(id).Bind("General", "Enabled", true, "Load this plugin.");
@@ -184,7 +183,7 @@ public static class Loader
             }
         }
 
-        Known = found.Values.Select(f => f.Info).OrderBy(i => i.Id).ToList();
+        Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
         var state = new Dictionary<string, bool?>(); // null while loading: a dependency cycle reads as failed
         foreach (var id in found.Keys.Order()) Load(id);
 
@@ -215,12 +214,12 @@ public static class Loader
                     log.Info("disabled in config");
                     return false;
                 }
-                if (info.AffectsGameState && _multiplayer)
+                if (info.AffectsGameState && Multiplayer)
                 {
                     log.Info("off in multiplayer");
                     return false;
                 }
-                if (info.MultiplayerOnly && !_multiplayer)
+                if (info.MultiplayerOnly && !Multiplayer)
                 {
                     log.Info("multiplayer only");
                     return false;
@@ -266,7 +265,7 @@ public static class Loader
     {
         private static readonly AssemblyLoadContext Core = GetLoadContext(typeof(Loader).Assembly)!;
 
-        protected override Assembly? Load(AssemblyName name)
+        protected override Assembly Load(AssemblyName name)
         {
             try { return Core.LoadFromAssemblyName(name); }
             catch (FileNotFoundException) when (files.ContainsKey(name.Name!)) { }

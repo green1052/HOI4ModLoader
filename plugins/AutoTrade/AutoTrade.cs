@@ -44,7 +44,7 @@ public unsafe class AutoTrade : Plugin
     private const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
     private const long Fixed = 100_000;
     private const long PendingMs = 10_000;                      // a sent deal shows in the balance at once in single player, a round trip later in multiplayer
-    private static readonly byte[] Label = "Auto "u8.ToArray();
+    private static readonly byte[] Label = [.. "Auto "u8];
 
     [Function(CallingConventions.Microsoft)] public delegate void ItemFn(nint item);
     [Function(CallingConventions.Microsoft)] public delegate void UpdateFn(nint item, nint unused);
@@ -55,8 +55,8 @@ public unsafe class AutoTrade : Plugin
     private delegate* unmanaged<nint, long*, nint, long*, long*, nint, void> _maxExport;
     private delegate* unmanaged<long*, nint, long*, long*, int, void> _amountForFactories;
 
-    private readonly HashSet<nint> _auto = new();                          // resources with auto trade on
-    private readonly Dictionary<nint, (int Balance, long Until)> _sent = new(); // by resource: balance when a deal was sent
+    private readonly HashSet<nint> _auto = [];                          // resources with auto trade on
+    private readonly Dictionary<nint, (int Balance, long Until)> _sent = []; // by resource: balance when a deal was sent
     private (nint GameState, int Tag) _session;
 
     public override void Load()
@@ -98,7 +98,7 @@ public unsafe class AutoTrade : Plugin
         var labelled = text.StartsWith(Label);
         var on = _auto.Contains(*(nint*)(item + ResourceOfItem));
         if (on && !labelled) Gui.SetText(box, [.. Label, .. text]);
-        else if (!on && labelled) Gui.SetText(box, text[Label.Length..].ToArray());
+        else if (!on && labelled) Gui.SetText(box, [.. text[Label.Length..]]);
     }
 
     private void Pump()

@@ -14,7 +14,7 @@ public sealed class ConfigFile
     public ConfigFile(string path)
     {
         _path = path;
-        _lines = File.Exists(path) ? File.ReadAllLines(path).ToList() : new();
+        _lines = File.Exists(path) ? [.. File.ReadAllLines(path)] : [];
     }
 
     public T Bind<T>(string section, string key, T defaultValue, string description) where T : IConvertible
@@ -53,7 +53,7 @@ public sealed class ConfigFile
         {
             var line = raw.Trim();
             if (line.StartsWith('#')) comment.Add(line.TrimStart('#').Trim());
-            else if (line.StartsWith('[') && line.EndsWith(']')) (section, comment) = (line[1..^1], new List<string>());
+            else if (line.StartsWith('[') && line.EndsWith(']')) (section, comment) = (line[1..^1], []);
             else if (line.Split('=', 2) is [var key, var value])
             {
                 entries.Add((section, key.Trim(), value.Trim(), string.Join(" ", comment)));
@@ -74,8 +74,8 @@ public sealed class ConfigFile
 
     private (int Section, int Key) Find(string section, string key)
     {
-        int sectionAt = -1;
-        for (int i = 0; i < _lines.Count; i++)
+        var sectionAt = -1;
+        for (var i = 0; i < _lines.Count; i++)
         {
             var line = _lines[i].Trim();
             if (line.StartsWith('['))

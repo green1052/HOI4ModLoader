@@ -38,9 +38,9 @@ internal static unsafe class SettingsMods
     private const int RootOfScreen = 0x5E98, ShownTab = 0x5E60; // CSettingsScreen: its window, the shown tab container
     private const int ButtonSlot = 13, CheckBoxSlot = 21, WindowSlot = 55;
     private const int ShowSlot = 15, HideSlot = 16, WidgetOfWindow = 48; // a container's GUI object, its Show()/Hide()
-    private const int SetFrameSlot = 22, SetTooltipHandlerSlot = 69;   // button: SetFrame(1 selected, 2 not); GUI object: tooltip
+    private const int SetFrameSlot = 22;                              // button: SetFrame(1 selected, 2 not)
     private const int CheckState = 176, Observers = 128, AddObserverSlot = 1; // CCheckBox: state (bit 0 = checked), observer list
-    private const int PluginRows = 18, SettingRows = 8, SettingTooltip = 100;
+    private const int PluginRows = 18, SettingRows = 8;
 
     [Function(CallingConventions.Microsoft)] public delegate nint InitFn(nint screen, nint window);
     [Function(CallingConventions.Microsoft)] public delegate nint TabsFn(nint screen);
@@ -50,7 +50,6 @@ internal static unsafe class SettingsMods
     private static IHook<TabsFn>? _updateTabs;
     private static IHook<OpenFn>? _open;
     private static delegate* unmanaged<nint, void> _checkBoxSprite;
-    private static nint _tooltipVTable;
     private static readonly Logger Log = new("Settings");
     private static bool _reportedMissing;
 
@@ -61,15 +60,11 @@ internal static unsafe class SettingsMods
 
     /// <summary>The plugin whose settings are shown, and those settings (section, key, value, description).</summary>
     private static string? _plugin;
-    private static List<(string Section, string Key, string Value, string Description)> _entries = new();
+    private static List<(string Section, string Key, string Value, string Description)> _entries = [];
 
     internal static void Install()
     {
         _checkBoxSprite = (delegate* unmanaged<nint, void>)Sig.Find(CheckBoxSpriteSig);
-        var tooltipVTable = (nint*)NativeMemory.Alloc(2, (nuint)sizeof(nint)); // the GUI never frees tooltip handlers
-        tooltipVTable[0] = (nint)(delegate* unmanaged<nint, nint, nint, void>)&BuildTooltip;
-        tooltipVTable[1] = (nint)(delegate* unmanaged<nint, int, void>)&DestroyTooltip;
-        _tooltipVTable = (nint)tooltipVTable;
 
         _init = Patches.Hook<InitFn>(Sig.Find(InitSig), (screen, window) =>
         {
@@ -117,7 +112,8 @@ internal static unsafe class SettingsMods
             PluginArrows[row] = Gui.Find(_list, ButtonSlot, $"hoimod_plugin_{row}_settings");
             BindCheckBox(PluginBoxes[row], &OnPluginToggle, row);
             BindButton(PluginArrows[row], &OnOpenSettings, row);
-            Tooltip(PluginTitles[row], row);
+            var plugin = row;
+            Gui.SetTooltip(PluginTitles[row], () => plugin < Loader.Known.Count ? PluginTooltip(Loader.Known[plugin]) : "");
         }
         for (var row = 0; row < SettingRows; row++)
         {
@@ -125,7 +121,9 @@ internal static unsafe class SettingsMods
             BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), &OnDecrease, row);
             BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), &OnIncrease, row);
             BindCheckBox(Gui.Find(container, CheckBoxSlot, "hoimod_setting_check"), &OnSettingToggle, row);
-            Tooltip(Gui.FindTextBox(container, "hoimod_setting_label"), SettingTooltip + row);
+            var setting = row;
+            Gui.SetTooltip(Gui.FindTextBox(container, "hoimod_setting_label"),
+                () => setting < _entries.Count ? $"{_entries[setting].Key} = {_entries[setting].Value}\n{_entries[setting].Description}" : "");
         }
         BindButton(Gui.Find(_settings, ButtonSlot, "hoimod_settings_back"), &OnBack, 0);
         BindButton(_tab, &OnTab, 0);
@@ -165,7 +163,7 @@ internal static unsafe class SettingsMods
             Shown(PluginTitles[row], show);
             Shown(PluginArrows[row], show && Settings(plugins[row].Id).Count > 0);
             if (!show) continue;
-            Gui.SetText(PluginTitles[row], Literal(plugins[row].Name));
+            Gui.SetText(PluginTitles[row], Gui.Literal(plugins[row].Name));
             Check(PluginBoxes[row], Loader.IsEnabled(plugins[row].Id));
         }
         if (plugins.Count > PluginRows) Log.Error($"{plugins.Count} plugins, but the Mods tab has {PluginRows} rows");
@@ -203,7 +201,7 @@ internal static unsafe class SettingsMods
 
     /// <summary>A plugin's editable config entries: everything but [General] (Enabled is the list's checkbox).</summary>
     private static List<(string Section, string Key, string Value, string Description)> Settings(string id) =>
-        Loader.Config(id).Entries().Where(e => e.Section != "General").ToList();
+        [.. Loader.Config(id).Entries().Where(e => e.Section != "General")];
 
     [UnmanagedCallersOnly]
     private static void OnOpenSettings(nint row) => Guard(() =>
@@ -213,7 +211,7 @@ internal static unsafe class SettingsMods
         _plugin = plugins[(int)row].Id;
         Visible(_list, false);
         Visible(_settings, true);
-        Gui.SetText(_title, Literal(plugins[(int)row].Name));
+        Gui.SetText(_title, Gui.Literal(plugins[(int)row].Name));
         ShowSettings();
     });
 
@@ -230,7 +228,7 @@ internal static unsafe class SettingsMods
             Visible(container, row < _entries.Count);
             if (row >= _entries.Count) continue;
             var (_, key, value, _) = _entries[row];
-            Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Literal(key));
+            Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Gui.Literal(key));
             var isBool = bool.TryParse(value, out var on);
             var isNumber = !isBool && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
             var check = Gui.Find(container, CheckBoxSlot, "hoimod_setting_check");
@@ -240,7 +238,7 @@ internal static unsafe class SettingsMods
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), isNumber);
             var shownValue = Gui.FindTextBox(container, "hoimod_setting_value");
             Shown(shownValue, !isBool);
-            if (!isBool) Gui.SetText(shownValue, Literal(value));
+            if (!isBool) Gui.SetText(shownValue, Gui.Literal(value));
         }
     }
 
@@ -285,43 +283,7 @@ internal static unsafe class SettingsMods
         Loader.RequestReload();
     }
 
-    // ---- tooltips ----
-
-    /// <summary>A tooltip for <paramref name="widget"/>: a handler object { vtable, id } whose text BuildTooltip makes.</summary>
-    private static void Tooltip(nint widget, int id)
-    {
-        if (widget == 0) return;
-        var handler = (nint*)NativeMemory.Alloc(2, (nuint)sizeof(nint));
-        handler[0] = _tooltipVTable;
-        handler[1] = id;
-        ((delegate* unmanaged<nint, nint, void>)(*(nint**)widget)[SetTooltipHandlerSlot])(widget, (nint)handler);
-    }
-
-    [UnmanagedCallersOnly]
-    private static void BuildTooltip(nint handler, nint widget, nint tooltip)
-    {
-        try
-        {
-            var id = (int)((nint*)handler)[1];
-            string? text = null;
-            if (id < SettingTooltip && id < Loader.Known.Count) text = PluginTooltip(Loader.Known[id]);
-            else if (id >= SettingTooltip && id - SettingTooltip < _entries.Count)
-            {
-                var (section, key, value, description) = _entries[id - SettingTooltip];
-                text = $"{key} = {value}\n{description}";
-            }
-            if (text != null) Native.SetMsvcString(tooltip, Encoding.ASCII.GetBytes(Literal(text)));
-        }
-        catch { /* never throw into the game */ }
-    }
-
-    [UnmanagedCallersOnly]
-    private static void DestroyTooltip(nint handler, int flags) { }
-
     // ---- helpers ----
-
-    /// <summary>Text shown as is: GUI text expands $KEY$, [..] and § codes.</summary>
-    private static string Literal(string text) => new(text.Where(c => c is not ('$' or '[' or ']' or '§')).ToArray());
 
     private static void Visible(nint window, bool show) =>
         ((delegate* unmanaged<nint, void>)(*(nint**)(window + WidgetOfWindow))[show ? ShowSlot : HideSlot])(window + WidgetOfWindow);

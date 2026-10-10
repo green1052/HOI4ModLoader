@@ -127,7 +127,7 @@ public unsafe class AirWingFieldMarshal : Plugin
     private void UpdateAttachedWings(nint ptr)
     {
         var g = new OrdersGroup(ptr);
-        if (g.IsArmyGroup && g.AttachedWingCount > 0) g.WithArmiesMembers(() => _updateAttachedWings!.OriginalFunction(ptr));
+        if (g is { IsArmyGroup: true, AttachedWingCount: > 0 }) g.WithArmiesMembers(() => _updateAttachedWings!.OriginalFunction(ptr));
         else _updateAttachedWings!.OriginalFunction(ptr);
     }
 }
@@ -139,7 +139,7 @@ public unsafe class AirWingFieldMarshal : Plugin
 /// need nothing.
 /// </summary>
 [Plugin("com.green1052.airwingfieldmarshal.multiplayer", "Air Wing Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true, Description = "Right-click a field marshal's card with air wings selected to attach them to his armies.")]
-public unsafe class AirWingFieldMarshalMultiplayer : Plugin
+public class AirWingFieldMarshalMultiplayer : Plugin
 {
     [Function(CallingConventions.Microsoft)] public delegate void CardFn(nint card);
     [Function(CallingConventions.Microsoft)] public delegate byte PostAttachFn(nint wings, nint group);
@@ -169,16 +169,11 @@ public unsafe class AirWingFieldMarshalMultiplayer : Plugin
         var all = Native.PdxArray(wings).ToArray();
         var armies = new OrdersGroup(group).Armies.ToArray();
         byte posted = 0;
-        var view = stackalloc nint[3]; // a CPdxArray of one army's share: the command reads only data (+0) and size (+0xC)
         for (var a = 0; a < armies.Length && a < all.Length; a++)
         {
+            var army = armies[a];
             var share = all.Where((_, i) => i % armies.Length == a).ToArray();
-            fixed (nint* data = share)
-            {
-                view[0] = (nint)data;
-                ((int*)view)[2] = ((int*)view)[3] = share.Length;
-                posted |= _postAttach!.OriginalFunction((nint)view, armies[a]);
-            }
+            posted |= Native.WithPdxArray(share, array => _postAttach!.OriginalFunction(array, army));
         }
         Log.Info($"{all.Length} air wings attached across {Math.Min(armies.Length, all.Length)} of the marshal's armies");
         return posted;

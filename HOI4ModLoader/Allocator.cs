@@ -86,6 +86,6 @@ public static unsafe class Allocator
     private static void Redirect(nint from, nint to)
     {
         var current = Convert.ToHexString(new ReadOnlySpan<byte>((void*)from, 12));
-        Patches.Bytes(from, current, "48B8" + Convert.ToHexString(BitConverter.GetBytes((long)to)) + "FFE0");
+        Patches.Bytes(from, current, "48B8" + Convert.ToHexString(BitConverter.GetBytes(to)) + "FFE0");
     }
 }

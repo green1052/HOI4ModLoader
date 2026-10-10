@@ -32,17 +32,17 @@ public static class Sig
 }
 
 /// <summary>A PE image mapped in memory: the running game, or hoi4.exe mapped as data (tests).</summary>
-public sealed unsafe class Image
+public sealed unsafe partial class Image
 {
     public static readonly Image Game = new(NativeLibrary.GetMainProgramHandle());
 
     private readonly nint _base;
     private readonly long _pointerBase; // what absolute pointers in the image are relative to: actual base when loaded, preferred base when mapped as data
-    private readonly List<(nint Start, int Size, bool Code)> _sections = new();
+    private readonly List<(nint Start, int Size, bool Code)> _sections = [];
     private readonly (int Begin, int End)[] _functions;
-    private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = new(); // code sections with patched bytes put back
-    private readonly Dictionary<(string, int, string?), nint[]> _found = new();          // FindAll results
-    private readonly Dictionary<string, nint> _vtables = new();                          // VTable results
+    private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = []; // code sections with patched bytes put back
+    private readonly Dictionary<(string, int, string?), nint[]> _found = [];          // FindAll results
+    private readonly Dictionary<string, nint> _vtables = [];                          // VTable results
 
     private Image(nint b, bool relocated = true)
     {
@@ -52,21 +52,21 @@ public sealed unsafe class Image
         var opt = nt + 24;
         _pointerBase = relocated ? b : *(long*)(opt + 24);
         var sec = opt + *(ushort*)(nt + 20);
-        for (int i = 0; i < count; i++, sec += 40)
+        for (var i = 0; i < count; i++, sec += 40)
             _sections.Add((b + *(int*)(sec + 12), *(int*)(sec + 8), (*(uint*)(sec + 36) & 0x20000000) != 0)); // IMAGE_SCN_MEM_EXECUTE
 
         // .pdata (exception directory, data directory #3): RUNTIME_FUNCTION { Begin, End, UnwindInfo } RVAs, sorted by Begin.
         var dir = opt + 112 + 3 * 8;
         var pdata = new ReadOnlySpan<int>((void*)(b + *(int*)dir), *(int*)(dir + 4) / 4);
         _functions = new (int, int)[pdata.Length / 3];
-        for (int i = 0; i < _functions.Length; i++) _functions[i] = (pdata[i * 3], pdata[i * 3 + 1]);
+        for (var i = 0; i < _functions.Length; i++) _functions[i] = (pdata[i * 3], pdata[i * 3 + 1]);
     }
 
     /// <summary>Maps an exe/dll read-only with sections at their RVAs, without running it.</summary>
     public static Image Load(string path)
     {
-        const uint LOAD_LIBRARY_AS_DATAFILE = 0x2, LOAD_LIBRARY_AS_IMAGE_RESOURCE = 0x20;
-        var h = LoadLibraryExW(path, 0, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+        const uint asDataFile = 0x2, asImageResource = 0x20; // LOAD_LIBRARY_AS_DATAFILE, LOAD_LIBRARY_AS_IMAGE_RESOURCE
+        var h = LoadLibraryExW(path, 0, asDataFile | asImageResource);
         if (h == 0) throw new FileNotFoundException($"cannot map {path} (error {Marshal.GetLastPInvokeError()})");
         return new Image(h & ~3, relocated: false); // low bits tag data-file handles
     }
@@ -84,18 +84,18 @@ public sealed unsafe class Image
         if (anchor != null)
         {
             var funcs = FunctionsReferencing(anchor);
-            hits = hits.Where(h => FunctionAt(h) is { } f && funcs.Contains(f)).ToList();
+            hits = [.. hits.Where(h => FunctionAt(h) is { } f && funcs.Contains(f))];
         }
         if (hits.Count != count)
             throw new InvalidOperationException($"pattern matched {hits.Count}x (expected {count}): {pattern}{(anchor != null ? $" in functions using \"{anchor}\"" : "")}");
-        return _found[key] = hits.ToArray();
+        return _found[key] = [.. hits];
     }
 
     private List<nint> Scan(string pattern)
     {
         var pat = pattern.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Select(t => t.StartsWith('?') ? -1 : Convert.ToInt32(t, 16)).ToArray();
-        int first = Array.FindIndex(pat, b => b >= 0);
+        var first = Array.FindIndex(pat, b => b >= 0);
         if (first < 0) throw new ArgumentException("pattern has no concrete byte", nameof(pattern));
         var hits = new List<nint>();
         foreach (var (start, size, code) in _sections)
@@ -106,9 +106,9 @@ public sealed unsafe class Image
             for (int i = first, next; (next = span[i..].IndexOf((byte)pat[first])) >= 0; i++)
             {
                 i += next;
-                int at = i - first;
+                var at = i - first;
                 if (at + pat.Length > size) break;
-                int k = 0;
+                var k = 0;
                 while (k < pat.Length && (pat[k] < 0 || span[at + k] == pat[k])) k++;
                 if (k == pat.Length) hits.Add(start + at);
             }
@@ -123,7 +123,7 @@ public sealed unsafe class Image
         if (this != Game || !Patches.Originals.Keys.Any(a => a >= start && a < start + size)) return live;
         if (_pristine.TryGetValue(start, out var copy) && copy.Version == Patches.OriginalsVersion) return copy.Bytes;
         // Code only changes through Patches, which records the original first: a copy stays valid once its overlays are redone.
-        var bytes = copy.Bytes ?? live.ToArray();
+        var bytes = copy.Bytes ?? [.. live];
         foreach (var (at, original) in Patches.Originals)
         {
             var offset = (int)(at - start);
@@ -180,11 +180,11 @@ public sealed unsafe class Image
     /// <summary>Begin RVA of the .pdata function containing <paramref name="address"/>.</summary>
     private int? FunctionAt(nint address)
     {
-        int rva = (int)(address - _base);
+        var rva = (int)(address - _base);
         int lo = 0, hi = _functions.Length - 1;
         while (lo <= hi)
         {
-            int mid = (lo + hi) / 2;
+            var mid = (lo + hi) / 2;
             if (rva < _functions[mid].Begin) hi = mid - 1;
             else if (rva >= _functions[mid].End) lo = mid + 1;
             else return _functions[mid].Begin;
@@ -203,7 +203,7 @@ public sealed unsafe class Image
         {
             if (!code) continue;
             var span = new ReadOnlySpan<byte>((void*)start, size);
-            for (int i = 0; i + 7 <= size; i++)
+            for (var i = 0; i + 7 <= size; i++)
             {
                 // REX.W (48/4C) + 8D (lea) or 8B (mov), ModRM mod=00 rm=101: [rip+disp32]
                 if ((span[i] & 0xFB) != 0x48 || (span[i + 1] != 0x8D && span[i + 1] != 0x8B) || (span[i + 2] & 0xC7) != 0x05) continue;
@@ -213,6 +213,6 @@ public sealed unsafe class Image
         return funcs;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern nint LoadLibraryExW(string path, nint file, uint flags);
+    [LibraryImport("kernel32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint LoadLibraryExW(string path, nint file, uint flags);
 }

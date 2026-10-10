@@ -4,7 +4,7 @@ namespace HOI4ModLoader;
 public sealed class Logger(string source)
 {
     private static readonly string Path = System.IO.Path.Combine(Loader.ModsDir, "hoimod.log");
-    private static readonly object Gate = new();
+    private static readonly Lock Gate = new();
 
     public void Info(string message) => Write("INFO ", message);
     public void Error(string message) => Write("ERROR", message);

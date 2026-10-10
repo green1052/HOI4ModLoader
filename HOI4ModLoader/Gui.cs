@@ -5,9 +5,9 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// Reading and writing the game's GUI widgets (elements defined in interface\*.gui). Widget text is the game's byte
-/// encoding (Windows-1252 plus § colour codes, or whatever a language mod maps in), so it is handled as bytes.
+/// encoding (Windows-1252 plus § color codes, or whatever a language mod maps in), so it is handled as bytes.
 /// </summary>
-public static unsafe class Gui
+public static unsafe partial class Gui
 {
     /// <summary>CInstantTextBox::SetText(box, std::string*): moves the string in (freeing the old text) and re-lays it out.</summary>
     [Signature] public const string SetTextSig = "48 89 5C 24 ? 48 89 74 24 ? 48 89 54 24 ? 57 48 83 EC 20 48 8B F2";
@@ -18,13 +18,18 @@ public static unsafe class Gui
     private const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
     private const int ShowSlot = 15, HideSlot = 16, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), Hide(), flags byte
     private const int TextOffset = 0x110; // CInstantTextBox: std::string text
+    private const int SetTooltipHandlerSlot = 69; // GUI object: SetTooltipHandler(CTooltipHandler*), used when the .gui has no tooltip
 
     private static delegate* unmanaged<nint, nint, void> _setText;
     private static delegate* unmanaged<nint, nint, byte> _hasTextBox;
+    private static nint _tooltipVTable;                       // CTooltipHandler vtable: { BuildTooltip, destructor }
+    private static readonly Dictionary<nint, nint> TooltipHandlers = [];      // widget -> its handler { vtable, widget }
+    private static readonly Dictionary<nint, Func<string>> TooltipTexts = []; // widget -> its text
 
     /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none.</summary>
     public static nint FindTextBox(nint window, string name)
     {
+        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, byte>)Sig.Find(HasTextBoxSig);
         var str = NewString(Encoding.ASCII.GetBytes(name));
         try { return _hasTextBox(window, str) == 0 ? 0 : Find(window, FindTextBoxSlot, str); }
@@ -51,6 +56,7 @@ public static unsafe class Gui
 
     public static void SetText(nint textBox, ReadOnlySpan<byte> text)
     {
+        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_setText == null) _setText = (delegate* unmanaged<nint, nint, void>)Sig.Find(SetTextSig);
         var str = NewString(text);
         try { _setText(textBox, str); }
@@ -73,11 +79,54 @@ public static unsafe class Gui
         ((delegate* unmanaged<nint, void>)(*(nint**)widget)[HideSlot])(widget);
     }
 
+    /// <summary>Text the GUI shows as written: it expands $KEY$, [..] and § codes otherwise.</summary>
+    public static string Literal(string text) => string.Concat(text.Where(c => c is not ('$' or '[' or ']' or '§')));
+
+    /// <summary>
+    /// Gives <paramref name="widget"/> a tooltip (for widgets whose .gui has none): <paramref name="text"/> makes it each time
+    /// it shows, every frame while hovered, so it stays current. Shown as written (<see cref="Literal"/>). UI thread only.
+    /// </summary>
+    public static void SetTooltip(nint widget, Func<string> text)
+    {
+        if (widget == 0) return;
+        if (_tooltipVTable == 0)
+        {
+            var vtable = (nint*)NativeMemory.Alloc(2, (nuint)sizeof(nint)); // the GUI never frees tooltip handlers
+            vtable[0] = (nint)(delegate* unmanaged<nint, nint, nint, void>)&BuildTooltip;
+            vtable[1] = (nint)(delegate* unmanaged<nint, int, void>)&DestroyTooltip;
+            _tooltipVTable = (nint)vtable;
+        }
+        TooltipTexts[widget] = text;
+        if (!TooltipHandlers.TryGetValue(widget, out var handler))
+        {
+            var created = (nint*)NativeMemory.Alloc(2, (nuint)sizeof(nint));
+            created[0] = _tooltipVTable;
+            created[1] = widget;
+            TooltipHandlers[widget] = handler = (nint)created;
+        }
+        ((delegate* unmanaged<nint, nint, void>)(*(nint**)widget)[SetTooltipHandlerSlot])(widget, handler);
+    }
+
+    /// <summary>CTooltipHandler::Build(handler, widget, out): the text goes into out's first std::string.</summary>
+    [UnmanagedCallersOnly]
+    private static void BuildTooltip(nint handler, nint widget, nint tooltip)
+    {
+        try
+        {
+            if (TooltipTexts.TryGetValue(((nint*)handler)[1], out var text))
+                Native.SetMsvcString(tooltip, Encoding.ASCII.GetBytes(Literal(text())));
+        }
+        catch { /* never throw into the game */ }
+    }
+
+    [UnmanagedCallersOnly]
+    private static void DestroyTooltip(nint handler, int flags) { }
+
     public static bool ShiftHeld => (GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
     public static bool CtrlHeld => (GetAsyncKeyState(0x11) & 0x8000) != 0;  // VK_CONTROL
 
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int key);
+    [LibraryImport("user32.dll")]
+    private static partial short GetAsyncKeyState(int key);
 
     private static nint NewString(ReadOnlySpan<byte> value)
     {

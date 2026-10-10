@@ -87,10 +87,10 @@ public unsafe class PoliticalQueue : Plugin
     private IHook<TwoFn>? _advisorPick;
     private IHook<ThreeFn>? _ideaUpdate, _advisorUpdate, _decisionSet, _targetedDecisionSet;
     private IHook<TwoFn>? _advisorUnselectable;
-    private readonly HashSet<nint> _forced = new(); // entries whose button we made clickable for Shift+click: a plain click does nothing
+    private readonly HashSet<nint> _forced = []; // entries whose button we made clickable for Shift+click: a plain click does nothing
     private delegate* unmanaged<nint, void> _ideaListRefresh;
 
-    private readonly List<Entry> _queue = new();
+    private readonly List<Entry> _queue = [];
     private (long PoliticalPower, long Until)? _waiting;
     private (nint GameState, int Tag) _session;
 
@@ -239,7 +239,7 @@ public unsafe class PoliticalQueue : Plugin
         while (digits < text.Length && char.IsAsciiDigit((char)text[digits])) digits++;
         var name = digits > 0 && text[digits..].StartsWith(". "u8) ? text[(digits + 2)..] : text;
         var position = _queue.FindIndex(e => Same(e, entry)) + 1;
-        byte[] shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. name] : name.ToArray();
+        var shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. name] : name.ToArray();
         if (!text.SequenceEqual(shown)) Gui.SetText(box, shown);
     }
 
@@ -301,7 +301,7 @@ public unsafe class PoliticalQueue : Plugin
                     || entry.Occupant != 0 && PostAdvisor(PoliticalSignatures.ReplaceAdvisor, 0x60, tag, entry.Occupant, entry);
             case Kind.Decision:
                 return Commands.TryPost(Commands.New(PoliticalSignatures.SelectDecision, 0x38, tag, entry.Item));
-            default:
+            case Kind.TargetedDecision:
             {
                 var cmd = Commands.New(PoliticalSignatures.SelectTargetedDecision, 0x40, tag, 0);
                 *(int*)(cmd + 44) = entry.Target;
@@ -309,6 +309,7 @@ public unsafe class PoliticalQueue : Plugin
                 *(nint*)(cmd + 56) = entry.Item;
                 return Commands.TryPost(cmd);
             }
+            default: throw new System.Diagnostics.UnreachableException();
         }
     }
 
@@ -334,7 +335,7 @@ public unsafe class PoliticalQueue : Plugin
             Commands.Post(cmd);
             return true;
         }
-        Native.SetMsvcString(slot, ReadOnlySpan<byte>.Empty); // frees a heap buffer
+        Native.SetMsvcString(slot, []); // frees a heap buffer
         Commands.Free(cmd);
         return false;
     }

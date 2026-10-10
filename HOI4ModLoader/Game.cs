@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -89,6 +88,21 @@ public static unsafe class Native
     /// <summary>CPdxArray&lt;T*&gt; at <paramref name="at"/>: { T** data; int capacity; int size; }.</summary>
     public static ReadOnlySpan<nint> PdxArray(nint at) => new((void*)*(nint*)at, *(int*)(at + 0xC));
 
+    /// <summary>
+    /// Calls <paramref name="use"/> with a CPdxArray header viewing <paramref name="items"/> (data +0, capacity +8, size +0xC),
+    /// for game functions that only read the array passed to them.
+    /// </summary>
+    public static T WithPdxArray<T>(nint[] items, Func<nint, T> use)
+    {
+        var header = stackalloc nint[3];
+        fixed (nint* data = items)
+        {
+            header[0] = (nint)data;
+            ((int*)header)[2] = ((int*)header)[3] = items.Length;
+            return use((nint)header);
+        }
+    }
+
     /// <summary>Characters of an MSVC std::string at <paramref name="at"/> (inline buffer when capacity &lt; 16).</summary>
     public static Span<byte> MsvcString(nint at)
     {
@@ -142,8 +156,8 @@ public readonly unsafe struct OrdersGroup(nint ptr)
     /// </summary>
     public void WithArmiesMembers(Action action)
     {
-        var merged = new List<nint>(Native.PdxArray(Members).ToArray());
-        foreach (var army in Armies) merged.AddRange(Native.PdxArray(new OrdersGroup(army).Members).ToArray());
+        List<nint> merged = [.. Native.PdxArray(Members)];
+        foreach (var army in Armies) merged.AddRange(Native.PdxArray(new OrdersGroup(army).Members));
         var members = merged.Distinct().ToArray();
 
         var saved = (*(nint*)Members, *(long*)(Members + 8)); // data, capacity|size

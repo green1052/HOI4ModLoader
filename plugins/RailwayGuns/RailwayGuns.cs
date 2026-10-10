@@ -90,25 +90,14 @@ public abstract unsafe class RailwayGunAssign : Plugin
             foreach (var gun in share)
             {
                 var from = *(nint*)(gun + AssignedTo) - GunsOfGroup;
-                if (from != -GunsOfGroup) WithArray([gun], array => _postUnassign(view, array, from));
+                if (from != -GunsOfGroup) Native.WithPdxArray([gun], array => _postUnassign(view, array, from));
             }
-            posted |= WithArray(share, array => _postAssign!.OriginalFunction(view, array, target));
+            posted |= Native.WithPdxArray(share, array => _postAssign!.OriginalFunction(view, array, target));
         }
         if (new OrdersGroup(group).IsArmyGroup) Log.Info($"{all.Length} railway guns selected for a field marshal, assigned to {targets.Length} group(s)");
         return posted;
     }
 
-    /// <summary>Calls <paramref name="post"/> with a CPdxArray view of <paramref name="items"/> (the commands read only data +0 and size +0xC).</summary>
-    private static byte WithArray(nint[] items, Func<nint, byte> post)
-    {
-        var array = stackalloc nint[2];
-        fixed (nint* data = items)
-        {
-            array[0] = (nint)data;
-            ((int*)array)[2] = ((int*)array)[3] = items.Length;
-            return post((nint)array);
-        }
-    }
 }
 
 /// <summary>
@@ -143,9 +132,9 @@ public unsafe class RailwayGunFieldMarshal : RailwayGunAssign
 /// selected spreads them over his armies with the vanilla assign command, so other players need nothing.
 /// </summary>
 [Plugin("com.green1052.railwayguns.multiplayer", "Railway Gun Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true, Description = "Right-click a field marshal's card with railway guns selected to assign them to his armies.")]
-public unsafe class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
+public class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
 {
-    protected override nint[] Targets(OrdersGroup group) => group.IsArmyGroup ? group.Armies.ToArray() : [group.Ptr];
+    protected override nint[] Targets(OrdersGroup group) => group.IsArmyGroup ? [.. group.Armies] : [group.Ptr];
 }
 
 /// <summary>
