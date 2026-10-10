@@ -143,7 +143,7 @@ public unsafe class AiAssist : Plugin
         _roles = Config.Bind("AI", "Roles", false,
             "Line infantry holds the line: provinces with only infantry make local attacks only into empty provinces or pockets; armored and breakthrough divisions do the pushing (not for armies with no such divisions).");
         _holdLine = Config.Bind("AI", "HoldTheLine", true,
-            "At war, the AI keeps a division in every province of a front that faces enemy divisions; it no longer ships them all off (supply crisis, another front) and leaves the line empty while fighting.");
+            "At war, the AI keeps a division in every province of a front that borders the enemy (enemy divisions or not); it no longer ships them all off (supply crisis, another front) and leaves the line empty while fighting.");
         _concentration = Config.Bind("AI", "Concentration", true,
             "The AI keeps only a thin screen on fronts with no enemy at war (neutral or friendly borders) and sends the rest to fronts facing more enemy divisions than they hold; fronts at war are never thinned.");
         _targetValue = Config.Bind("AI", "TargetValue", true,
@@ -810,7 +810,7 @@ public unsafe class AiAssist : Plugin
             // Both sides of the section: enemy provinces (held by a country at war with us) and their divisions; our provinces
             // facing enemy divisions (each needs a defender), and whether any of ours is fighting.
             var enemyHeld = new Dictionary<nint, bool>();
-            var threatened = new HashSet<nint>();
+            var contact = new HashSet<nint>();    // ours facing any enemy-held province
             var fighting = false;
             var enemy = 0;
             var pairs = *(nint*)(section + PairsOfSection);
@@ -826,7 +826,7 @@ public unsafe class AiAssist : Plugin
                     held = enemyHeld[theirs] = controller > 0 && controller != tag && _atWar(country, other) != 0;
                     if (held) enemy += *(int*)(theirs + DivisionsInProvince);
                 }
-                if (held && ours != 0 && *(int*)(theirs + DivisionsInProvince) > 0) threatened.Add(ours);
+                if (held && ours != 0) contact.Add(ours);
             }
             var hostile = enemyHeld.ContainsValue(true);
             var enemyProvinces = enemyHeld.Count(e => e.Value);
@@ -842,9 +842,9 @@ public unsafe class AiAssist : Plugin
                 else Factors[front] = (hour, factor = !hostile ? QuietFactor : enemy > min ? HotBoost : 1);
                 if (fighting || LastBattle.TryGetValue(front, out var battle) && hour - battle is >= 0 and < CalmHours) factor = Math.Max(factor, 1);
             }
-            // Hold the line: at war, every province of ours facing enemy divisions keeps a defender, whatever else (a supply
+            // Hold the line: at war, every province of ours on the line keeps a defender, whatever else (a supply
             // crisis, another front) the game weighs; it would ship them off and leave the line empty while fighting.
-            var floor = _holdLine && hostile ? threatened.Count : 0;
+            var floor = _holdLine && hostile ? contact.Count : 0;
             if (factor == 1 && min >= floor) continue;
             min = (int)Math.Ceiling(min * factor);
             desired = (int)Math.Ceiling(desired * factor);

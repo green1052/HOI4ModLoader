@@ -30,4 +30,4 @@
  com.green1052.aiassist.TargetValue:0 "공세 목표 선정"
  com.green1052.aiassist.TargetValue.desc:0 "AI의 국지 공격이 가치 높은 프로빈스부터 노립니다: 승점, 수도, 보급 허브, 공항, 자원, 비었거나 지친 수비대(요새화된 다수 병력은 감점). 포위 목표 다음, 전선 단축보다 먼저 봅니다."
  com.green1052.aiassist.HoldTheLine:0 "전선 유지"
- com.green1052.aiassist.HoldTheLine.desc:0 "전쟁 중에 적 사단과 맞닿은 우리 프로빈스마다 사단 하나는 남깁니다. 바닐라는 보급 위기나 다른 전선 때문에 싸우는 전선의 사단을 통째로 다른 곳으로 실어 가서 전선을 비우기도 합니다."
+ com.green1052.aiassist.HoldTheLine.desc:0 "전쟁 중에 교전국과 맞닿은 우리 프로빈스마다 사단 하나는 남깁니다(적 사단이 없어도). 바닐라는 보급 위기나 다른 전선 때문에 싸우는 전선의 사단을 통째로 실어 가서 전선을 비우기도 하고, 병력 집중도 남는 병력만 옮길 수 있습니다."

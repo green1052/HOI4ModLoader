@@ -100,7 +100,7 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 - **Production:** factories move from equipment the AI has plenty of (or nothing uses) to equipment it is short of. Air and land totals stay as vanilla split them.
 - **Offensive readiness:** an army doesn't start an attack while its divisions are worn out or out of supply.
 - **Local attacks:** pocket-closing targets first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, empty or worn defences), then ones that shorten the front; armor avoids terrain and rivers that cripple it; line infantry holds while breakthrough divisions push.
-- **Hold the line:** at war, every province facing enemy divisions keeps a defender; vanilla can ship a whole fighting front away (supply crisis, another front).
+- **Hold the line:** at war, every province on the line keeps a defender; vanilla can ship a whole fighting front away (supply crisis, another front).
 - **Concentration:** fronts with no enemy at war keep a thin screen, the rest goes where the enemy is strong; fronts at war are never thinned.
 - **Air:** planes leave regions where the AI keeps losing the air war badly.
 - **Leaders:** the biggest, fighting, attacking fronts choose their field marshals and generals first; infantry traits, doctrine and bad status count.
