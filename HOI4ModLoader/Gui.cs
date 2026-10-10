@@ -63,6 +63,15 @@ public static unsafe partial class Gui
         finally { Allocator.Free(str); } // SetText already took (and freed) any heap buffer
     }
 
+    private const int WindowWidgetOffset = 48; // a container window: its own GUI object (the one Show()/Hide() take)
+
+    /// <summary>Shows or hides a container window and everything in it (the game's own windows toggle it this way).</summary>
+    public static void ShowWindow(nint window, bool show)
+    {
+        var widget = window + WindowWidgetOffset;
+        ((delegate* unmanaged<nint, void>)(*(nint**)widget)[show ? ShowSlot : HideSlot])(widget);
+    }
+
     public static bool IsHidden(nint widget) => (*(byte*)(widget + Flags) & HiddenFlag) != 0;
 
     /// <summary>Shows a widget the code hid (what the game does: clear the hidden flag, then Show()).</summary>
@@ -148,6 +157,20 @@ public static unsafe partial class Gui
     public static bool ShiftHeld => (GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
     public static bool CtrlHeld => (GetAsyncKeyState(0x11) & 0x8000) != 0;  // VK_CONTROL
     public static bool AltHeld => (GetAsyncKeyState(0x12) & 0x8000) != 0;   // VK_MENU
+
+    /// <summary>Runs <paramref name="onClick"/> when the game fires the button's click (what its own buttons do). UI thread.</summary>
+    public static void OnClick(nint button, Action onClick)
+    {
+        if (button == 0) return;
+        SettingsMods.BindButton(button, &RunClick, (nint)GCHandle.Alloc(onClick)); // never freed: the game keeps its buttons
+    }
+
+    [UnmanagedCallersOnly]
+    private static void RunClick(nint handle)
+    {
+        try { ((Action)((GCHandle)handle).Target!)(); }
+        catch { /* never throw into the game */ }
+    }
 
     [LibraryImport("user32.dll")]
     private static partial short GetAsyncKeyState(int key);

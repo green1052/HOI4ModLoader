@@ -346,7 +346,7 @@ internal static unsafe class SettingsMods
         AddObserver(box, glue);
     }
 
-    private static void BindButton(nint button, delegate* unmanaged<nint, void> handler, nint cookie)
+    internal static void BindButton(nint button, delegate* unmanaged<nint, void> handler, nint cookie)
     {
         var glue = Allocator.AllocZeroed(8 + 20 * 64);
         *(nint*)glue = Sig.VTable(ButtonGlue);

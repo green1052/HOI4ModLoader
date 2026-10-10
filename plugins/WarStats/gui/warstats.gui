@@ -1,0 +1,35 @@
+
+		# HOI4ModLoader WarStats: a war statistics window, opened by a button under the topbar's flag.
+		buttonType = {
+			name = "warstats_button"
+			position = { x = 14 y = 45 }
+			quadTextureSprite = "GFX_ledger_button"
+			Orientation = "UPPER_LEFT"
+			clicksound = click_ok
+			oversound = ui_menu_over
+			pdx_tooltip = "com.green1052.warstats.button"
+		}
+
+		containerWindowType = {
+			name = "warstats_window"
+			position = { x = 10 y = 80 }
+			size = { width = 400 height = 560 }
+			Orientation = "UPPER_LEFT"
+			clipping = no
+
+			background = {
+				name = "Background"
+				quadTextureSprite = "GFX_tiled_generic_bg_1"
+			}
+
+			instantTextBoxType = {
+				name = "warstats_text"
+				position = { x = 12 y = 10 }
+				font = "hoi_16mbs"
+				text = ""
+				maxWidth = 376
+				maxHeight = 540
+				format = left
+				alwaystransparent = yes
+			}
+		}
