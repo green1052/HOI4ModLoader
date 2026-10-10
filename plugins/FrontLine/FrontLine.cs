@@ -43,7 +43,7 @@ public static class Signatures
 /// - Attack: an empty enemy province next to the line is taken by a fresh division; enemy divisions already surrounded are
 ///   attacked by up to two (a province of ours always keeps one).
 /// Divisions taken off a front go back onto it once rested and free (after a reload that memory is gone: a rested division
-/// on no order then joins its army's front). ApplyToAi does rotation, plugging and escape for the AI countries too (single player), with their theatre distribution and army balancing kept off the divisions it handles (they'd regroup them into new small armies).
+/// on no order then joins its army's front). ApplyToAi does rotation and plugging for the AI countries too (single player), with their theatre distribution and army balancing kept off the divisions it handles (they'd regroup them into new small armies).
 /// </summary>
 [Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class FrontLine : Plugin
@@ -116,7 +116,7 @@ public unsafe class FrontLine : Plugin
             "Attack enemy divisions already surrounded (every land neighbour ours or not at war with us) with up to two fresh divisions from next to them.");
 
         var ai = Config.Bind("AI", "ApplyToAi", false,
-            "Rotation, plugging and escape for the AI countries' divisions too (single player); the AI's army management then leaves the divisions it handles alone.");
+            "Rotation and plugging for the AI countries' divisions too (single player); the AI's army management then leaves the divisions it handles alone.");
 
         if (!_rotation && !_plugging && !_escape && !_opportunity && !_mopUp) return;
         MainThread.Every(TimeSpan.FromSeconds(2), () => Manage(Game.ControlledTag, false));
@@ -227,7 +227,7 @@ public unsafe class FrontLine : Plugin
 
         if (_rotation) foreach (var group in groups) RotateArmy(country, tag, group, orders, now);
         if (_plugging) Plug(country, tag, units, orders, now);
-        if (_escape) Escape(country, tag, units, orders, now);
+        if (_escape && !_ai) Escape(country, tag, units, orders, now); // the AI re-places its own fronts: a pulled-out division leaves a hole
         if ((_opportunity || _mopUp) && !_ai) Attack(country, tag, units, now); // the AI makes its own local attacks
     }
 
