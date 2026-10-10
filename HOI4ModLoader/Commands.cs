@@ -38,8 +38,11 @@ public static unsafe class Commands
         return cmd;
     }
 
-    /// <summary>The command's own validity check, the same one the game runs before executing it.</summary>
-    public static bool CanExecute(nint cmd) => ((delegate* unmanaged<nint, byte>)(*(nint**)cmd)[CanExecuteSlot])(cmd) != 0;
+    /// <summary>
+    /// The command's own validity check, the same one the game runs before executing it. Some take a std::string* for the
+    /// failure reason (written when non-null); pass null like the game does.
+    /// </summary>
+    public static bool CanExecute(nint cmd) => ((delegate* unmanaged<nint, nint, byte>)(*(nint**)cmd)[CanExecuteSlot])(cmd, 0) != 0;
 
     /// <summary>Hands the command to the session, which owns and eventually frees it.</summary>
     public static void Post(nint cmd)
