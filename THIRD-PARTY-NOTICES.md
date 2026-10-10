@@ -1,11 +1,11 @@
 # Third-party notices
 
 HOI4ModLoader ships with the following components, each under its own license. HOI4ModLoader itself is under the
-GNU LGPL v3.0 (`COPYING.LESSER`, which builds on the GNU GPL v3.0 in `COPYING`).
+GNU LGPL v3.0 (`LICENSE`).
 
 | Component | Files | License |
 |---|---|---|
-| [Reloaded.Hooks](https://github.com/Reloaded-Project/Reloaded.Hooks), Reloaded.Hooks.Definitions, [Reloaded.Memory](https://github.com/Reloaded-Project/Reloaded.Memory), Reloaded.Memory.Buffers, [Reloaded.Assembler](https://github.com/Reloaded-Project/Reloaded.Assembler) | `core/Reloaded.*.dll` | GNU LGPL v3.0 (same text as `COPYING.LESSER`) |
+| [Reloaded.Hooks](https://github.com/Reloaded-Project/Reloaded.Hooks), Reloaded.Hooks.Definitions, [Reloaded.Memory](https://github.com/Reloaded-Project/Reloaded.Memory), Reloaded.Memory.Buffers, [Reloaded.Assembler](https://github.com/Reloaded-Project/Reloaded.Assembler) | `core/Reloaded.*.dll` | GNU LGPL v3.0 (same text as `LICENSE`) |
 | [Iced](https://github.com/icedland/iced) | `core/Iced.dll` | MIT |
 | [mimalloc](https://github.com/microsoft/mimalloc) | `core/mimalloc.dll`, `core/mimalloc-redirect.dll` | MIT |
 | [flat assembler (FASM)](https://flatassembler.net/) | `core/FASMX64.DLL` | flat assembler license (`core/FASM-LICENSE.TXT`) |
