@@ -58,7 +58,7 @@ public class SignatureTests
         return data;
     }
 
-    /// <summary>The UI mods' GUI files still build from the installed game's (the loader builds them at startup).</summary>
+    /// <summary>The changed GUI files still build from the installed game's (the loader builds them at startup).</summary>
     [Theory]
     [MemberData(nameof(GuiPatches))]
     public void GuiPatchFitsInstalledGame(string id)

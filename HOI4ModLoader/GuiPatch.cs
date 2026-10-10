@@ -1,18 +1,22 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using Reloaded.Hooks.Definitions;
+using Reloaded.Hooks.Definitions.X64;
+using CallingConventions = Reloaded.Hooks.Definitions.X64.CallingConventions;
 
 namespace HOI4ModLoader;
 
 /// <summary>
-/// A file of the assembly's UI mod (its mod\ folder, installed as Documents\Paradox Interactive\Hearts of Iron IV\mod\&lt;assembly
-/// name&gt;), built at startup from the installed game's vanilla <see cref="File"/> plus <see cref="Snippet"/> (an embedded
-/// gui\*.gui file): inserted after the <see cref="After"/> match, or replacing the <see cref="Replace"/> match (the snippet can
-/// put back groups with ${1} etc.). Built from the game the player has, it follows game updates without a new release.
+/// A game file the assembly changes, built at startup from the installed game's vanilla <see cref="File"/> plus
+/// <see cref="Snippet"/> (an embedded gui\*.gui file): inserted after the <see cref="After"/> match, or replacing the
+/// <see cref="Replace"/> match (the snippet can put back groups with ${1} etc.). Built from the game the player has, it
+/// follows game updates without a new release; <see cref="GameFiles"/> shows it to the game.
 /// </summary>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class GuiPatchAttribute(string file, string snippet) : Attribute
 {
-    /// <summary>Path in the game folder and in the mod, e.g. "interface/settings.gui".</summary>
+    /// <summary>Path in the game folder, e.g. "interface/settings.gui".</summary>
     public string File { get; } = file;
 
     /// <summary>Embedded resource name, e.g. "gui/settings_mods.gui" (every project embeds its gui\*.gui so).</summary>
@@ -39,55 +43,73 @@ public sealed class GuiPatchAttribute(string file, string snippet) : Attribute
     }
 }
 
-/// <summary>Writes every <see cref="GuiPatchAttribute"/> file into its installed UI mod, before the game reads its interface files.</summary>
-internal static class UiMods
+/// <summary>
+/// The <see cref="GuiPatchAttribute"/> files, written to HOI4ModLoader\ui and put in front of the game's virtual file system
+/// (its PhysFS search path, which hoi4.exe exports): the game reads them instead of its own and mods' copies, with no mod
+/// to install or enable. Only interface files: the checksum (common, events, history, map) stays vanilla.
+/// </summary>
+internal static class GameFiles
 {
-    private static readonly Logger Log = new("UI mods");
-    private static readonly string UserDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Paradox Interactive", "Hearts of Iron IV");
-    private static readonly string GameDir = Path.GetDirectoryName(Loader.ModsDir)!;
+    [Function(CallingConventions.Microsoft)] public delegate int MountFn(nint dir, nint mountPoint, int appendToPath);
+    [Function(CallingConventions.Microsoft)] public delegate int UnmountFn(nint dir);
 
-    internal static void Generate(IEnumerable<Assembly> assemblies)
+    private const string MountExport = "?PHYSFS_mount@@YAHPEBD0H@Z", UnmountExport = "?PHYSFS_unmount@@YAHPEBD@Z";
+
+    private static readonly Logger Log = new("GameFiles");
+    private static readonly string Dir = Path.Combine(Loader.ModsDir, "ui");
+    private static readonly string GameDir = Path.GetDirectoryName(Loader.ModsDir)!;
+    private static IHook<MountFn>? _mount;
+    private static UnmountFn? _unmount;
+    private static nint _dir; // Dir in UTF-8, for PhysFS; never freed
+
+    /// <summary>Before the game starts: every directory it mounts goes in behind ours (PhysFS mounts in front by default).</summary>
+    internal static void Install()
     {
-        foreach (var assembly in assemblies)
+        var exe = NativeLibrary.GetMainProgramHandle();
+        _unmount = Marshal.GetDelegateForFunctionPointer<UnmountFn>(NativeLibrary.GetExport(exe, UnmountExport));
+        _dir = Marshal.StringToCoTaskMemUTF8(Dir);
+        _mount = Patches.Hook<MountFn>(NativeLibrary.GetExport(exe, MountExport), (dir, mountPoint, appendToPath) =>
         {
-            var patches = assembly.GetCustomAttributes<GuiPatchAttribute>().ToArray();
-            if (patches.Length == 0) continue;
-            var name = assembly.GetName().Name!;
-            if (ModDir(name) is not { } dir)
+            var result = _mount!.OriginalFunction(dir, mountPoint, appendToPath);
+            if (result != 0 && dir != _dir && Directory.Exists(Dir))
             {
-                Log.Info($"{name}: its UI mod isn't installed (no mod\\{name}.mod)");
-                continue;
+                _unmount(_dir);
+                _mount.OriginalFunction(_dir, 0, 0);
             }
-            foreach (var patch in patches)
-            {
-                var target = Path.Combine(dir, patch.File);
-                try
-                {
-                    var vanilla = Path.Combine(GameDir, patch.File);
-                    var patched = patch.Apply(File.ReadAllText(vanilla), patch.ReadSnippet(assembly));
-                    if (patched == null)
-                    {
-                        File.Delete(target); // an old one would hide the updated vanilla file: the game's own is better
-                        Log.Error($"{name}: {patch.File} changed in this game version, left vanilla");
-                        continue;
-                    }
-                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                    if (!File.Exists(target) || File.ReadAllText(target) != patched) File.WriteAllText(target, patched);
-                }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-                {
-                    Log.Error($"{name}: {patch.File}: {e.Message}");
-                }
-            }
-        }
+            return result;
+        });
     }
 
-    /// <summary>The installed mod's folder, from the path= line of Documents\...\mod\&lt;name&gt;.mod; null if it isn't installed.</summary>
-    private static string? ModDir(string name)
+    /// <summary>Writes the files of <paramref name="assemblies"/> anew (left out: vanilla). Before the game reads its interface.</summary>
+    internal static void Build(IEnumerable<Assembly> assemblies)
     {
-        var descriptor = Path.Combine(UserDir, "mod", name + ".mod");
-        if (!File.Exists(descriptor)) return null;
-        var path = File.ReadLines(descriptor).Select(l => Regex.Match(l, @"^\s*path\s*=\s*""(.*)""")).FirstOrDefault(m => m.Success)?.Groups[1].Value;
-        return path == null ? null : Path.GetFullPath(Path.Combine(UserDir, path)); // relative paths are from the user folder
+        try
+        {
+            if (Directory.Exists(Dir)) Directory.Delete(Dir, true); // a disabled plugin's or a game update's leftovers
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Log.Error($"can't clear {Dir}: {e.Message}");
+        }
+        foreach (var assembly in assemblies)
+        foreach (var patch in assembly.GetCustomAttributes<GuiPatchAttribute>())
+        {
+            try
+            {
+                var patched = patch.Apply(File.ReadAllText(Path.Combine(GameDir, patch.File)), patch.ReadSnippet(assembly));
+                if (patched == null)
+                {
+                    Log.Error($"{assembly.GetName().Name}: {patch.File} changed in this game version, left vanilla");
+                    continue;
+                }
+                var target = Path.Combine(Dir, patch.File);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.WriteAllText(target, patched);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Log.Error($"{assembly.GetName().Name}: {patch.File}: {e.Message}");
+            }
+        }
     }
 }

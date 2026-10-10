@@ -1,7 +1,6 @@
 ﻿l_korean:
  HOIMOD_MODS_TAB:0 "모드"
  HOIMOD_TITLE:0 "HOI4ModLoader {0}  (플러그인 {2}개 중 {1}개 활성)"
- HOIMOD_VERSION_LINE:0 "HOI4ModLoader {0} (플러그인 {1}개)"
  HOIMOD_NO_PLUGINS:0 "로드된 플러그인 없음"
  HOIMOD_STATUS_RUNNING:0 "실행 중입니다."
  HOIMOD_STATUS_OFF:0 "꺼져 있습니다."

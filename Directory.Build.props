@@ -3,15 +3,12 @@
     <PropertyGroup>
         <!-- Game folder: Steam's uninstall entry for app 394360. Override with -p:HOI4Dir=... or the HOI4Dir environment variable. -->
         <HOI4Dir Condition="'$(HOI4Dir)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 394360', 'InstallLocation', null, RegistryView.Registry64, RegistryView.Registry32))</HOI4Dir>
-        <!-- Every build deploys into the game (version.dll + HOI4ModLoader\). -p:DeployDir=/-p:HOI4ModDir= (see README) point it elsewhere or turn it off. -->
+        <!-- Every build deploys into the game (version.dll + HOI4ModLoader\). -p:DeployDir= points it elsewhere or turns it off. -->
         <DeployDir Condition="'$(DeployDir)' == ''">$(HOI4Dir)</DeployDir>
-        <!-- Regular HOI4 (Paradox) mods that some plugins ship, e.g. GUI files. -->
-        <HOI4ModDir Condition="'$(HOI4ModDir)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.MyDocuments))\Paradox Interactive\Hearts of Iron IV\mod</HOI4ModDir>
-        <!-- Where they resolve to: relative paths are from this folder (the repository), the same for every project and shell. -->
+        <!-- Where it resolves to: a relative path are from this folder (the repository), the same for every project and shell. -->
         <DeployPath Condition="'$(DeployDir)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '$(DeployDir)'))))</DeployPath>
         <!-- Symbols (.pdb: line numbers in LogOutput.log, debugging) go out with Debug builds only. -->
         <DeploySymbols Condition="'$(DeploySymbols)' == ''">$([System.String]::Equals('$(Configuration)', 'Debug'))</DeploySymbols>
-        <HOI4ModPath Condition="'$(HOI4ModDir)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '$(HOI4ModDir)'))))</HOI4ModPath>
     </PropertyGroup>
 
     <!-- Every project: the loader, the plugins (hosted in the 64-bit game) and the tests. -->

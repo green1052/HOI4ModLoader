@@ -39,7 +39,6 @@
         <Touch Condition="'$(_VcMSBuild)' != '' And Exists('$(BootstrapDll)')" Files="$(BootstrapDll)" />
     </Target>
 
-    <Import Project="..\HOI4Mod.targets" />
 
     <!--
       mimalloc: Microsoft's official release build (pinned and hash-checked), shipped next to the loader (see Allocator.cs).

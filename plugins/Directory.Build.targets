@@ -7,6 +7,4 @@
         <Delete Condition="!$(DeploySymbols)" Files="$(DeployPath)\HOI4ModLoader\plugins\$(TargetName).pdb" ContinueOnError="WarnAndContinue" /> <!-- a stale one would not match -->
     </Target>
 
-    <Import Project="$(MSBuildThisFileDirectory)..\HOI4Mod.targets" />
-
 </Project>

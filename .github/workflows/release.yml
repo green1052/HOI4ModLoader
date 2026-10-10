@@ -21,7 +21,7 @@ jobs:
                 shell: pwsh
                 run: |
                     $version = "${{ github.ref_name }}".TrimStart("v")
-                    dotnet build HOI4ModLoader.slnx -c Release -p:Version=$version -p:DeployDir=out -p:HOI4ModDir=out\mod
+                    dotnet build HOI4ModLoader.slnx -c Release -p:Version=$version -p:DeployDir=out
                     if ($LASTEXITCODE) { exit $LASTEXITCODE }
                     foreach ($file in "out\version.dll", "out\HOI4ModLoader\core\HOI4ModLoader.dll", "out\HOI4ModLoader\core\mimalloc.dll") {
                         if (!(Test-Path $file)) { throw "$file missing" }

@@ -1,7 +1,6 @@
 ﻿l_english:
  HOIMOD_MODS_TAB:0 "Mods"
  HOIMOD_TITLE:0 "HOI4ModLoader {0}  ({1} of {2} plugins active)"
- HOIMOD_VERSION_LINE:0 "HOI4ModLoader {0} ({1} plugins)"
  HOIMOD_NO_PLUGINS:0 "No plugins loaded"
  HOIMOD_STATUS_RUNNING:0 "Running."
  HOIMOD_STATUS_OFF:0 "Off."

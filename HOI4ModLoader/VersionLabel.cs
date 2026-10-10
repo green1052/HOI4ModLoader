@@ -10,8 +10,8 @@ using Reloaded.Hooks.Definitions.X64;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Adds the loader to the main menu's version label: a second line "HOI4ModLoader 1.0.0 (N plugins)" when the
-/// HOI4ModLoader UI mod made the panel and label two lines tall, else " +N" on the version's line (a second line would run
+/// Adds the loader to the main menu's version label: a second line "HOI4ModLoader 1.0.0" when the
+/// GuiPatch above made the panel and label two lines tall, else " +" on the version's line (a second line would run
 /// out of the menu frame); and a tooltip with the loader's version and the loaded plugins. Only that label changes: the game's version
 /// string (saves, multiplayer) is untouched.
 /// </summary>
@@ -40,9 +40,7 @@ public static unsafe class VersionLabel
             Log.Guard("version label", () =>
             {
                 var box = Gui.FindTextBox(*(nint*)(view + WindowOfView), "version_label");
-                var added = box != 0 && *(int*)(box + MaxHeight) >= 40
-                    ? "\n" + Loc.Format("HOIMOD_VERSION_LINE", "HOI4ModLoader {0} ({1} plugins)", Loader.Version, Loader.LoadedCount)
-                    : $" +{Loader.LoadedCount}";
+                var added = box != 0 && *(int*)(box + MaxHeight) >= 40 ? $"\nHOI4ModLoader {Loader.Version}" : " +";
                 Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // appended as bytes: the label is in the game's encoding
                 Gui.SetTooltip(box, Tooltip);
             });

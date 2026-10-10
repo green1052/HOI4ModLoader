@@ -13,8 +13,8 @@ namespace HOI4ModLoader;
 /// <summary>
 /// A "Mods" tab in the game's settings window: a checkbox per plugin to switch it on or off (hover for what it does), and
 /// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers). Changes are written to the
-/// plugin's config and every plugin reloads. The tab comes from the "HOI4ModLoader UI" mod (generated from the vanilla
-/// interface\settings.gui at build); without it nothing changes.
+/// plugin's config and every plugin reloads. The tab comes from the GuiPatch above (built from the
+/// installed game's interface\settings.gui at startup); without it nothing changes.
 /// </summary>
 internal static unsafe class SettingsMods
 {
@@ -97,7 +97,7 @@ internal static unsafe class SettingsMods
         var root = *(nint*)(screen + RootOfScreen);
         if (root == 0 || Gui.FindTextBox(root, "hoimod_ui") == 0)
         {
-            if (!_reportedMissing) Log.Info("no Mods tab: enable the \"HOI4ModLoader UI\" mod in the launcher to get one");
+            if (!_reportedMissing) Log.Info("no Mods tab: the settings window isn't HOI4ModLoader\\ui's (see GameFiles in this log)");
             _reportedMissing = true;
             return;
         }
@@ -108,6 +108,8 @@ internal static unsafe class SettingsMods
         _title = Gui.FindTextBox(_settings, "hoimod_settings_title");
         _listTitle = Gui.FindTextBox(_list, "hoimod_mods_title");
         _tab = Gui.Find(root, ButtonSlot, "hoimod_mods_tab");
+        var tabText = Gui.FindTextBox(root, "hoimod_mods_tab_text");
+        if (tabText != 0) Gui.SetText(tabText, Loc.Get("HOIMOD_MODS_TAB", "Mods"));
         Visible(_page, false);
 
         for (var row = 0; row < PluginRows; row++)

@@ -86,7 +86,7 @@ ${1}buttonType = {
                 name = "hoimod_mods_tab_text"
                 position = { x = 371 y = 74 }
                 font = "hoi_18mbs"
-                text = "HOIMOD_MODS_TAB"
+                text = ""
                 maxWidth = 86
                 maxHeight = 20
                 format = centre

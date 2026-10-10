@@ -59,7 +59,7 @@ public static class Signatures
 /// Research, national focus and intelligence agency upgrade queues. Shift+click a tech, focus or agency upgrade to
 /// queue/unqueue it; whenever a research slot, the focus or the agency is idle, the first queued entry the game accepts
 /// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
-/// "N." on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (Queues UI mod).
+/// "N." on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (added to its GUI below).
 /// The political power queue (<see cref="PoliticalQueue"/>) comes with it.
 /// </summary>
 [Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.3")]
@@ -82,7 +82,7 @@ public unsafe class Queues : Plugin
     private const int ViewedCountryOfFocusView = 0x20F8, TagOfCountry = 8; // CCountry* shown, null = the player
     private const int Prerequisites = 0x570, FocusesOfGroup = 8;          // CNationalFocus: CPdxArray of prerequisite blocks (AND), each a CPdxArray of focuses (OR)
     private const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
-    private const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
+    private const string NumberBox = "hoimod_queue";                      // added to the GUI by the GuiPatch above
     private const long SentTimeoutMs = 30_000;                            // a sent command not running by then failed: drop the entry
 
     [Function(CallingConventions.Microsoft)] public delegate nint TechClickFn(nint view, nint ev);
@@ -301,7 +301,7 @@ public unsafe class Queues : Plugin
         if (!_reportedNumberBox)
         {
             _reportedNumberBox = true;
-            Log.Info(box != 0 ? "queue numbers: on" : $"queue numbers: no '{NumberBox}' element (is the Queues UI mod enabled?)");
+            Log.Info(box != 0 ? "queue numbers: on" : $"queue numbers: no '{NumberBox}' element (see GameFiles in this log)");
         }
         if (box == 0) return;
         var index = queue.Items.IndexOf(item);

@@ -41,7 +41,7 @@ public static class Signatures
 
 /// <summary>
 /// Auto construction targets. In the construction tab, Shift+click a building to raise its target by 1 (Ctrl+Shift: 5),
-/// Ctrl+click to lower it; the target shows on the button (Auto Construction UI mod). While a building's count (built
+/// Ctrl+click to lower it; the target shows on the button (a text box the GuiPatch above adds). While a building's count (built
 /// plus queued) is under its target, more is queued with the construction tab's own command (so multiplayer stays in
 /// sync), in the best state first: core states, then higher infrastructure, then more free building slots.
 /// </summary>
@@ -140,7 +140,7 @@ public unsafe class AutoConstruction : Plugin
         if (!_reportedBox)
         {
             _reportedBox = true;
-            if (box == 0) Log.Info($"no '{TargetBox}' element: targets work but don't show (is the Auto Construction UI mod enabled?)");
+            if (box == 0) Log.Info($"no '{TargetBox}' element: targets work but don't show (see GameFiles in this log)");
         }
         if (box == 0) return;
         var country = Game.Country(Game.ControlledTag);

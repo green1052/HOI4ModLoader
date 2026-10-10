@@ -13,11 +13,9 @@ The bundled plugins add quality-of-life features: research, focus and political 
 2. Download the latest zip from [Releases](../../releases) and extract it.
 3. Put `version.dll` and the `HOI4ModLoader` folder in the game folder (where `hoi4.exe` is).
    - Steam library → right-click Hearts of Iron IV → Manage → Browse local files
-4. Put the contents of the `mod` folder in `Documents\Paradox Interactive\Hearts of Iron IV\mod`.
-5. In the HOI4 launcher, enable `HOI4ModLoader UI` and the UI mods of the plugins you use (`Queues UI` and so on).
-6. Start the game: the main menu's version label shows `HOI4ModLoader 1.0.0 (N plugins)` under the game version.
+4. Start the game: the main menu's version label shows `HOI4ModLoader 1.0.0` under the game version.
 
-The UI mods' interface files are built from your installed game each time it starts, so they keep up with game updates.
+There is no mod to enable in the launcher. The few interface files the plugins change are built from your installed game each time it starts, so they keep up with game updates.
 
 ### Uninstall
 Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
@@ -46,10 +44,9 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
   - Repeatable agency upgrades queue one more level per click (`1x3`).
   - Unqueueing a focus also unqueues the queued focuses that need it.
 - **National spirits, laws, designers, advisors, decisions:** taken one at a time as soon as you have the political power; a full slot is replaced.
-- Agency queue numbers need the `Queues UI` mod.
 
 ### AutoConstruction
-In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are left as `+N` (`Auto Construction UI` mod).
+In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are left as `+N`.
 - What's missing is added to the end of the construction queue, one level per state (or province) so they are built at the same time.
 - Location priority: core states, then infrastructure level, then free building slots.
 
@@ -62,7 +59,7 @@ In the trade view, **Shift+click** a resource icon to turn auto trade on or off 
 With air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
 
 ### AirWingFieldMarshal
-Attach air wings to field marshals (army groups). The marshal's card gets attach slots (`Air Wing Field Marshal UI` mod).
+Attach air wings to field marshals (army groups). The marshal's card gets attach slots.
 - In multiplayer, right-clicking a marshal's card with air wings selected spreads them over the marshal's armies instead.
 
 ### RailwayGuns
@@ -79,7 +76,7 @@ Keeps achievements and ironman available when the checksum changes. Patched in m
 Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports are untouched.
 
 ## Multiplayer
-- Other players see vanilla. The checksum is unchanged, so players without the loader can join the same game.
+- Other players see vanilla. Only interface files change, never the checksum, so players without the loader can join the same game.
 - Plugins like the queues and auto construction send the same commands a player's clicks would, so they work as usual.
 - Plugins that change game rules (AttachedCas, railway gun positioning, ...) switch off in a multiplayer lobby and back on in single player. Their multiplayer stand-ins start by themselves in multiplayer; the Mods tab shows both as active.
 
@@ -89,7 +86,7 @@ The game's memory allocations use Microsoft's [mimalloc](https://github.com/micr
 ## Troubleshooting
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.
 - **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins don't load on game versions other than 1.19.3.
-- **UI elements missing or broken:** check that the plugin's UI mod is enabled in the launcher. Other mods that replace the same GUI files can conflict.
+- **UI elements missing or broken:** other mods that replace the same interface files (settings window, main menu, construction tab, intelligence agency, army group card) can conflict; the loader's versions win.
 - **Turning a plugin off:** use the Mods tab, or set `Enabled = False` in `config\<plugin id>.cfg`.
 
 ## Development

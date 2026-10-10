@@ -6,8 +6,7 @@
 | `bootstrap/` | `version.dll` proxy (C++). Starts .NET 10 just before the game's entry point; also holds the mimalloc glue (`allocator.c`). |
 | `HOI4ModLoader/` | The core: plugin loading, patch API, signature scanning, config, logging, game structures, the settings window's Mods tab, the main menu version label. |
 | `plugins/<name>/` | One plugin per folder. |
-| `plugins/<name>/mod/` | (optional) The plugin's HOI4 UI mod: `descriptor.mod` and static files. |
-| `plugins/<name>/gui/` | (optional) GUI snippets for `[assembly: GuiPatch]`. |
+| `plugins/<name>/gui/` | (optional) GUI snippets for `[assembly: GuiPatch]`, embedded in the DLL. |
 | `plugins/<name>/localisation/` | (optional) Translations of the plugin's name, description and settings (`english.yml`, `korean.yml`). |
 | `tests/Signatures.Tests/` | Checks every `[Signature]` and `[assembly: GuiPatch]` against the installed game (without running it). |
 
@@ -17,14 +16,14 @@ Requirements: .NET 10 SDK, Visual Studio's "Desktop development with C++" (for `
 ```
 dotnet build
 ```
-- Every build deploys into the game folder (found through Steam's registry entry, or `-p:HOI4Dir=`) and the UI mods into `Documents\Paradox Interactive\Hearts of Iron IV\mod`.
+- Every build deploys into the game folder (found through Steam's registry entry, or `-p:HOI4Dir=`).
 - With the game running, plugins hot reload; locked core files only warn.
 - `bootstrap` is built with the Visual Studio C++ tools when its sources change.
 - mimalloc is Microsoft's official release (version and SHA-256 pinned), downloaded at build time; it isn't in the repository.
 
 A release folder (`out\`, relative to the repository). Release builds leave out the `.pdb` symbols (`-p:DeploySymbols=true` keeps them):
 ```
-dotnet build -c Release -p:DeployDir=out -p:HOI4ModDir=out\mod
+dotnet build -c Release -p:DeployDir=out
 ```
 
 ## Releases
@@ -33,7 +32,7 @@ Pushing a version tag builds and publishes a GitHub release (`.github/workflows/
 git tag v1.0.0
 git push origin v1.0.0
 ```
-The workflow builds on a Windows runner with the tag as the loader's version, zips `out\` (`version.dll`, `HOI4ModLoader\`, `mod\`) and attaches it to a new release with generated notes. The runner has no game, so the signature tests don't run there: run `dotnet test tests/Signatures.Tests` locally first.
+The workflow builds on a Windows runner with the tag as the loader's version, zips `out\` (`version.dll`, `HOI4ModLoader\`) and attaches it to a new release with generated notes. The runner has no game, so the signature tests don't run there: run `dotnet test tests/Signatures.Tests` locally first.
 
 ## Writing a plugin
 ```csharp
@@ -79,13 +78,13 @@ Files in `localisation/<language>.yml` (the game's format, UTF-8 with BOM) are e
 
 Read them with `Loc.Get(key, fallback)`: the game's language, else English, else `fallback`.
 
-### UI mods
-A project's `mod/` folder (`descriptor.mod` plus static files) is deployed as a HOI4 mod named after the project. GUI files that change vanilla ones aren't copied from the game: declare them and the loader builds them from the installed game at startup, before the game reads its interface files.
+### Game files (GUI)
+Plugins change vanilla interface files without shipping copies of them: declare the change and the loader builds the file from the installed game at startup into `HOI4ModLoader\ui`, which it mounts in front of the game's virtual file system (PhysFS, exported by `hoi4.exe`). Players install no mod. Files of disabled plugins are left out.
 ```csharp
 [assembly: GuiPatch("interface/countryconstructionsview.gui", "gui/auto_construction_target.gui",
     After = @"(?s)name = ""start_construction_entry"".*?(?=\n\t\})")]   // or Replace = regex, with ${1} etc. in the snippet
 ```
-If a pattern stops matching after a game update, the loader leaves the vanilla file and logs an error; the signature tests catch it first.
+If a pattern stops matching after a game update, the loader leaves the vanilla file and logs an error; the signature tests catch it first. Keep to `interface/` and `localisation/`: anything in the checksum (`common`, `events`, `history`, `map`) would break multiplayer and achievements.
 
 ## Debugging and hot reload
 - Set `WaitForDebugger = True` in `config\HOI4ModLoader.cfg`, start the game and attach a debugger to `hoi4.exe`: it stops before `Load()`.

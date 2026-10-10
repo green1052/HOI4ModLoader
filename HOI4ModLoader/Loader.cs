@@ -30,7 +30,7 @@ public static class Loader
     private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
     private static string _loadedFiles = "", _changedFiles = "";
     private static int _generation;
-    private static bool _uiModsBuilt;
+    private static bool _gameFilesBuilt;
 
     /// <summary>Called once by the native bootstrap (version.dll), before the game's entry point.</summary>
     [UnmanagedCallersOnly]
@@ -74,6 +74,8 @@ public static class Loader
 
             // The loader's own hooks first: a plugin hooking the same function then stacks on top, and reloads cleanly.
             Patches.Owner = "HOI4ModLoader";
+            try { GameFiles.Install(); }
+            catch (Exception e) { Log.Error($"game files: {e.Message}"); }
             try { SettingsMods.Install(); }
             catch (Exception e) { Log.Error($"settings Mods tab: {e.Message}"); }
             try { VersionLabel.Install(); }
@@ -212,12 +214,11 @@ public static class Loader
         }
 
         Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
-        Assembly[] assemblies = [typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly).Distinct()];
-        Loc.Load(assemblies); // disabled plugins' names too
-        if (!_uiModsBuilt)
+        Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins' names too
+        if (!_gameFilesBuilt)
         {
-            _uiModsBuilt = true; // once: the game reads its interface files at startup, after this and before its main menu
-            UiMods.Generate(assemblies);
+            _gameFilesBuilt = true; // once: the game reads its interface files at startup, after this and before its main menu
+            GameFiles.Build([typeof(Loader).Assembly, .. found.Values.Where(f => IsEnabled(f.Info.Id)).Select(f => f.Type.Assembly).Distinct()]);
         }
         var state = new Dictionary<string, bool?>(); // null while loading: a dependency cycle reads as failed
         foreach (var id in found.Keys.Order()) Load(id);
