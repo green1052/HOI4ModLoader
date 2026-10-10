@@ -86,19 +86,4 @@
         <Copy Condition="Exists('$(BootstrapDll)')" SourceFiles="$(BootstrapDll)" DestinationFolder="$(DeployDir)" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
     </Target>
 
-    <!-- -p:BundleRuntime=true ships the .NET runtime in HOI4ModLoader\dotnet, so players don't need it installed. -->
-    <Target Name="BundleRuntime" AfterTargets="DeployCore" Condition="'$(BundleRuntime)' == 'true' And '$(DeployDir)' != ''">
-        <PropertyGroup>
-            <_Fxr>host\fxr\$(BundledNETCoreAppPackageVersion)\</_Fxr>
-            <_Shared>shared\Microsoft.NETCore.App\$(BundledNETCoreAppPackageVersion)\</_Shared>
-        </PropertyGroup>
-        <ItemGroup>
-            <_Fxr Include="$(NetCoreRoot)$(_Fxr)**\*" />
-            <_Shared Include="$(NetCoreRoot)$(_Shared)**\*" />
-        </ItemGroup>
-        <Error Condition="'@(_Fxr)' == '' Or '@(_Shared)' == ''" Text=".NET runtime $(BundledNETCoreAppPackageVersion) not found under $(NetCoreRoot)." />
-        <Copy SourceFiles="@(_Fxr)" DestinationFiles="@(_Fxr->'$(DeployDir)\HOI4ModLoader\dotnet\$(_Fxr)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-        <Copy SourceFiles="@(_Shared)" DestinationFiles="@(_Shared->'$(DeployDir)\HOI4ModLoader\dotnet\$(_Shared)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-    </Target>
-
 </Project>

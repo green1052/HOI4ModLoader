@@ -64,6 +64,19 @@ public static unsafe class Game
         }
     }
 
+    /// <summary>
+    /// The country the player controls, or 0 (main menu, observer): what commands must be sent for. <see cref="PlayerTag"/>
+    /// also gives an observer's country, for showing things.
+    /// </summary>
+    public static int ControlledTag
+    {
+        get
+        {
+            var gs = State;
+            return gs == 0 ? 0 : Math.Max(0, *(int*)(gs + PlayerTagOffset));
+        }
+    }
+
     /// <summary>CCountry for <paramref name="tag"/>, or 0.</summary>
     public static nint Country(int tag)
     {
@@ -85,8 +98,17 @@ public static unsafe class Game
 /// <summary>Readers for engine containers.</summary>
 public static unsafe class Native
 {
+    /// <summary>The engine's fixed-point scale: 1.0 is 100000 (resources, scores, progress).</summary>
+    public const long FixedPoint = 100_000;
+
     /// <summary>CPdxArray&lt;T*&gt; at <paramref name="at"/>: { T** data; int capacity; int size; }.</summary>
     public static ReadOnlySpan<nint> PdxArray(nint at) => new((void*)*(nint*)at, *(int*)(at + 0xC));
+
+    /// <summary>CPdxArray&lt;T&gt; of values (ints, longs, ...) at <paramref name="at"/>, writable in place.</summary>
+    public static Span<T> PdxArray<T>(nint at) where T : unmanaged => new((void*)*(nint*)at, *(int*)(at + 0xC));
+
+    /// <summary>Shrinks the CPdxArray at <paramref name="at"/> to its first <paramref name="size"/> elements (no free, no move).</summary>
+    public static void SetPdxArraySize(nint at, int size) => *(int*)(at + 0xC) = size;
 
     /// <summary>
     /// Calls <paramref name="use"/> with a CPdxArray header viewing <paramref name="items"/> (data +0, capacity +8, size +0xC),
@@ -180,4 +202,57 @@ public readonly unsafe struct OrdersGroup(nint ptr)
             finally { (*(nint*)Members, *(long*)(Members + 8)) = saved; }
         }
     }
+}
+
+/// <summary>
+/// A plugin's state that belongs to one game and country (queued items, targets, pointers into game data):
+/// <see cref="Check"/> runs the reset when either changed since the last check. Call it before using that state.
+/// </summary>
+public sealed class PerGame(Action reset)
+{
+    private (nint GameState, int Tag) _game;
+
+    public void Check()
+    {
+        var game = (Game.State, Game.ControlledTag);
+        if (game == _game) return;
+        _game = game;
+        reset();
+    }
+}
+
+/// <summary>An army card: the leader cards in the army list, one per army or army group. Offsets for HOI4 1.19.3.</summary>
+public static unsafe class ArmyCard
+{
+    /// <summary>Right-click on a card (card): attaches selected air wings or assigns selected railway guns to its group, among others.</summary>
+    [Signature] public const string RightClickSig = "48 8B C4 48 89 58 ? 48 89 70 ? 48 89 78 ? 55 41 54 41 55 41 56 41 57 48 8D 68 ? 48 81 EC B0 00 00 00 0F 29 70 ? 4C 8B E9 48 83 C1 30";
+
+    /// <summary>Refreshes the card's attached-wing slots (card, group): `cmp byte [rcx+IsArmyGroup],0; ...; jnz skip; mov rcx,[rcx+WingGrid]`.</summary>
+    [Signature] public const string RefreshWingSlotsSig = "48 89 5C 24 ? 57 48 83 EC 30 80 B9 ? ? ? ? 00 48 8B DA 48 8B F9 0F 85 ? ? ? ? 48 8B 89 ? ? ? ?";
+
+    private static int _isArmyGroup;
+
+    /// <summary>Offset of the card's "this card is an army group's" byte, as the slot refresh instruction names it.</summary>
+    public static int IsArmyGroupOffset => _isArmyGroup != 0 ? _isArmyGroup : _isArmyGroup = *(int*)(Sig.Find(RefreshWingSlotsSig) + 12);
+
+    /// <summary>
+    /// Runs <paramref name="original"/> with the card treated as an army card when <paramref name="when"/>: the card UI skips
+    /// army-group cards for attached wings and railway guns. UI thread only, so nothing else sees the flip.
+    /// </summary>
+    public static void AsArmyCard(nint card, bool when, Action original)
+    {
+        var flag = (byte*)(card + IsArmyGroupOffset);
+        var was = *flag;
+        if (when) *flag = 0;
+        try { original(); }
+        finally { *flag = was; }
+    }
+
+    /// <summary>
+    /// <paramref name="items"/> dealt round-robin into <paramref name="groups"/> shares (fewer if there are fewer items), in
+    /// order: share i gets items i, i + groups, ...
+    /// </summary>
+    // ponytail: equal shares, not weighted by army size or front; weigh them if that matters in play.
+    public static nint[][] Spread(nint[] items, int groups) =>
+        [.. Enumerable.Range(0, Math.Min(groups, items.Length)).Select(g => items.Where((_, i) => i % groups == g).ToArray())];
 }

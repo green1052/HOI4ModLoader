@@ -79,6 +79,29 @@ public static unsafe partial class Gui
         ((delegate* unmanaged<nint, void>)(*(nint**)widget)[HideSlot])(widget);
     }
 
+    /// <summary>
+    /// Puts "N. " (<paramref name="position"/>) in front of the text box's text, replacing an earlier "N. ", or takes it off
+    /// for position 0. Idempotent; sets the text only when it changes.
+    /// </summary>
+    public static void Number(nint box, int position)
+    {
+        var text = Text(box);
+        var digits = 0;
+        while (digits < text.Length && char.IsAsciiDigit((char)text[digits])) digits++;
+        var rest = digits > 0 && text[digits..].StartsWith(". "u8) ? text[(digits + 2)..] : text;
+        byte[] shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. rest] : [.. rest];
+        if (!text.SequenceEqual(shown)) SetText(box, shown);
+    }
+
+    /// <summary>Puts <paramref name="prefix"/> in front of the text box's text when <paramref name="on"/>, else takes it off. Idempotent.</summary>
+    public static void SetPrefix(nint box, ReadOnlySpan<byte> prefix, bool on)
+    {
+        var text = Text(box);
+        var has = text.StartsWith(prefix);
+        if (on && !has) SetText(box, [.. prefix, .. text]);
+        else if (!on && has) SetText(box, [.. text[prefix.Length..]]);
+    }
+
     /// <summary>Text the GUI shows as written: it expands $KEY$, [..] and § codes otherwise.</summary>
     public static string Literal(string text) => string.Concat(text.Where(c => c is not ('$' or '[' or ']' or '§')));
 

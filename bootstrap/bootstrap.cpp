@@ -2,6 +2,7 @@
 // Forwards the real version.dll exports, and right before hoi4.exe's entry point boots .NET
 // and calls HOI4ModLoader.Loader.Init from HOI4ModLoader\core\HOI4ModLoader.dll.
 #include <windows.h>
+#include <shlobj.h>
 #include <cstdint>
 #include <string>
 
@@ -43,24 +44,6 @@ static void Fail(const std::wstring& msg) {
     MessageBoxW(nullptr, (g_hostError.empty() ? msg : msg + L"\n\n" + g_hostError).c_str(), L"HOI4ModLoader: mods disabled", MB_ICONWARNING);
 }
 
-// An environment variable, or empty (also when it doesn't fit MAX_PATH).
-static std::wstring Env(const wchar_t* name) {
-    wchar_t value[MAX_PATH];
-    DWORD n = GetEnvironmentVariableW(name, value, MAX_PATH);
-    return n && n < MAX_PATH ? value : L"";
-}
-
-// Where the .NET installer put the x64 runtime (it may not be under Program Files), or empty.
-static std::wstring InstallLocation() {
-    wchar_t value[MAX_PATH];
-    DWORD size = sizeof value;
-    return RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\dotnet\\Setup\\InstalledVersions\\x64", L"InstallLocation", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6432KEY, nullptr, value, &size) == ERROR_SUCCESS ? value : L"";
-}
-
-static bool IsDir(const std::wstring& path) {
-    DWORD a = GetFileAttributesW(path.c_str());
-    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
-}
 
 // <root>\host\fxr\<highest version>\hostfxr.dll, or empty.
 static std::wstring FindHostFxr(const std::wstring& root) {
@@ -92,14 +75,12 @@ static void BootDotnet() {
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring mods = std::wstring(exe, wcsrchr(exe, L'\\')) + L"\\HOI4ModLoader";
 
-    // A runtime shipped in HOI4ModLoader\dotnet wins; otherwise the installed one, found like the official hosts do.
-    std::wstring root = mods + L"\\dotnet";
-    if (!IsDir(root)) root = Env(L"DOTNET_ROOT");
-    if (root.empty()) root = InstallLocation();
-    if (root.empty() && !Env(L"ProgramFiles").empty()) root = Env(L"ProgramFiles") + L"\\dotnet";
+    // The .NET 10 Runtime (x64) the player installed, where its installer puts it.
+    wchar_t programFiles[MAX_PATH];
+    std::wstring root = SHGetSpecialFolderPathW(nullptr, programFiles, CSIDL_PROGRAM_FILES, FALSE) ? std::wstring(programFiles) + L"\\dotnet" : L"";
     std::wstring fxrPath = root.empty() ? L"" : FindHostFxr(root);
     HMODULE fxr = fxrPath.empty() ? nullptr : LoadLibraryW(fxrPath.c_str());
-    if (!fxr) return Fail(L".NET 10 runtime not found. Install the .NET 10 Runtime (x64) or use a release that bundles HOI4ModLoader\\dotnet.");
+    if (!fxr) return Fail(L".NET 10 Runtime (x64) not found. Install it from https://dotnet.microsoft.com/download/dotnet/10.0 and start the game again.");
 
     auto init = (hostfxr_initialize_for_runtime_config_fn)GetProcAddress(fxr, "hostfxr_initialize_for_runtime_config");
     auto getDelegate = (hostfxr_get_runtime_delegate_fn)GetProcAddress(fxr, "hostfxr_get_runtime_delegate");
