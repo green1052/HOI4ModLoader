@@ -765,6 +765,9 @@ public unsafe class AiAssist : Plugin
 
     private IHook<GeneralRetFn>? _unitRequests;
     private int _concentrated;
+    private const int FactorHours = 24, CalmHours = 168;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, double Factor)> Factors = new(); // AI front -> its factor, for a day
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> LastBattle = new();                 // AI front -> hour of its last battle
 
     private void LoadConcentration()
     {
@@ -825,11 +828,21 @@ public unsafe class AiAssist : Plugin
             var hostile = enemyHeld.ContainsValue(true);
             var enemyProvinces = enemyHeld.Count(e => e.Value);
             int min = *(int*)(front + MinWanted), desired = *(int*)(front + DesiredWanted), max = *(int*)(front + MaxWanted);
-            var factor = !hostile ? QuietFactor
-                : *(byte*)(front + AttackingFront) != 0 ? 1                                                 // its offensive: as it is
-                : enemy < enemyProvinces * WeakRatio ? Math.Clamp(enemy * ScreenPerEnemy / Math.Max(1, min), QuietFactor, 1)
-                : enemy > min ? HotBoost : 1;
-            if (fighting) factor = Math.Max(factor, 1); // a front in battle never gives divisions away
+            // Requests are redone every hour; a factor that followed every enemy move would march divisions back and forth.
+            // So a factor holds for a day, and a front gives divisions away only a week after its last battle.
+            var hour = *(int*)(Game.State + HourOfGameState);
+            if (fighting) LastBattle[front] = hour;
+            double factor;
+            if (Factors.TryGetValue(front, out var kept) && hour - kept.Hour is >= 0 and < FactorHours) factor = kept.Factor; // (negative: another save)
+            else
+            {
+                factor = !hostile ? QuietFactor
+                    : *(byte*)(front + AttackingFront) != 0 ? 1                                                 // its offensive: as it is
+                    : enemy < enemyProvinces * WeakRatio ? Math.Clamp(enemy * ScreenPerEnemy / Math.Max(1, min), QuietFactor, 1)
+                    : enemy > min ? HotBoost : 1;
+                Factors[front] = (hour, factor);
+            }
+            if (fighting || LastBattle.TryGetValue(front, out var battle) && hour - battle is >= 0 and < CalmHours) factor = Math.Max(factor, 1);
             if (factor == 1) continue;
             min = (int)Math.Ceiling(min * factor);
             desired = (int)Math.Ceiling(desired * factor);
