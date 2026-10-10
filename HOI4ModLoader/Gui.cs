@@ -57,6 +57,7 @@ public static unsafe class Gui
     }
 
     public static bool ShiftHeld => (GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
+    public static bool CtrlHeld => (GetAsyncKeyState(0x11) & 0x8000) != 0;  // VK_CONTROL
 
     [DllImport("user32.dll")]
     static extern short GetAsyncKeyState(int key);
