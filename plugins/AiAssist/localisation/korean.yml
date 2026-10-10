@@ -26,6 +26,6 @@
  com.green1052.aiassist.Leaders:0 "지휘관 배치"
  com.green1052.aiassist.Leaders.desc:0 "AI가 가장 크고 교전 중이며 공세 중인 전선부터 좋은 원수·장군을 고르게 합니다(바닐라는 전선 목록 순서대로 고름). 바닐라가 무시하는 특성도 반영합니다: 보병 위주 군에 보병 특성, 공세·수비 전선에 원수의 공세·수비 교리, 병·부상 같은 나쁜 상태."
  com.green1052.aiassist.Concentration:0 "병력 집중"
- com.green1052.aiassist.Concentration.desc:0 "AI가 교전국이 없는 조용한 전선과 적이 약한 전선에는 최소 병력만 남기고, 강한 적과 맞선 전선에 병력을 몰아줍니다. 바닐라는 전선 길이만큼(프로빈스당 사단 하나) 병력을 요구해서 여러 전선에 병력이 흩어집니다. 공세 중인 전선, 지역 방어, 상륙은 건드리지 않습니다."
+ com.green1052.aiassist.Concentration.desc:0 "AI가 교전국이 없는 전선(중립국·동맹국 국경)에는 최소 병력만 남기고, 적 사단이 요구량보다 많은 전선에 병력을 더 붙입니다. 교전 중인 적과 맞닿은 전선은 절대 줄이지 않습니다."
  com.green1052.aiassist.TargetValue:0 "공세 목표 선정"
  com.green1052.aiassist.TargetValue.desc:0 "AI의 국지 공격이 가치 높은 프로빈스부터 노립니다: 승점, 수도, 보급 허브, 공항, 자원, 비었거나 지친 수비대(요새화된 다수 병력은 감점). 포위 목표 다음, 전선 단축보다 먼저 봅니다."

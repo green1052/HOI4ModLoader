@@ -143,7 +143,7 @@ public unsafe class AiAssist : Plugin
         _roles = Config.Bind("AI", "Roles", true,
             "Line infantry holds the line: provinces with only infantry make local attacks only into empty provinces or pockets; armored and breakthrough divisions do the pushing (not for armies with no such divisions).");
         var concentration = Config.Bind("AI", "Concentration", true,
-            "The AI keeps only a thin screen on quiet fronts and fronts facing a weak enemy, and sends the rest to fronts facing a strong enemy (it asks one division per province of front otherwise).");
+            "The AI keeps only a thin screen on fronts with no enemy at war (neutral or friendly borders) and sends the rest to fronts facing more enemy divisions than they hold; fronts at war are never thinned.");
         _targetValue = Config.Bind("AI", "TargetValue", true,
             "The AI's local attacks go for valuable provinces first: victory points, capitals, supply hubs, airfields, resources, empty or worn-out defences (after pockets, before front shortening).");
         var leaders = Config.Bind("AI", "Leaders", true,
@@ -759,7 +759,7 @@ public unsafe class AiAssist : Plugin
     private const int MinWanted = 0x90, DesiredWanted = 0x94, MaxWanted = 0x98, FixedRequest = 0x9C, CountryOfFront = 0xE0, FrontOfAiFront = 0xE8;
     private const int SectionOfAiFront = 0xF0, AreaDefense = 0x104, InvasionTarget = 0x120, AttackingFront = 0x218 + 0x84, OtherRequest = 0x1DC;
     private const int SectionsOfFront = 0x58, IdOfSection = 8, PairsOfSection = 0x48, CombatsInProvince = 0x17C; // province: combats count
-    private const double QuietFactor = 0.25, WeakRatio = 0.5, ScreenPerEnemy = 1.5, HotBoost = 1.25;
+    private const double QuietFactor = 0.25, HotBoost = 1.25;
 
     [Function(CallingConventions.Microsoft)] public delegate nint GeneralRetFn(nint general);
 
@@ -837,8 +837,6 @@ public unsafe class AiAssist : Plugin
             else
             {
                 factor = !hostile ? QuietFactor
-                    : *(byte*)(front + AttackingFront) != 0 ? 1                                                 // its offensive: as it is
-                    : enemy < enemyProvinces * WeakRatio ? Math.Clamp(enemy * ScreenPerEnemy / Math.Max(1, min), QuietFactor, 1)
                     : enemy > min ? HotBoost : 1;
                 Factors[front] = (hour, factor);
             }
