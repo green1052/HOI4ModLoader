@@ -28,14 +28,14 @@
         </ItemGroup>
     </Target>
 
-    <Target Name="DeployHOI4Mod" AfterTargets="Build" Condition="Exists('mod\descriptor.mod') And '$(HOI4ModDir)' != ''">
+    <Target Name="DeployHOI4Mod" AfterTargets="Build" Condition="Exists('mod\descriptor.mod') And '$(HOI4ModPath)' != ''">
         <ItemGroup>
             <!-- Qualified metadata: unqualified %(RecursiveDir) here would batch over (and relink) the generated files too. -->
             <_HOI4ModOwnFile Include="mod\**\*" />
             <HOI4ModFile Include="@(_HOI4ModOwnFile)" Link="%(_HOI4ModOwnFile.RecursiveDir)%(_HOI4ModOwnFile.Filename)%(_HOI4ModOwnFile.Extension)" />
         </ItemGroup>
-        <Copy SourceFiles="@(HOI4ModFile)" DestinationFiles="@(HOI4ModFile->'$(HOI4ModDir)\$(MSBuildProjectName)\%(Link)')" SkipUnchangedFiles="true" />
-        <WriteLinesToFile File="$(HOI4ModDir)\$(MSBuildProjectName).mod" Overwrite="true" WriteOnlyWhenDifferent="true"
+        <Copy SourceFiles="@(HOI4ModFile)" DestinationFiles="@(HOI4ModFile->'$(HOI4ModPath)\$(MSBuildProjectName)\%(Link)')" SkipUnchangedFiles="true" />
+        <WriteLinesToFile File="$(HOI4ModPath)\$(MSBuildProjectName).mod" Overwrite="true" WriteOnlyWhenDifferent="true"
                           Lines="$([System.IO.File]::ReadAllText('mod\descriptor.mod'));path=&quot;mod/$(MSBuildProjectName)&quot;" />
     </Target>
 

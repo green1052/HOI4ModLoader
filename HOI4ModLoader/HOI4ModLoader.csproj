@@ -76,14 +76,14 @@
     </Target>
 
     <!-- Every build copies the loader into <DeployDir>\HOI4ModLoader\core and version.dll next to hoi4.exe. Locked files (game running) only warn. -->
-    <Target Name="DeployCore" AfterTargets="Build" Condition="'$(DeployDir)' != ''">
+    <Target Name="DeployCore" AfterTargets="Build" Condition="'$(DeployPath)' != ''">
         <ItemGroup>
             <!-- FASM.DLL is the 32-bit assembler; hoi4.exe is 64-bit and uses FASMX64.DLL. -->
             <_CoreFile Include="$(OutDir)**\*" Exclude="$(OutDir)**\*.targets;$(OutDir)FASM.DLL" />
         </ItemGroup>
-        <Copy SourceFiles="@(_CoreFile)" DestinationFiles="@(_CoreFile->'$(DeployDir)\HOI4ModLoader\core\%(RecursiveDir)%(Filename)%(Extension)')"
+        <Copy SourceFiles="@(_CoreFile)" DestinationFiles="@(_CoreFile->'$(DeployPath)\HOI4ModLoader\core\%(RecursiveDir)%(Filename)%(Extension)')"
               SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
-        <Copy Condition="Exists('$(BootstrapDll)')" SourceFiles="$(BootstrapDll)" DestinationFolder="$(DeployDir)" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
+        <Copy Condition="Exists('$(BootstrapDll)')" SourceFiles="$(BootstrapDll)" DestinationFolder="$(DeployPath)" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
     </Target>
 
 </Project>
