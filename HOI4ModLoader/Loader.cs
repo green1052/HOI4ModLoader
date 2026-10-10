@@ -30,6 +30,7 @@ public static class Loader
     private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
     private static string _loadedFiles = "", _changedFiles = "";
     private static int _generation;
+    private static bool _uiModsBuilt;
 
     /// <summary>Called once by the native bootstrap (version.dll), before the game's entry point.</summary>
     [UnmanagedCallersOnly]
@@ -204,7 +205,13 @@ public static class Loader
         }
 
         Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
-        Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins' names too
+        Assembly[] assemblies = [typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly).Distinct()];
+        Loc.Load(assemblies); // disabled plugins' names too
+        if (!_uiModsBuilt)
+        {
+            _uiModsBuilt = true; // once: the game reads its interface files at startup, after this and before its main menu
+            UiMods.Generate(assemblies);
+        }
         var state = new Dictionary<string, bool?>(); // null while loading: a dependency cycle reads as failed
         foreach (var id in found.Keys.Order()) Load(id);
 

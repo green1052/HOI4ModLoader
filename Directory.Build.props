@@ -26,6 +26,8 @@
     <!-- Translations (Loc.cs): localisation\<language>.yml, embedded as "localisation/<language>.yml". -->
     <ItemGroup>
         <EmbeddedResource Include="localisation\*.yml" LogicalName="localisation/%(Filename).yml" />
+        <!-- GUI snippets ([assembly: GuiPatch], GuiPatch.cs): gui\<name>.gui, embedded as "gui/<name>.gui". -->
+        <EmbeddedResource Include="gui\*.gui" LogicalName="gui/%(Filename)%(Extension)" />
     </ItemGroup>
 
 </Project>

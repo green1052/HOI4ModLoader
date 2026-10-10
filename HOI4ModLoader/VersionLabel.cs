@@ -2,6 +2,11 @@ using System.Text;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
+// The main menu panel 20 px taller (it grows from its centre: 10 px each way) and its version label two lines tall, 10 px
+// lower so the first line stays where it was, under the social buttons: room for the loader's line.
+[assembly: HOI4ModLoader.GuiPatch("interface/frontendmainview.gui", "gui/main_menu_version.gui",
+    Replace = @"(?s)(name =""mainmenu_panel_bottom""\s*position = \{ x=0 y =0\}\s*size = \{ width = 320 height = )450(.*?name =""version_label""\s*position = \{ x = 0 y = )411(.*?maxHeight = )20")]
+
 namespace HOI4ModLoader;
 
 /// <summary>

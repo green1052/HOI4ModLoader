@@ -2,6 +2,9 @@ using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
+// Queue number on intelligence agency upgrades; appended at the entry's end so it draws over the button.
+[assembly: GuiPatch("interface/countryintelligenceagencyview.gui", "gui/agency_queue_number.gui", After = @"(?s)name = ""upgrade_entry"".*?(?=\n\t\})")]
+
 namespace Queues;
 
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>

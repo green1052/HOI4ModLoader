@@ -3,38 +3,13 @@
     <!--
       A project (a plugin, or the loader itself) may ship a regular HOI4 mod in its mod\ folder (descriptor.mod + game files). After build it is copied to
       Documents\Paradox Interactive\Hearts of Iron IV\mod\<ProjectName> with a matching .mod file; enable it in the launcher.
-      Projects can add generated files as <HOI4ModFile Include="..." Link="interface\x.gui" /> before DeployHOI4Mod runs.
+      Files built from the installed game (GuiPatch.cs) are written into the installed mod when the game starts.
     -->
-    <!--
-      GuiPatch: a file of the HOI4 mod built from the installed vanilla file plus a snippet inserted after a regex match,
-      so it follows game updates instead of freezing an old copy:
-        <GuiPatch Include="interface\x.gui" After="(?s)name = &quot;window&quot;.*?Orientation = upper_left" Snippet="gui\my.gui" />
-      Or Match="regex" instead of After: the match is replaced by the snippet, which can put back groups with ${1} etc.
-    -->
-    <Target Name="GenerateGuiPatches" BeforeTargets="DeployHOI4Mod" Condition="'@(GuiPatch)' != ''" Outputs="%(GuiPatch.Identity)">
-        <PropertyGroup>
-            <_Vanilla>$(HOI4Dir)\%(GuiPatch.Identity)</_Vanilla>
-            <_Out>$(IntermediateOutputPath)gui\%(GuiPatch.Identity)</_Out>
-            <_Original Condition="Exists('$(_Vanilla)')">$([System.IO.File]::ReadAllText('$(_Vanilla)'))</_Original>
-            <_Snippet>$([System.IO.File]::ReadAllText(`%(GuiPatch.Snippet)`))</_Snippet>
-            <_Patched Condition="'%(GuiPatch.Match)' == ''">$([System.Text.RegularExpressions.Regex]::Replace($(_Original), '%(GuiPatch.After)', '$0$(_Snippet)'))</_Patched>
-            <_Patched Condition="'%(GuiPatch.Match)' != ''">$([System.Text.RegularExpressions.Regex]::Replace($(_Original), '%(GuiPatch.Match)', $(_Snippet)))</_Patched>
-        </PropertyGroup>
-        <Error Condition="!Exists('$(_Vanilla)')" Text="$(_Vanilla) not found (set HOI4Dir)." />
-        <Error Condition="'$(_Patched)' == '$(_Original)'" Text="'%(GuiPatch.After)%(GuiPatch.Match)' not found in $(_Vanilla); the game's GUI changed." />
-        <WriteLinesToFile File="$(_Out)" Lines="$([MSBuild]::Escape($(_Patched)))" Overwrite="true" WriteOnlyWhenDifferent="true" />
-        <ItemGroup>
-            <HOI4ModFile Include="$(_Out)" Link="%(GuiPatch.Identity)" />
-        </ItemGroup>
-    </Target>
-
     <Target Name="DeployHOI4Mod" AfterTargets="Build" Condition="Exists('mod\descriptor.mod') And '$(HOI4ModPath)' != ''">
         <ItemGroup>
-            <!-- Qualified metadata: unqualified %(RecursiveDir) here would batch over (and relink) the generated files too. -->
-            <_HOI4ModOwnFile Include="mod\**\*" />
-            <HOI4ModFile Include="@(_HOI4ModOwnFile)" Link="%(_HOI4ModOwnFile.RecursiveDir)%(_HOI4ModOwnFile.Filename)%(_HOI4ModOwnFile.Extension)" />
+            <_HOI4ModFile Include="mod\**\*" />
         </ItemGroup>
-        <Copy SourceFiles="@(HOI4ModFile)" DestinationFiles="@(HOI4ModFile->'$(HOI4ModPath)\$(MSBuildProjectName)\%(Link)')" SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(_HOI4ModFile)" DestinationFiles="@(_HOI4ModFile->'$(HOI4ModPath)\$(MSBuildProjectName)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
         <WriteLinesToFile File="$(HOI4ModPath)\$(MSBuildProjectName).mod" Overwrite="true" WriteOnlyWhenDifferent="true"
                           Lines="$([System.IO.File]::ReadAllText('mod\descriptor.mod'));path=&quot;mod/$(MSBuildProjectName)&quot;" />
     </Target>

@@ -42,4 +42,34 @@ public class SignatureTests
 
     [Fact]
     public void FoundSignatures() => Assert.True(All().Count >= 10, $"only {All().Count} signatures discovered");
+
+    /// <summary>Every [assembly: GuiPatch] in this folder's assemblies, as "assembly|index".</summary>
+    public static TheoryData<string> GuiPatches()
+    {
+        var data = new TheoryData<string>();
+        foreach (var file in Directory.GetFiles(AppContext.BaseDirectory, "*.dll"))
+        {
+            Assembly assembly;
+            try { assembly = Assembly.LoadFrom(file); }
+            catch (BadImageFormatException) { continue; }
+            var count = assembly.GetCustomAttributes<GuiPatchAttribute>().Count();
+            for (var i = 0; i < count; i++) data.Add($"{assembly.GetName().Name}|{i}");
+        }
+        return data;
+    }
+
+    /// <summary>The UI mods' GUI files still build from the installed game's (the loader builds them at startup).</summary>
+    [Theory]
+    [MemberData(nameof(GuiPatches))]
+    public void GuiPatchFitsInstalledGame(string id)
+    {
+        var parts = id.Split('|');
+        var assembly = Assembly.Load(parts[0]);
+        var patch = assembly.GetCustomAttributes<GuiPatchAttribute>().ElementAt(int.Parse(parts[1]));
+        var vanilla = File.ReadAllText(Path.Combine(GameDir, patch.File));
+        Assert.True(patch.Apply(vanilla, patch.ReadSnippet(assembly)) != null, $"{patch.File}: pattern not found");
+    }
+
+    [Fact]
+    public void FoundGuiPatches() => Assert.Equal(5, GuiPatches().Count);
 }

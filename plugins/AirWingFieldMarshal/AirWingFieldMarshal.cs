@@ -2,6 +2,9 @@ using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
+// Attach slots on the marshal card, like leader_groups_portrait_window has; appended at the window's end so it draws on top.
+[assembly: GuiPatch("interface/leadergroups.gui", "gui/army_group_attached_units.gui", After = @"(?s)name = ""army_group_portrait_window"".*?(?=\n\t\})")]
+
 namespace AirWingFieldMarshal;
 
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>

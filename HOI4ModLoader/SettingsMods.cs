@@ -4,6 +4,10 @@ using System.Text;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
+// The ingame settings window's 4 tabs become 5 (narrower) and the Mods page goes in after its Back button.
+[assembly: HOI4ModLoader.GuiPatch("interface/settings.gui", "gui/settings_mods.gui",
+    Replace = @"(?s)(name = ""menu_settings_ingame"".*?)buttonType = \{\s*name = ""settings_tab_1"".*?name = ""settings_tab_4"".*?\n\t\t\t\}(.*?shortcut = ""ESCAPE""\s*\})")]
+
 namespace HOI4ModLoader;
 
 /// <summary>

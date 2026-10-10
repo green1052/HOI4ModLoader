@@ -1,8 +1,3 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <ItemGroup>
-        <!-- Auto construction target on each building button of the construction tab; appended so it draws over the button. -->
-        <GuiPatch Include="interface\countryconstructionsview.gui" After="(?s)name = &quot;start_construction_entry&quot;.*?(?=\n\t\})" Snippet="gui\auto_construction_target.gui" />
-    </ItemGroup>
-
 </Project>

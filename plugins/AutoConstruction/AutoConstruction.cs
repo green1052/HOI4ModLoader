@@ -2,6 +2,9 @@ using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
+// Auto construction target on each building button of the construction tab; appended so it draws over the button.
+[assembly: GuiPatch("interface/countryconstructionsview.gui", "gui/auto_construction_target.gui", After = @"(?s)name = ""start_construction_entry"".*?(?=\n\t\})")]
+
 namespace AutoConstruction;
 
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
