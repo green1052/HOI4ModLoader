@@ -81,6 +81,12 @@ public static class Signatures
     /// </summary>
     [Signature] public const string UpdateFrontUnitRequests = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 30 48 8B F1 48 8B 49 08 48 8B 01 FF 50 08 48 8B C8 E8 ? ? ? ? 48 8B C8 48 8B D8 48 8B 90 88 0F 00 00 83 BA 04 01 00 00 00";
 
+    /// <summary>BuildingContainer::Find(container, CBuildingType*) -> CBuilding* or null (+0x40 level, +0x42 working level).</summary>
+    [Signature] public const string FindBuilding = "80 7A 20 00 74 ? 83 79 2C 00 74 ? 48 63 92 E0 02 00 00 48 8B 41 20";
+
+    /// <summary>A call of the building database getter, `call Get; mov rcx,[rax+3B8h]`; the getter reads [rip+db].</summary>
+    [Signature] public const string BuildingDbCall = "E8 ? ? ? ? 48 8B 88 B8 03 00 00 E8 ? ? ? ? 8B D8";
+
     /// <summary>CStrategicAir::GetOrCreateRegionCombatData: losses and kills per region at sa+0x170 (pins that offset; never called).</summary>
     [Signature] public const string RegionCombatData = "48 89 74 24 ? 57 48 83 EC 20 48 63 C2 48 8B F9 48 8D 34 C5 00 00 00 00 48 8B 81 70 01 00 00";
 }
@@ -138,13 +144,16 @@ public unsafe class AiAssist : Plugin
             "Line infantry holds the line: provinces with only infantry make local attacks only into empty provinces or pockets; armored and breakthrough divisions do the pushing (not for armies with no such divisions).");
         var concentration = Config.Bind("AI", "Concentration", true,
             "The AI keeps only a thin screen on quiet fronts and fronts facing a weak enemy, and sends the rest to fronts facing a strong enemy (it asks one division per province of front otherwise).");
+        _targetValue = Config.Bind("AI", "TargetValue", true,
+            "The AI's local attacks go for valuable provinces first: victory points, capitals, supply hubs, airfields, resources, empty or worn-out defences (after pockets, before front shortening).");
         var leaders = Config.Bind("AI", "Leaders", true,
             "The AI gives its best field marshals and generals to its biggest, fighting, attacking fronts first, and counts the traits it ignores: infantry traits for infantry armies, offensive or defensive doctrine for attacking or holding fronts, bad status.");
         var airRetreat = Config.Bind("AI", "AirRetreat", true,
             "The AI pulls its planes out of regions where it is losing the air war badly (low air superiority, heavy losses, few kills) and uses them where it can win.");
 
         if (readiness) LoadReadiness();
-        if (_pocketClosing || _frontShortening || _armorTerrain || _roles) LoadPockets();
+        if (_targetValue) LoadTargetValue();
+        if (_pocketClosing || _frontShortening || _armorTerrain || _roles || _targetValue) LoadPockets();
         if (airRetreat) LoadAirRetreat();
         if (leaders) LoadLeaders();
         if (concentration) LoadConcentration();
@@ -339,8 +348,8 @@ public unsafe class AiAssist : Plugin
                 Interlocked.Increment(ref _steered);
                 return 1;
             }
-            if (!_pocketClosing && !_frontShortening) return 0;
-            var (pocket, shortest) = (0, int.MaxValue);
+            if (!_pocketClosing && !_frontShortening && !_targetValue) return 0;
+            var (pocket, shortest, valuable) = (0, int.MaxValue, 0.0);
             foreach (var id in Game.Neighbours(from))
             {
                 var c = Game.Province(id);
@@ -348,8 +357,10 @@ public unsafe class AiAssist : Plugin
                 if (Divisions(from) < Divisions(c) * (_fortLevel(c) / 2 + 1)) continue; // fails vanilla's strength test anyway
                 if (_pocketClosing) pocket = Math.Max(pocket, Pocket(me, tag, c));
                 if (_frontShortening) shortest = Math.Min(shortest, FrontChange(me, tag, c));
+                if (_targetValue) valuable = Math.Max(valuable, TargetValue(c));
             }
             var skip = pocket > 0 ? Pocket(me, tag, to) == 0                                   // pocket targets only
+                : _targetValue && valuable >= MinTargetValue ? TargetValue(to) < valuable / 2         // worth at least half the best
                 : _frontShortening && shortest < 0 && FrontChange(me, tag, to) > 0;              // nothing that lengthens the front
             if (skip) Interlocked.Increment(ref _steered);
             return skip ? (byte)1 : (byte)0;
@@ -475,6 +486,83 @@ public unsafe class AiAssist : Plugin
             if (*(int*)(unit + KindOfUnit) == 0 && IsBreakthrough(unit)) { has = true; break; }
         Breakthroughs[tag] = (now + RolesCacheMs, has);
         return has;
+    }
+
+    // ---- Target value: victory points, capitals, supply hubs, airfields, resources, and how well it is held ----
+
+    private const int VictoryPoints = 0x38, StateOfProvince = 0xC0, BuildingsOfProvince = 0x190;
+    private const int ProvincesOfState = 0x18, IdOfState = 0x58, BestVictoryPoints = 0x85C, BuildingsOfState = 0x120, ResourcesOfState = 0x30;
+    private const int ResourceEntries = 0xF8, SupplyNodeType = 0x3A0, AirBaseTypes = 0x298, CapitalOfCountry = 0x1018;
+    private const int MinTargetValue = 30;
+    private const long CapitalsCacheMs = 60_000;
+
+    private static bool _targetValue;
+    private static nint _buildingDb; // address of the building database global
+    private static delegate* unmanaged<nint, nint, nint> _findBuilding;
+    private static (long Until, HashSet<int> States) _capitals = (0, []);
+
+    private void LoadTargetValue()
+    {
+        _findBuilding = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
+        var at = Sig.Find(Signatures.BuildingDbCall);
+        var getter = at + 5 + *(int*)(at + 1);
+        _buildingDb = getter + 18 + *(int*)(getter + 14);
+    }
+
+    /// <summary>
+    /// What taking the enemy province is worth: its victory points, a capital, a supply hub, the state's airfields and
+    /// resources (in full on the state's main province), plus empty or worn defenders; a dug-in stack counts against it.
+    /// </summary>
+    private static double TargetValue(nint target)
+    {
+        var db = *(nint*)_buildingDb;
+        var state = *(nint*)(target + StateOfProvince);
+        if (db == 0 || state == 0) return 0;
+        var index = *(int*)(state + BestVictoryPoints);
+        var main = index >= 0 && index < *(int*)(state + ProvincesOfState + 0xC) && ((nint*)*(nint*)(state + ProvincesOfState))[index] == target;
+
+        double value = 3 * Math.Min(*(int*)(target + VictoryPoints), 30);
+        if (Capitals().Contains(*(int*)(state + IdOfState))) value += main ? 60 : 15;
+        var hub = _findBuilding(target + BuildingsOfProvince, *(nint*)(db + SupplyNodeType));
+        if (hub != 0 && *(short*)(hub + 0x40) > 0) value += 20;
+
+        var air = 0;
+        var types = (nint*)*(nint*)(db + AirBaseTypes);
+        for (int i = 0, n = *(int*)(db + AirBaseTypes + 0xC); i < n; i++)
+            if (_findBuilding(state + BuildingsOfState, types[i]) is var b && b != 0) air += *(short*)(b + 0x42);
+        long resources = 0;
+        var definition = *(nint*)(state + ResourcesOfState);
+        if (definition != 0)
+            for (int i = 0, n = *(int*)(definition + ResourceEntries + 0xC); i < n; i++)
+                resources += *(long*)(*(nint*)(definition + ResourceEntries) + 16 * i);
+        value += (main ? 1 : 0.25) * (2 * air + Math.Min(resources / Native.FixedPoint, 40));
+
+        // How it is held.
+        var defenders = Native.PdxArray(target + UnitsInProvince);
+        if (defenders.Length == 0) return value + 25;
+        long org = 0, strength = 0;
+        foreach (var unit in defenders)
+        {
+            long o, s;
+            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[OrgRatioSlot])(unit, &o);
+            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[StrengthRatioSlot])(unit, &s);
+            org += o;
+            strength += s;
+        }
+        if (org / defenders.Length < 30_000 || strength / defenders.Length < 50_000) return value + 10;
+        return value - 5 * defenders.Length * (1 + _fortLevel(target) / 2.0);
+    }
+
+    /// <summary>Every country's capital state id (cached a minute).</summary>
+    private static HashSet<int> Capitals()
+    {
+        var cached = _capitals;
+        if (Environment.TickCount64 < cached.Until) return cached.States;
+        var states = new HashSet<int>();
+        foreach (var country in Game.Countries)
+            if (country != 0) states.Add(*(int*)(country + CapitalOfCountry));
+        _capitals = (Environment.TickCount64 + CapitalsCacheMs, states);
+        return states;
     }
 
     /// <summary>The adjacency type from one province to a neighbour: 0 normal, 1 strait, 2 river, 3 large river, 4 impassable.</summary>
