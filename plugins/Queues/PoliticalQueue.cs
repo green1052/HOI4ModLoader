@@ -20,6 +20,9 @@ public static class PoliticalSignatures
     /// <summary>Advisor picker, pick lambda (impl, CCharacterStatus*): impl+16 slot occupant, impl+32 std::string* slot.</summary>
     [Signature] public const string AdvisorPick = "48 89 5C 24 ? 57 48 83 EC 20 80 79 ? ? 48 8B DA 48 8B F9 74";
 
+    /// <summary>CCountryCharacterSelectionItem::SetUnselectable(item, bool): disables the entry's button (can't afford, not allowed).</summary>
+    [Signature] public const string AdvisorUnselectable = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 40 0F B6 FA 48 8B F1 48 8B 59 10 48 83 C1 20 E8";
+
     /// <summary>CCountryCharacterSelectionItem::Update(item, CCharacterStatus*, bool).</summary>
     [Signature] public const string AdvisorUpdate = "44 88 44 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24";
 
@@ -51,13 +54,15 @@ public unsafe class PoliticalQueue : Plugin
     // Layouts for HOI4 1.19.3.
     private const int PoliticsOfCountry = 0xF90, ActiveIdeas = 80, PoliticalPower = 0xE0;
     private const int SlotOfIdea = 2720, IdOfCharacter = 8;
-    private const int IdeaItemOfImpl = 8, WindowOfIdeaItem = 40, IdeaOfItem = 48, IdeaActive = 56, IdeaName = 72, IdeaButton = 112;
+    private const int IdeaItemOfImpl = 8, WindowOfIdeaItem = 40, IdeaOfItem = 48, IdeaActive = 56, IdeaName = 72, IdeaButton = 0x70;
     private const int ListOfIdeasWindow = 1416;
     private const int OccupantOfImpl = 16, SlotOfImpl = 32, CharacterItemOffset = 1400; // the pick lambda gets item + 1400
     private const int CharacterOfItem = 1400, SlotOfItem = 1560, CharacterName = 1592;
     private const int DecisionOfItem = 4016, DecisionName = 3984, TargetOfItem = 4024, TargetedDecisionName = 3976;
+    private const int CharacterButton = 0x28, DecisionButton = 0xA58;
     private const int TargetTag = 32, TargetExtra = 36;
-    private const int EnableSlot = 0x288;                  // GUI button vtable: Enable()
+    private const int EnableSlot = 0x288, SetClickableSlot = 0x168; // CButton vtable: Enable(), SetClickable(bool)
+    private const int ButtonState = 0xB0, Disabled = 3, ButtonFlags = 0xE4, Clickable = 0x08;
     private const long WaitMs = 5_000;                    // after a post: until political power changes, at most this long
 
     private enum Kind { Idea, Advisor, Decision, TargetedDecision }
@@ -75,6 +80,8 @@ public unsafe class PoliticalQueue : Plugin
     private IHook<OneFn>? _ideaClick, _decisionClick, _targetedDecisionClick;
     private IHook<TwoFn>? _advisorPick;
     private IHook<ThreeFn>? _ideaUpdate, _advisorUpdate, _decisionSet, _targetedDecisionSet;
+    private IHook<TwoFn>? _advisorUnselectable;
+    private readonly HashSet<nint> _forced = new(); // entries whose button we made clickable for Shift+click: a plain click does nothing
     private delegate* unmanaged<nint, void> _ideaListRefresh;
 
     private readonly List<Entry> _queue = new();
@@ -88,6 +95,7 @@ public unsafe class PoliticalQueue : Plugin
         _ideaClick = Patches.Hook<OneFn>(Sig.Find(PoliticalSignatures.IdeaClick), impl =>
         {
             var item = *(nint*)(impl + IdeaItemOfImpl);
+            if (!Gui.ShiftHeld && _forced.Contains(item)) return 0;
             if (!Gui.ShiftHeld || item == 0 || *(byte*)(item + IdeaActive) != 0) return _ideaClick!.OriginalFunction(impl);
             Toggle(new Entry(Kind.Idea, *(nint*)(item + IdeaOfItem)));
             var list = *(nint*)(*(nint*)(item + WindowOfIdeaItem) + ListOfIdeasWindow);
@@ -97,16 +105,15 @@ public unsafe class PoliticalQueue : Plugin
         _ideaUpdate = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.IdeaUpdate), (item, tag, slotIdea) =>
         {
             var result = _ideaUpdate!.OriginalFunction(item, tag, slotIdea);
-            if (*(byte*)(item + IdeaActive) != 0) return result;
             Label(*(nint*)(item + IdeaName), new Entry(Kind.Idea, *(nint*)(item + IdeaOfItem)));
-            var button = *(nint*)(item + IdeaButton); // disabled while unaffordable: keep it clickable for Shift+click
-            if (button != 0) ((delegate* unmanaged<nint, void>)*(nint*)(*(nint*)button + EnableSlot))(button);
+            Force(item, *(nint*)(item + IdeaButton)); // disabled while unaffordable or not allowed
             return result;
         });
 
         _advisorPick = Patches.Hook<TwoFn>(Sig.Find(PoliticalSignatures.AdvisorPick), (impl, status) =>
         {
             var slot = *(nint*)(impl + SlotOfImpl);
+            if (!Gui.ShiftHeld && _forced.Contains(status - CharacterItemOffset)) return 0;
             if (!Gui.ShiftHeld || status == 0 || slot == 0) return _advisorPick!.OriginalFunction(impl, status);
             Toggle(new Entry(Kind.Advisor, *(nint*)status, SlotName(slot)) { Occupant = *(nint*)(impl + OccupantOfImpl) });
             LabelAdvisor(status - CharacterItemOffset);
@@ -115,13 +122,21 @@ public unsafe class PoliticalQueue : Plugin
         _advisorUpdate = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.AdvisorUpdate), (item, status, flag) =>
         {
             var result = _advisorUpdate!.OriginalFunction(item, status, flag);
+            _forced.Remove(item); // a refresh runs Update first, then SetUnselectable or SetSelectable
             LabelAdvisor(item);
+            return result;
+        });
+        _advisorUnselectable = Patches.Hook<TwoFn>(Sig.Find(PoliticalSignatures.AdvisorUnselectable), (item, iconEnabled) =>
+        {
+            var result = _advisorUnselectable!.OriginalFunction(item, iconEnabled);
+            Force(item, *(nint*)(item + CharacterButton));
             return result;
         });
 
         _decisionClick = Patches.Hook<OneFn>(Sig.Find(PoliticalSignatures.DecisionClick), item =>
         {
             var decision = *(nint*)(item + DecisionOfItem);
+            if (!Gui.ShiftHeld && _forced.Contains(item)) return 0;
             if (!Gui.ShiftHeld || decision == 0) return _decisionClick!.OriginalFunction(item);
             Toggle(new Entry(Kind.Decision, decision));
             Label(*(nint*)(item + DecisionName), new Entry(Kind.Decision, decision));
@@ -130,6 +145,7 @@ public unsafe class PoliticalQueue : Plugin
         _targetedDecisionClick = Patches.Hook<OneFn>(Sig.Find(PoliticalSignatures.TargetedDecisionClick), item =>
         {
             var entry = TargetedEntry(*(nint*)(item + TargetOfItem));
+            if (!Gui.ShiftHeld && _forced.Contains(item)) return 0;
             if (!Gui.ShiftHeld || entry == null) return _targetedDecisionClick!.OriginalFunction(item);
             Toggle(entry);
             Label(*(nint*)(item + TargetedDecisionName), entry);
@@ -139,16 +155,37 @@ public unsafe class PoliticalQueue : Plugin
         {
             var result = _decisionSet!.OriginalFunction(item, decision, tag);
             if (decision != 0) Label(*(nint*)(item + DecisionName), new Entry(Kind.Decision, decision));
+            Force(item, *(nint*)(item + DecisionButton)); // unaffordable: enabled but not clickable; unavailable: disabled
             return result;
         });
         _targetedDecisionSet = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.TargetedDecisionSet), (item, target, tag) =>
         {
             var result = _targetedDecisionSet!.OriginalFunction(item, target, tag);
             if (TargetedEntry(target) is { } entry) Label(*(nint*)(item + TargetedDecisionName), entry);
+            Force(item, *(nint*)(item + DecisionButton));
             return result;
         });
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
+    }
+
+    /// <summary>
+    /// The game drops clicks on a disabled or unclickable button before any handler runs, and it blocks exactly what a queue
+    /// is for (can't afford yet). Make <paramref name="button"/> clickable, and remember <paramref name="item"/> so that a
+    /// plain click on it still does nothing.
+    /// </summary>
+    private void Force(nint item, nint button)
+    {
+        if (button == 0) return;
+        if (*(int*)(button + ButtonState) != Disabled && (*(byte*)(button + ButtonFlags) & Clickable) != 0)
+        {
+            _forced.Remove(item);
+            return;
+        }
+        _forced.Add(item);
+        var vtable = *(nint*)button;
+        ((delegate* unmanaged<nint, void>)*(nint*)(vtable + EnableSlot))(button);
+        ((delegate* unmanaged<nint, byte, void>)*(nint*)(vtable + SetClickableSlot))(button, 1);
     }
 
     private static string SlotName(nint str) => Encoding.Latin1.GetString(Native.MsvcString(str));
@@ -208,6 +245,7 @@ public unsafe class PoliticalQueue : Plugin
             _session = (Game.State, tag);
             _queue.Clear();
             _waiting = null;
+            _forced.Clear();
         }
 
         // One at a time: the cost is paid when the command runs (a round trip later in multiplayer), so a second post could
