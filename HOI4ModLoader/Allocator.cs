@@ -57,7 +57,7 @@ public static unsafe class Allocator
     internal static void UseMimalloc()
     {
         // The release build overrides the whole process's (ucrtbase) malloc when loaded unless told not to: only the
-        // game's own CRT is meant to change.
+        // game's own CRT is meant to change. (Loaded this late it doesn't take over anyway; this makes sure.)
         Environment.SetEnvironmentVariable("MIMALLOC_DISABLE_REDIRECT", "1");
         var mimalloc = NativeLibrary.Load(Path.Combine(Path.GetDirectoryName(typeof(Allocator).Assembly.Location)!, "mimalloc.dll"));
         nint Mi(string name) => NativeLibrary.GetExport(mimalloc, name);
