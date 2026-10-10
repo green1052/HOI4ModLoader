@@ -121,8 +121,8 @@ public static unsafe class Native
     public static void SetMsvcString(nint at, ReadOnlySpan<byte> value)
     {
         var bytes = value.ToArray(); // value may point into the buffer freed below
-        if (bytes.Length >= 0xFFF) throw new ArgumentException("too long: MSVC over-aligns buffers of 4 KB and more"); // and frees them differently
-        if (*(long*)(at + 0x18) >= 16) Allocator.Free(*(nint*)at);
+        if (bytes.Length >= BigBuffer - 1) throw new ArgumentException("too long: MSVC over-aligns buffers of 4 KB and more");
+        FreeMsvcString(at);
         var data = bytes.Length < 16 ? (byte*)at : (byte*)Allocator.Alloc(bytes.Length + 1);
         if (data != (byte*)at) *(byte**)at = data;
         bytes.CopyTo(new Span<byte>(data, bytes.Length));
@@ -132,6 +132,17 @@ public static unsafe class Native
     }
 
     public static string Utf8(ReadOnlySpan<byte> bytes) => Encoding.UTF8.GetString(bytes);
+
+    private const int BigBuffer = 0x1000; // MSVC allocates std::string buffers this big 32-byte aligned, the real block's pointer just before
+
+    /// <summary>Frees the heap buffer of the MSVC std::string at <paramref name="at"/> (none when inline), leaving it dangling.</summary>
+    internal static void FreeMsvcString(nint at)
+    {
+        var capacity = *(long*)(at + 0x18);
+        if (capacity < 16) return;
+        var buffer = *(nint*)at;
+        Allocator.Free(capacity + 1 >= BigBuffer ? ((nint*)buffer)[-1] : buffer);
+    }
 }
 
 /// <summary>COrdersGroup (hoi4/source/ordersgroup.cpp): an army or an army group. Offsets for HOI4 1.19.3.</summary>

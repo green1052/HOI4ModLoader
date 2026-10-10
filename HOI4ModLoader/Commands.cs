@@ -17,7 +17,6 @@ public static unsafe class Commands
 
     private static delegate* unmanaged<nint, nint, byte, byte> _post;
     private static nint* _sessionHolder;
-    private static readonly Dictionary<string, nint> VTables = [];
 
     /// <summary>
     /// A new <paramref name="className"/> command (e.g. "CSetResearchCommand") of <paramref name="size"/> bytes, laid out like
@@ -26,7 +25,7 @@ public static unsafe class Commands
     /// </summary>
     public static nint New(string className, int size, int tag, nint target)
     {
-        if (!VTables.TryGetValue(className, out var vtable)) VTables[className] = vtable = Sig.VTable(className);
+        var vtable = Sig.VTable(className);
         var cmd = Allocator.AllocZeroed(size);
         *(nint*)cmd = vtable;
         *(int*)(cmd + 12) = -1;

@@ -24,9 +24,12 @@ public sealed class ConfigFile
         {
             var raw = _lines[keyAt][(_lines[keyAt].IndexOf('=') + 1)..].Trim();
             try { return (T)Convert.ChangeType(raw, typeof(T), CultureInfo.InvariantCulture); }
-            catch (FormatException) { return defaultValue; }
+            catch (Exception e) when (e is FormatException or OverflowException or InvalidCastException) { return defaultValue; }
         }
 
+        Reload();
+        (sectionAt, keyAt) = Find(section, key);
+        if (keyAt >= 0) return Bind(section, key, defaultValue, description); // written meanwhile
         var entry = new[] { $"# {description}", $"{key} = {Convert.ToString(defaultValue, CultureInfo.InvariantCulture)}", "" };
         if (sectionAt < 0)
         {
@@ -68,8 +71,15 @@ public sealed class ConfigFile
     public void Set<T>(string section, string key, T value, string description) where T : IConvertible
     {
         Bind(section, key, value, description);
+        Reload();
         _lines[Find(section, key).Key] = $"{key} = {Convert.ToString(value, CultureInfo.InvariantCulture)}";
         File.WriteAllLines(_path, _lines);
+    }
+
+    private void Reload()
+    {
+        _lines.Clear();
+        if (File.Exists(_path)) _lines.AddRange(File.ReadAllLines(_path));
     }
 
     private (int Section, int Key) Find(string section, string key)

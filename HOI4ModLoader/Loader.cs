@@ -13,13 +13,16 @@ public static class Loader
     private static readonly string PluginsDir = Path.Combine(ModsDir, "plugins");
     private static readonly Logger Log = new("Loader");
 
-    // Plugins loaded now, in load order (hooks keep reverted ones' detours alive: a game thread may still be in one).
+    // Plugins loaded now, in load order.
     private static readonly List<Plugin> Loaded = [];
 
     /// <summary>The loader's version, e.g. "1.0.0".</summary>
     internal static readonly string Version = typeof(Loader).Assembly.GetName().Version!.ToString(3);
 
-    /// <summary>Plugins loaded now.</summary>
+    /// <summary>Plugins loaded now, in load order.</summary>
+    internal static IEnumerable<PluginAttribute> LoadedPlugins => Loaded.Select(p => p.Info);
+
+    /// <summary>How many plugins are loaded now.</summary>
     internal static int LoadedCount => Loaded.Count;
 
     /// <summary>Every plugin found in the plugins folder at the last load, loaded or not, by id.</summary>
@@ -32,9 +35,9 @@ public static class Loader
     [UnmanagedCallersOnly]
     public static void Init()
     {
-        Logger.Reset();
         try
         {
+            Logger.Reset();
             var config = new ConfigFile(Path.Combine(ModsDir, "config", "HOI4ModLoader.cfg"));
             if (config.Bind("Debug", "WaitForDebugger", false, "Pause startup until a debugger attaches (Rider: Run > Attach to Process > hoi4.exe)."))
                 while (!Debugger.IsAttached) Thread.Sleep(100);
@@ -61,6 +64,21 @@ public static class Loader
                 Multiplayer = true; // fail closed: unable to tell, game rule plugins could desync a multiplayer game
                 Log.Error($"multiplayer check unavailable, game rule plugins stay off: {e.Message}");
             }
+            // Signatures the core resolves on first use: a broken one (game update) is reported here, once, not in play.
+            foreach (var signature in new[] { Commands.PostSig, Commands.SessionHolderSig, Gui.SetTextSig, Gui.HasTextBoxSig })
+            {
+                try { Sig.Find(signature); }
+                catch (Exception e) { Log.Error($"core signature: {e.Message}"); }
+            }
+
+            // The loader's own hooks first: a plugin hooking the same function then stacks on top, and reloads cleanly.
+            Patches.Owner = "HOI4ModLoader";
+            try { SettingsMods.Install(); }
+            catch (Exception e) { Log.Error($"settings Mods tab: {e.Message}"); }
+            try { VersionLabel.Install(); }
+            catch (Exception e) { Log.Error($"version label: {e.Message}"); }
+            Patches.Owner = null;
+
             LoadPlugins();
 
             Patches.Owner = "HOI4ModLoader";
@@ -72,15 +90,6 @@ public static class Loader
                 _reloadAt = long.MaxValue;
                 Reload();
             });
-            try { SettingsMods.Install(); }
-            catch (Exception e) { Log.Error($"settings Mods page: {e.Message}"); }
-            try
-            {
-                VersionLabel.Install(() => Loc.Format("HOIMOD_VERSION_LINE", "HOI4ModLoader {0} ({1} plugins)", Version, Loaded.Count), () => $" +{Loaded.Count}",
-                    () => $"HOI4ModLoader {Version}\n" + (Loaded.Count == 0 ? Loc.Get("HOIMOD_NO_PLUGINS", "No plugins loaded")
-                        : string.Join("\n", Loaded.Select(p => $"- {Name(p.Info)} {p.Info.Version}"))));
-            }
-            catch (Exception e) { Log.Error($"version label: {e.Message}"); }
         }
         catch (Exception e)
         {
@@ -143,7 +152,14 @@ public static class Loader
     internal static bool Multiplayer { get; private set; }
 
     /// <summary>Whether the plugin's config lets it load ([General] Enabled).</summary>
-    internal static bool IsEnabled(string id) => Config(id).Bind("General", "Enabled", true, "Load this plugin.");
+    internal static bool IsEnabled(string id) => IsEnabled(Config(id));
+
+    private static bool IsEnabled(ConfigFile config) => config.Bind("General", "Enabled", true, EnabledDescription);
+
+    /// <summary>Switches the plugin on or off in its config (takes effect at the next reload).</summary>
+    internal static void SetEnabled(string id, bool on) => Config(id).Set("General", "Enabled", on, EnabledDescription);
+
+    private const string EnabledDescription = "Load this plugin.";
 
     private static void Reload()
     {
@@ -214,7 +230,7 @@ public static class Loader
             try // anything a plugin brings (constructor, config file, Load) only skips that plugin
             {
                 var config = Config(info.Id);
-                if (!config.Bind("General", "Enabled", true, "Load this plugin."))
+                if (!IsEnabled(config))
                 {
                     log.Info("disabled in config");
                     return false;

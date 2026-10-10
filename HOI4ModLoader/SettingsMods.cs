@@ -65,11 +65,12 @@ internal static unsafe class SettingsMods
     internal static void Install()
     {
         _checkBoxSprite = (delegate* unmanaged<nint, void>)Sig.Find(CheckBoxSpriteSig);
+        _ = Sig.VTable(CheckBoxGlue) + Sig.VTable(ButtonGlue) + Sig.VTable(MemberCall); // resolve now: fail at startup, not in a click
 
         _init = Patches.Hook<InitFn>(Sig.Find(InitSig), (screen, window) =>
         {
             var result = _init!.OriginalFunction(screen, window);
-            Build(screen);
+            Guard(() => Build(screen));
             return result;
         });
         _open = Patches.Hook<OpenFn>(Sig.Find(OpenSig), screen =>
@@ -82,7 +83,7 @@ internal static unsafe class SettingsMods
         {
             var result = _updateTabs!.OriginalFunction(screen);
             if (screen == _screen && _tab != 0) // the vanilla table knows 4 tabs: ours is selected when its page is shown
-                ((delegate* unmanaged<nint, int, void>)(*(nint**)_tab)[SetFrameSlot])(_tab, *(nint*)(screen + ShownTab) == _page ? 1 : 2);
+                Guard(() => ((delegate* unmanaged<nint, int, void>)(*(nint**)_tab)[SetFrameSlot])(_tab, *(nint*)(screen + ShownTab) == _page ? 1 : 2));
             return result;
         });
     }
@@ -178,7 +179,7 @@ internal static unsafe class SettingsMods
         var on = (*(int*)(PluginBoxes[row] + CheckState) & 1) != 0;
         var id = plugins[(int)row].Id;
         if (Loader.IsEnabled(id) == on) return; // called once per observer slot of a click
-        Loader.Config(id).Set("General", "Enabled", on, "Load this plugin.");
+        Loader.SetEnabled(id, on);
         Log.Info($"{id} {(on ? "enabled" : "disabled")}: reloading plugins");
         Loader.RequestReload();
     });
@@ -333,9 +334,5 @@ internal static unsafe class SettingsMods
         ((delegate* unmanaged<nint, nint, void>)(*(nint**)list)[AddObserverSlot])(list, glue);
     }
 
-    private static void Guard(Action action)
-    {
-        try { action(); }
-        catch (Exception e) { Log.Error($"Mods tab: {e}"); } // never throw into the game
-    }
+    private static void Guard(Action action) => Log.Guard("Mods tab", action); // never throw into the game
 }

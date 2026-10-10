@@ -138,7 +138,7 @@ public static unsafe partial class Gui
 
     private static void FreeString(nint s)
     {
-        if (*(long*)(s + 24) >= 16) Allocator.Free(*(nint*)s);
+        Native.FreeMsvcString(s);
         Allocator.Free(s);
     }
 }

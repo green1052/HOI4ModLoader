@@ -21,17 +21,26 @@ public static unsafe class VersionLabel
     [Function(CallingConventions.Microsoft)] public delegate nint TextFn(nint view, nint text);
 
     private static IHook<TextFn>? _hook;
+    private static readonly Logger Log = new("VersionLabel");
 
-    internal static void Install(Func<string> line, Func<string> suffix, Func<string> tooltip)
+    private static string Tooltip() => $"HOI4ModLoader {Loader.Version}\n" + (Loader.LoadedCount == 0
+        ? Loc.Get("HOIMOD_NO_PLUGINS", "No plugins loaded")
+        : string.Join("\n", Loader.LoadedPlugins.Select(p => $"- {Loader.Name(p)} {p.Version}")));
+
+    internal static void Install()
     {
         _hook = Patches.Hook<TextFn>(Sig.Find(TextSig), (view, text) =>
         {
             var result = _hook!.OriginalFunction(view, text);
-            var box = Gui.FindTextBox(*(nint*)(view + WindowOfView), "version_label");
-            var twoLines = box != 0 && *(int*)(box + MaxHeight) >= 40;
-            var added = twoLines ? "\n" + line() : suffix();
-            Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // appended as bytes: the label is in the game's encoding
-            Gui.SetTooltip(box, tooltip);
+            Log.Guard("version label", () =>
+            {
+                var box = Gui.FindTextBox(*(nint*)(view + WindowOfView), "version_label");
+                var added = box != 0 && *(int*)(box + MaxHeight) >= 40
+                    ? "\n" + Loc.Format("HOIMOD_VERSION_LINE", "HOI4ModLoader {0} ({1} plugins)", Loader.Version, Loader.LoadedCount)
+                    : $" +{Loader.LoadedCount}";
+                Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // appended as bytes: the label is in the game's encoding
+                Gui.SetTooltip(box, Tooltip);
+            });
             return result;
         });
     }

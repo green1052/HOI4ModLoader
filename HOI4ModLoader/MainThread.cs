@@ -24,6 +24,7 @@ public static class MainThread
     /// </summary>
     public static void Every(TimeSpan interval, Action action)
     {
+        Patches.RequireOwner();
         if (_hook == null) Install();
         var timer = new Timer(action, (long)interval.TotalMilliseconds);
         Timers.Add(timer);
@@ -40,7 +41,7 @@ public static class MainThread
             _hook = Patches.Hook<PeekMessageFn>(peek, (msg, hwnd, min, max, remove) =>
             {
                 var result = _hook!.OriginalFunction(msg, hwnd, min, max, remove);
-                if (Environment.CurrentManagedThreadId == Id) Tick();
+                if (Environment.CurrentManagedThreadId == Id) Log.Guard("timers", Tick); // never PeekMessage twice: it removes a message
                 return result;
             });
         }
@@ -58,7 +59,12 @@ public static class MainThread
             if (now < timer.Next || !Timers.Contains(timer)) continue;
             timer.Next = now + timer.IntervalMs;
             try { timer.Action(); }
-            catch (Exception e) { Log.Error(e.ToString()); }
+            catch (Exception e)
+            {
+                if (timer.Failed) continue;
+                timer.Failed = true; // once: a timer runs several times a second
+                Log.Error(e.ToString());
+            }
         }
     }
 
@@ -67,5 +73,6 @@ public static class MainThread
         public Action Action { get; } = action;
         public long IntervalMs { get; } = intervalMs;
         public long Next;
+        public bool Failed;
     }
 }

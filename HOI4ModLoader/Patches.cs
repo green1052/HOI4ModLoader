@@ -30,8 +30,7 @@ public static unsafe partial class Patches
     internal static int OriginalsVersion;
     private static readonly Logger Log = new("Patches");
 
-    /// <summary>The Reloaded.Hooks instance, for anything the helpers below don't cover.</summary>
-    public static IReloadedHooks Hooks => ReloadedHooks.Instance;
+    private static IReloadedHooks Hooks => ReloadedHooks.Instance;
 
     /// <summary>
     /// Writes <paramref name="replace"/> over <paramref name="expect"/> (hex, same length) at <paramref name="at"/>.
@@ -39,6 +38,7 @@ public static unsafe partial class Patches
     /// </summary>
     public static void Bytes(nint at, string expect, string replace)
     {
+        RequireOwner();
         var want = Convert.FromHexString(expect.Replace(" ", ""));
         var with = Convert.FromHexString(replace.Replace(" ", ""));
         if (want.Length != with.Length) throw new ArgumentException("expect and replace differ in length");
@@ -58,6 +58,7 @@ public static unsafe partial class Patches
     /// </summary>
     public static IHook<T> Hook<T>(nint at, T detour) where T : Delegate
     {
+        RequireOwner();
         IHook<T>? hook = null;
         var owner = Owner;
         var logged = false;
@@ -90,6 +91,7 @@ public static unsafe partial class Patches
     /// </summary>
     public static IAsmHook Asm(nint at, int length, params string[] asm)
     {
+        RequireOwner();
         Claim(at, length);
         var hook = Hooks.CreateAsmHook(asm, at, AsmHookBehaviour.DoNotExecuteOriginal, length);
         Restorable(at, () => hook.Activate(), hook.Disable, hook);
@@ -136,6 +138,12 @@ public static unsafe partial class Patches
     }
 
     /// <summary>Runs <paramref name="undo"/> when the current <see cref="Owner"/> is reverted (failed load, hot reload).</summary>
+    /// <summary>Throws unless a plugin (or the loader) is being loaded: a patch nobody owns would never be reverted.</summary>
+    internal static void RequireOwner()
+    {
+        if (Owner == null) throw new InvalidOperationException("patches belong to a plugin: make them in Plugin.Load");
+    }
+
     internal static void Record(Action undo, object? keepAlive = null)
     {
         if (keepAlive != null) KeepAlive.Add(keepAlive);

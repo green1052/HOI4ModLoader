@@ -79,7 +79,7 @@ public sealed unsafe partial class Image
     {
         // Code never moves and scans see it unpatched, so a result holds for the whole run (plugin reloads look it up again).
         var key = (pattern, count, anchor);
-        if (_found.TryGetValue(key, out var found)) return found;
+        if (_found.TryGetValue(key, out var found)) return [.. found];
         var hits = Scan(pattern);
         if (anchor != null)
         {
@@ -88,7 +88,8 @@ public sealed unsafe partial class Image
         }
         if (hits.Count != count)
             throw new InvalidOperationException($"pattern matched {hits.Count}x (expected {count}): {pattern}{(anchor != null ? $" in functions using \"{anchor}\"" : "")}");
-        return _found[key] = [.. hits];
+        _found[key] = [.. hits];
+        return [.. hits];
     }
 
     private List<nint> Scan(string pattern)
@@ -124,7 +125,7 @@ public sealed unsafe partial class Image
         if (_pristine.TryGetValue(start, out var copy) && copy.Version == Patches.OriginalsVersion) return copy.Bytes;
         // Code only changes through Patches, which records the original first: a copy stays valid once its overlays are redone.
         var bytes = copy.Bytes ?? [.. live];
-        foreach (var (at, original) in Patches.Originals)
+        foreach (var (at, original) in Patches.Originals.Reverse()) // earliest last: its bytes are the game's own
         {
             var offset = (int)(at - start);
             if (offset >= 0 && offset < size) original.AsSpan(0, Math.Min(original.Length, size - offset)).CopyTo(bytes.AsSpan(offset));
@@ -202,12 +203,12 @@ public sealed unsafe partial class Image
         foreach (var (start, size, code) in _sections)
         {
             if (!code) continue;
-            var span = new ReadOnlySpan<byte>((void*)start, size);
+            var span = Unpatched(start, size); // a hook over the lea must not hide the function
             for (var i = 0; i + 7 <= size; i++)
             {
                 // REX.W (48/4C) + 8D (lea) or 8B (mov), ModRM mod=00 rm=101: [rip+disp32]
                 if ((span[i] & 0xFB) != 0x48 || (span[i + 1] != 0x8D && span[i + 1] != 0x8B) || (span[i + 2] & 0xC7) != 0x05) continue;
-                if (strings.Contains(start + i + 7 + *(int*)(start + i + 3)) && FunctionAt(start + i) is { } f) funcs.Add(f);
+                if (strings.Contains(start + i + 7 + MemoryMarshal.Read<int>(span[(i + 3)..])) && FunctionAt(start + i) is { } f) funcs.Add(f);
             }
         }
         return funcs;
