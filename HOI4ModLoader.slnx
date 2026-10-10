@@ -1,5 +1,6 @@
 <Solution>
     <Folder Name="/plugins/">
+        <Project Path="plugins/AiAssist/AiAssist.csproj" />
         <Project Path="plugins/AirbaseCapacity/AirbaseCapacity.csproj" />
         <Project Path="plugins/AirWingFieldMarshal/AirWingFieldMarshal.csproj" />
         <Project Path="plugins/AutoConstruction/AutoConstruction.csproj" />

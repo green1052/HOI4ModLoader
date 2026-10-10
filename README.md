@@ -17,6 +17,9 @@ The bundled plugins add quality-of-life features: research, focus and political 
 
 There is no mod to enable in the launcher. The few interface files the plugins change are built from your installed game each time it starts, so they keep up with game updates.
 
+### Update
+Delete the old `HOI4ModLoader\plugins` folder first (plugins get merged or renamed between versions), then install as above. Your settings in `HOI4ModLoader\config` stay.
+
 ### Uninstall
 Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 
@@ -29,14 +32,16 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | Plugin | What it does | Multiplayer |
 |---|---|---|
 | Queues | Research, focus, intelligence agency and political power queues | ✅ |
-| AutoConstruction | Auto construction targets per building | ✅ |
+| AutoConstruction | Auto construction targets per building, auto supply | ✅ |
+| AutoProduction | Moves factories from surplus equipment to equipment you are short of | ✅ |
 | AutoTrade | Imports resources you are short of | ✅ |
-| AirbaseCapacity | Sends only the air wings an airbase has room for | ✅ |
-| AirWingFieldMarshal | Air wings for field marshals | ✅ (stand-in) |
-| RailwayGuns | Railway guns for field marshals, better positioning | Assignment only (stand-in) |
-| AttachedCas | Attached air wings give CAS in their whole mission area | Single player only |
+| AirbaseCapacity | Sends only the air wings an airbase has room for, auto rebase | ✅ |
+| FrontLine | Division rotation on the front line | ✅ (AI part: single player) |
+| AirWingFieldMarshal | Air wings for field marshals, CAS in the whole mission area | Field marshals only (spread over armies) |
+| RailwayGuns | Railway guns for field marshals, better positioning | Field marshals only (spread over armies) |
 | ChecksumPatcher | Keeps achievements and ironman with mods | ✅ |
 | NoTelemetry | Blocks gameplay telemetry | ✅ |
+| AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show `N. ` in front of their name.
@@ -44,30 +49,45 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
   - Repeatable agency upgrades queue one more level per click (`1x3`).
   - Unqueueing a focus also unqueues the queued focuses that need it.
 - **National spirits, laws, designers, advisors, decisions:** taken one at a time as soon as you have the political power; a full slot is replaced.
+- Settings: each queue can be turned off (its Shift+click goes back to the game).
 
 ### AutoConstruction
-In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are left as `+N`.
+In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5 (setting), **Ctrl+click** to lower it by 1. The button shows how many are left as `+N`.
 - What's missing is added to the end of the construction queue, one level per state (or province) so they are built at the same time.
-- Location priority: core states, then infrastructure level, then free building slots.
+- Location priority: core states, then infrastructure level, then free building slots. Core and infrastructure priority are settings.
+- **Auto supply:** where your divisions are low on supply, the right fix is queued: a saturated hub gets its railway to the capital upgraded (a naval base if the bottleneck is at sea), a cut-off hub a railway to the nearest connected one, and an area with no hub near a new supply hub (railway-connected provinces first). Settings: on/off, hub saturation, new hub distance.
 
 ### AutoTrade
 In the trade view, **Shift+click** a resource icon to turn auto trade on or off for it (`Auto` shows). A shortage is imported automatically.
 - Seller priority: your subjects, your faction, then whoever can sell the most; trade influence breaks ties.
+- Settings: subject and faction priority, and a surplus to keep (imports until the balance is at least that, not just 0).
 - Existing imports are never reduced.
 
 ### AirbaseCapacity
 With air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
+- Settings: capacity to keep free, and trimming every send without Shift.
+- **Auto rebase:** a wing whose airbase only partly reaches its mission region flies to a usable airbase with room that reaches more, keeping its mission. Wings attached to an army are left to the game, which already does this.
 
 ### AirWingFieldMarshal
-Attach air wings to field marshals (army groups). The marshal's card gets attach slots.
-- In multiplayer, right-clicking a marshal's card with air wings selected spreads them over the marshal's armies instead.
+- **Field marshals:** attach air wings to field marshals (army groups). The marshal's card gets attach slots.
+  - In multiplayer, right-clicking a marshal's card with air wings selected spreads them over the marshal's armies instead (setting).
+- **CAS in the whole mission area (single player):** air wings attached to a general support every battle in their mission area, not only their own divisions' battles.
 
 ### RailwayGuns
-- **Field marshal assignment:** right-click a marshal's card with railway guns selected. In single player they are assigned to the marshal; in multiplayer they are spread over the marshal's armies.
-- **Better positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. Adjustable in the Mods tab.
+- **Field marshal assignment:** right-click a marshal's card with railway guns selected. In single player they are assigned to the marshal; in multiplayer they are spread over the marshal's armies (setting).
+- **Better positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. The penalty and sea transfer are settings.
 
-### AttachedCas
-Air wings attached to a general support every battle in their mission area, not only their own divisions' battles.
+### AutoProduction
+Every few seconds one military factory moves from a line whose equipment has a big surplus to a line whose equipment is short (biggest shortage first), with the production screen's own command. Land and air lines only; no line is created or emptied.
+- Settings: what counts as surplus (% of need, minimum units), minimum factories per line, factories moved at a time.
+
+### FrontLine
+Front line micro a player does by hand. Divisions taken off a front go back onto it once rested.
+- **Rotation:** a worn-out division in contact with the enemy rests a few provinces back, where another of ours holds its province; at most a share of a front rests at once.
+- **Plugging:** a defence of ours that is being lost gets the nearest fresh division (resting, unassigned, or spare on a quiet part of a front).
+- **Escape:** a division in a salient whose way back narrows to one province next to the enemy pulls back before the pocket closes.
+- **Opportunity attack / mop-up:** empty enemy provinces next to the line are taken, surrounded enemy divisions attacked.
+- Settings: every threshold, each feature on/off, and rotation, plugging and escape for AI countries too (single player; their army management is kept off the divisions it handles).
 
 ### ChecksumPatcher
 Keeps achievements and ironman available when the checksum changes. Patched in memory only.
@@ -75,10 +95,19 @@ Keeps achievements and ironman available when the checksum changes. Patched in m
 ### NoTelemetry
 Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports are untouched.
 
+### AiAssist
+An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.
+- **Production:** factories move from equipment the AI has plenty of (or nothing uses) to equipment it is short of. Air and land totals stay as vanilla split them.
+- **Offensive readiness:** an army doesn't start an attack while its divisions are worn out or out of supply.
+- **Local attacks:** pocket-closing targets first, then ones that shorten the front; armor avoids terrain and rivers that cripple it; line infantry holds while breakthrough divisions push.
+- **Concentration:** quiet fronts and fronts facing a weak enemy keep a thin screen, the rest goes where the enemy is strong.
+- **Air:** planes leave regions where the AI keeps losing the air war badly.
+- **Leaders:** the biggest, fighting, attacking fronts choose their field marshals and generals first; infantry traits, doctrine and bad status count.
+
 ## Multiplayer
 - Other players see vanilla. Only interface files change, never the checksum, so players without the loader can join the same game.
 - Plugins like the queues and auto construction send the same commands a player's clicks would, so they work as usual.
-- Plugins that change game rules (AttachedCas, railway gun positioning, ...) switch off in a multiplayer lobby and back on in single player. Their multiplayer stand-ins start by themselves in multiplayer; the Mods tab shows both as active.
+- Features that change game rules (attached CAS, railway gun positioning, field marshals holding air wings and railway guns) switch off in a multiplayer lobby and back on in single player. Field marshal assignment switches to spreading over the marshal's armies with vanilla commands instead.
 
 ## Performance: mimalloc
 The game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap. If you suspect crashes or memory problems, set `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` (takes effect at the next start).
