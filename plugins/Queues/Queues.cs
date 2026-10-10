@@ -57,6 +57,7 @@ public static class Signatures
 /// queue/unqueue it; whenever a research slot, the focus or the agency is idle, the first queued entry the game accepts
 /// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
 /// "N." on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (Queues UI mod).
+/// The political power queue (<see cref="PoliticalQueue"/>) comes with it.
 /// </summary>
 [Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class Queues : Plugin
@@ -170,6 +171,7 @@ public unsafe class Queues : Plugin
         });
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
+        new PoliticalQueue(Log).Load();
     }
 
     private bool ShiftQueuesTech(nint view, nint ev)

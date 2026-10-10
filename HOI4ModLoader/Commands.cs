@@ -1,8 +1,8 @@
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Game commands (CCommand subclasses), the way the UI issues player actions. Going through commands keeps
-/// multiplayer in sync: the session stamps and distributes them. Send them from the main thread (<see cref="MainThread"/>).
+/// Sends the game's own commands (CSetResearchCommand, CAddConstructionCommand...), the same objects the UI makes when the
+/// player clicks: no new command types, so other players' games run them as vanilla. Main thread only (<see cref="MainThread"/>).
 /// </summary>
 public static unsafe class Commands
 {

@@ -1,3 +1,2 @@
 ﻿l_english:
- com.green1052.politicalqueue.desc:0 "Shift+click advisors, ideas, laws and decisions to queue them; they are taken when you have the political power."
- com.green1052.queues.desc:0 "Shift+click techs, focuses and intelligence agency upgrades to queue them; they start when a slot is free."
+ com.green1052.queues.desc:0 "Shift+click techs, focuses and intelligence agency upgrades to queue them; they start when a slot is free. Advisors, ideas, laws and decisions are taken when you have the political power."

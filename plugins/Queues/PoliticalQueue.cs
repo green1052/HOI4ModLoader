@@ -53,9 +53,9 @@ public static class PoliticalSignatures
 /// advisor, theorist, chief, high command) in the advisor picker, or a decision, to queue/unqueue it; queued entries show
 /// "N. " in front of their name. The first queued entry the game accepts (its own command check, which includes the cost)
 /// is taken with the same command the UI sends, one at a time, so it happens as soon as there's enough political power.
+/// Part of <see cref="Queues"/>, which loads it.
 /// </summary>
-[Plugin("com.green1052.politicalqueue", "Political Power Queue", "1.0.0", GameVersion = "1.19.3")]
-public unsafe class PoliticalQueue : Plugin
+internal sealed unsafe class PoliticalQueue(Logger log)
 {
     // Layouts for HOI4 1.19.3.
     private const int PoliticsOfCountry = 0xF90, ActiveIdeas = 80, PoliticalPower = 0xE0;
@@ -96,7 +96,7 @@ public unsafe class PoliticalQueue : Plugin
     private (long PoliticalPower, long Until)? _waiting;
     private PerGame _game = null!;
 
-    public override void Load()
+    public void Load()
     {
         _ideaListRefresh = (delegate* unmanaged<nint, void>)Sig.Find(PoliticalSignatures.IdeaListRefresh);
         _game = new PerGame(() =>
@@ -120,7 +120,7 @@ public unsafe class PoliticalQueue : Plugin
         _ideaUpdate = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.IdeaUpdate), (item, tag, slotIdea) =>
         {
             var result = _ideaUpdate!.OriginalFunction(item, tag, slotIdea);
-            Log.Guard("idea numbers", () =>
+            log.Guard("idea numbers", () =>
             {
                 Label(*(nint*)(item + IdeaName), new Entry(Kind.Idea, *(nint*)(item + IdeaOfItem)));
                 Force(item, *(nint*)(item + IdeaButton)); // disabled while unaffordable or not allowed
@@ -144,13 +144,13 @@ public unsafe class PoliticalQueue : Plugin
         {
             var result = _advisorUpdate!.OriginalFunction(item, status, flag);
             _forced.Remove(item); // a refresh runs Update first, then SetUnselectable or SetSelectable
-            Log.Guard("advisor numbers", () => LabelAdvisor(item));
+            log.Guard("advisor numbers", () => LabelAdvisor(item));
             return result;
         });
         _advisorUnselectable = Patches.Hook<TwoFn>(Sig.Find(PoliticalSignatures.AdvisorUnselectable), (item, iconEnabled) =>
         {
             var result = _advisorUnselectable!.OriginalFunction(item, iconEnabled);
-            Log.Guard("advisor buttons", () => Force(item, *(nint*)(item + CharacterButton)));
+            log.Guard("advisor buttons", () => Force(item, *(nint*)(item + CharacterButton)));
             return result;
         });
 
@@ -175,7 +175,7 @@ public unsafe class PoliticalQueue : Plugin
         _decisionSet = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.DecisionSet), (item, decision, tag) =>
         {
             var result = _decisionSet!.OriginalFunction(item, decision, tag);
-            Log.Guard("decision numbers", () =>
+            log.Guard("decision numbers", () =>
             {
                 if (decision != 0) Label(*(nint*)(item + DecisionName), new Entry(Kind.Decision, decision));
                 Force(item, *(nint*)(item + DecisionButton)); // unaffordable: enabled but not clickable; unavailable: disabled
@@ -185,7 +185,7 @@ public unsafe class PoliticalQueue : Plugin
         _targetedDecisionSet = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.TargetedDecisionSet), (item, target, tag) =>
         {
             var result = _targetedDecisionSet!.OriginalFunction(item, target, tag);
-            Log.Guard("targeted decision numbers", () =>
+            log.Guard("targeted decision numbers", () =>
             {
                 if (TargetedEntry(target) is { } entry) Label(*(nint*)(item + TargetedDecisionName), entry);
                 Force(item, *(nint*)(item + DecisionButton));
@@ -238,12 +238,12 @@ public unsafe class PoliticalQueue : Plugin
         if (index >= 0)
         {
             _queue.RemoveAt(index);
-            Log.Info($"{entry.Kind}: unqueued, {_queue.Count} left");
+            log.Info($"{entry.Kind}: unqueued, {_queue.Count} left");
         }
         else
         {
             _queue.Add(entry);
-            Log.Info($"{entry.Kind}: queued #{_queue.Count}");
+            log.Info($"{entry.Kind}: queued #{_queue.Count}");
         }
     }
 
@@ -279,7 +279,7 @@ public unsafe class PoliticalQueue : Plugin
             // game turns down when the command runs is tried again.
             if (entry.Kind != Kind.Idea) _queue.Remove(entry);
             _waiting = (power, now + WaitMs);
-            Log.Info($"{entry.Kind}: taken");
+            log.Info($"{entry.Kind}: taken");
             return;
         }
     }
