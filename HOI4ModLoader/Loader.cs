@@ -39,7 +39,7 @@ public static class Loader
         {
             Logger.Reset();
             var config = new ConfigFile(Path.Combine(ModsDir, "config", "HOI4ModLoader.cfg"));
-            if (config.Bind("Debug", "WaitForDebugger", false, "Pause startup until a debugger attaches (Rider: Run > Attach to Process > hoi4.exe)."))
+            if (config.Bind("Debug", "WaitForDebugger", false, "Pause startup until a debugger attaches to hoi4.exe."))
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
                 "Reload all plugins when a DLL in HOI4ModLoader\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
