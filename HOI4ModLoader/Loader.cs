@@ -16,6 +16,12 @@ public static class Loader
     // Plugins loaded now, in load order (hooks keep reverted ones' detours alive: a game thread may still be in one).
     private static readonly List<Plugin> Loaded = new();
 
+    /// <summary>The loader's version, e.g. "1.0.0".</summary>
+    internal static readonly string Version = typeof(Loader).Assembly.GetName().Version!.ToString(3);
+
+    /// <summary>Plugins loaded now.</summary>
+    internal static int LoadedCount => Loaded.Count;
+
     /// <summary>Every plugin found in the plugins folder at the last load, loaded or not, by id.</summary>
     internal static IReadOnlyList<PluginAttribute> Known { get; private set; } = [];
     private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
@@ -71,9 +77,8 @@ public static class Loader
             catch (Exception e) { Log.Error($"settings Mods page: {e.Message}"); }
             try
             {
-                var version = typeof(Loader).Assembly.GetName().Version!.ToString(3);
-                VersionLabel.Install(() => $" +{Loaded.Count}",
-                    () => $"HOI4ModLoader {version}\n" + (Loaded.Count == 0 ? "No plugins loaded" : string.Join("\n", Loaded.Select(p => $"- {p.Info.Name} {p.Info.Version}"))));
+                VersionLabel.Install(() => $"HOI4ModLoader {Version} ({Loaded.Count} plugins)", () => $" +{Loaded.Count}",
+                    () => $"HOI4ModLoader {Version}\n" + (Loaded.Count == 0 ? "No plugins loaded" : string.Join("\n", Loaded.Select(p => $"- {p.Info.Name} {p.Info.Version}"))));
             }
             catch (Exception e) { Log.Error($"version label: {e.Message}"); }
         }

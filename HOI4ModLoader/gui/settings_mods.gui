@@ -116,16 +116,26 @@ ${1}buttonType = {
 					position = { x = 0 y = 0 }
 					size = { width = 460 height = 360 }
 
+					instantTextBoxType = {
+						name = "hoimod_mods_title"
+						position = { x = 0 y = 10 }
+						font = "hoi_18mbs"
+						text = ""
+						maxWidth = 460
+						maxHeight = 20
+						format = centre
+					}
+
 					checkboxType = {
 						name = "hoimod_plugin_0"
-						position = { x = 30 y = 16 }
+						position = { x = 30 y = 40 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_0_title"
-						position = { x = 74 y = 21 }
+						position = { x = 74 y = 45 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -135,20 +145,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_0_settings"
-						position = { x = 206 y = 22 }
+						position = { x = 206 y = 46 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_1"
-						position = { x = 30 y = 53 }
+						position = { x = 30 y = 74 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_1_title"
-						position = { x = 74 y = 58 }
+						position = { x = 74 y = 79 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -158,20 +168,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_1_settings"
-						position = { x = 206 y = 59 }
+						position = { x = 206 y = 80 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_2"
-						position = { x = 30 y = 90 }
+						position = { x = 30 y = 108 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_2_title"
-						position = { x = 74 y = 95 }
+						position = { x = 74 y = 113 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -181,20 +191,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_2_settings"
-						position = { x = 206 y = 96 }
+						position = { x = 206 y = 114 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_3"
-						position = { x = 30 y = 127 }
+						position = { x = 30 y = 142 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_3_title"
-						position = { x = 74 y = 132 }
+						position = { x = 74 y = 147 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -204,20 +214,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_3_settings"
-						position = { x = 206 y = 133 }
+						position = { x = 206 y = 148 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_4"
-						position = { x = 30 y = 164 }
+						position = { x = 30 y = 176 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_4_title"
-						position = { x = 74 y = 169 }
+						position = { x = 74 y = 181 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -227,20 +237,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_4_settings"
-						position = { x = 206 y = 170 }
+						position = { x = 206 y = 182 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_5"
-						position = { x = 30 y = 201 }
+						position = { x = 30 y = 210 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_5_title"
-						position = { x = 74 y = 206 }
+						position = { x = 74 y = 215 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -250,20 +260,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_5_settings"
-						position = { x = 206 y = 207 }
+						position = { x = 206 y = 216 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_6"
-						position = { x = 30 y = 238 }
+						position = { x = 30 y = 244 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_6_title"
-						position = { x = 74 y = 243 }
+						position = { x = 74 y = 249 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -273,20 +283,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_6_settings"
-						position = { x = 206 y = 244 }
+						position = { x = 206 y = 250 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_7"
-						position = { x = 30 y = 275 }
+						position = { x = 30 y = 278 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_7_title"
-						position = { x = 74 y = 280 }
+						position = { x = 74 y = 283 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -296,7 +306,7 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_7_settings"
-						position = { x = 206 y = 281 }
+						position = { x = 206 y = 284 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
@@ -325,14 +335,14 @@ ${1}buttonType = {
 					}
 					checkboxType = {
 						name = "hoimod_plugin_9"
-						position = { x = 230 y = 16 }
+						position = { x = 230 y = 40 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_9_title"
-						position = { x = 274 y = 21 }
+						position = { x = 274 y = 45 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -342,20 +352,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_9_settings"
-						position = { x = 406 y = 22 }
+						position = { x = 406 y = 46 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_10"
-						position = { x = 230 y = 53 }
+						position = { x = 230 y = 74 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_10_title"
-						position = { x = 274 y = 58 }
+						position = { x = 274 y = 79 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -365,20 +375,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_10_settings"
-						position = { x = 406 y = 59 }
+						position = { x = 406 y = 80 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_11"
-						position = { x = 230 y = 90 }
+						position = { x = 230 y = 108 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_11_title"
-						position = { x = 274 y = 95 }
+						position = { x = 274 y = 113 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -388,20 +398,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_11_settings"
-						position = { x = 406 y = 96 }
+						position = { x = 406 y = 114 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_12"
-						position = { x = 230 y = 127 }
+						position = { x = 230 y = 142 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_12_title"
-						position = { x = 274 y = 132 }
+						position = { x = 274 y = 147 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -411,20 +421,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_12_settings"
-						position = { x = 406 y = 133 }
+						position = { x = 406 y = 148 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_13"
-						position = { x = 230 y = 164 }
+						position = { x = 230 y = 176 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_13_title"
-						position = { x = 274 y = 169 }
+						position = { x = 274 y = 181 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -434,20 +444,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_13_settings"
-						position = { x = 406 y = 170 }
+						position = { x = 406 y = 182 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_14"
-						position = { x = 230 y = 201 }
+						position = { x = 230 y = 210 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_14_title"
-						position = { x = 274 y = 206 }
+						position = { x = 274 y = 215 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -457,20 +467,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_14_settings"
-						position = { x = 406 y = 207 }
+						position = { x = 406 y = 216 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_15"
-						position = { x = 230 y = 238 }
+						position = { x = 230 y = 244 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_15_title"
-						position = { x = 274 y = 243 }
+						position = { x = 274 y = 249 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -480,20 +490,20 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_15_settings"
-						position = { x = 406 y = 244 }
+						position = { x = 406 y = 250 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}
 					checkboxType = {
 						name = "hoimod_plugin_16"
-						position = { x = 230 y = 275 }
+						position = { x = 230 y = 278 }
 						quadTextureSprite ="GFX_generic_checkbox"
 						Orientation = "UPPER_LEFT"
 						clicksound = click_checkbox
 					}
 					instantTextBoxType = {
 						name = "hoimod_plugin_16_title"
-						position = { x = 274 y = 280 }
+						position = { x = 274 y = 283 }
 						font = "hoi_16mbs"
 						text = ""
 						maxWidth = 130
@@ -503,7 +513,7 @@ ${1}buttonType = {
 					}
 					buttonType = {
 						name = "hoimod_plugin_16_settings"
-						position = { x = 406 y = 281 }
+						position = { x = 406 y = 284 }
 						quadTextureSprite ="button_right"
 						clicksound = click_default
 					}

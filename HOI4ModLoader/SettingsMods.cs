@@ -50,7 +50,7 @@ internal static unsafe class SettingsMods
     private static bool _reportedMissing;
 
     /// <summary>The widgets of the last built Mods page (the settings screen is built once per menu).</summary>
-    private static nint _screen, _page, _list, _settings, _tab, _title;
+    private static nint _screen, _page, _list, _settings, _tab, _title, _listTitle;
     private static readonly nint[] PluginBoxes = new nint[PluginRows], PluginTitles = new nint[PluginRows], PluginArrows = new nint[PluginRows];
     private static readonly nint[] Rows = new nint[SettingRows];
 
@@ -95,6 +95,7 @@ internal static unsafe class SettingsMods
         _list = Gui.Find(_page, WindowSlot, "hoimod_mods_list");
         _settings = Gui.Find(_page, WindowSlot, "hoimod_mods_settings");
         _title = Gui.FindTextBox(_settings, "hoimod_settings_title");
+        _listTitle = Gui.FindTextBox(_list, "hoimod_mods_title");
         _tab = Gui.Find(root, ButtonSlot, "hoimod_mods_tab");
         Visible(_page, false);
 
@@ -140,6 +141,7 @@ internal static unsafe class SettingsMods
         Visible(_settings, false);
         Visible(_list, true);
         var plugins = Loader.Known;
+        if (_listTitle != 0) Gui.SetText(_listTitle, $"HOI4ModLoader {Loader.Version}  ({Loader.LoadedCount} of {plugins.Count} plugins running)");
         for (var row = 0; row < PluginRows; row++)
         {
             var show = row < plugins.Count;
