@@ -45,6 +45,9 @@ public static class Signatures
     /// </summary>
     [Signature] public const string FocusUpdateNodeStates = "48 8B C4 48 89 58 ? 48 89 68 ? 56 57 41 54 41 56 41 57 48 83 EC 60 F3 0F 10 91 ? ? ? ? 45 32 FF";
 
+    /// <summary>CNationalFocusProgress::IsCompleted(progress, CNationalFocus*) -> bool.</summary>
+    [Signature] public const string FocusCompleted = "48 89 54 24 10 48 83 EC 28 48 83 C1 58 4C 8D 44 24 38 48 8D 54 24 30 E8";
+
     [VTable] public const string ResearchCommand = "CSetResearchCommand";
     [VTable] public const string FocusCommand = "CSetNationalFocusCommand";
     [VTable] public const string AgencyCommand = "CIntelligenceAgencyUpgradeCommand";
@@ -74,6 +77,7 @@ public unsafe class Queues : Plugin
     const int ViewedTagOfTechView = 0x1AA0;                       // int tag of the country shown, <= 0 = the player
     const int FocusItems = 0x2058, FocusOfItem = 0x20;            // CNationalFocusView items; CNationalFocusTreeItem -> CNationalFocus
     const int ViewedCountryOfFocusView = 0x20F8, TagOfCountry = 8; // CCountry* shown, null = the player
+    const int Prerequisites = 0x570, FocusesOfGroup = 8;          // CNationalFocus: CPdxArray of prerequisite blocks (AND), each a CPdxArray of focuses (OR)
     const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
     const string NumberBox = "hoimod_queue";                      // added to the GUI by the Queues UI mod
     const long SentTimeoutMs = 30_000;                            // a sent command not running by then failed: drop the entry
@@ -93,6 +97,7 @@ public unsafe class Queues : Plugin
     IHook<EntryFn>? _techItemBonus;
     IHook<NodeStatesFn>? _focusNodeStates;
     delegate* unmanaged<nint, void> _techViewUpdateAllItems;
+    delegate* unmanaged<nint, nint, byte> _focusCompleted;
     readonly Dictionary<nint, (byte[] Name, byte[] Shown)> _labelledFocusItems = new(); // the game's name, what we wrote
     nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
     bool _reportedNumberBox;
@@ -113,12 +118,14 @@ public unsafe class Queues : Plugin
         var techItemBonus = Sig.Find(Signatures.TechItemUpdateBonus);
         _techViewUpdateAllItems = (delegate* unmanaged<nint, void>)Sig.Find(Signatures.TechViewUpdateAllItems);
         var focusNodeStates = Sig.Find(Signatures.FocusUpdateNodeStates);
+        _focusCompleted = (delegate* unmanaged<nint, nint, byte>)Sig.Find(Signatures.FocusCompleted);
 
         _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _techClick!.OriginalFunction(view, ev));
         _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
         _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
-            if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
+            if (focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
+            else if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
             else _focusClick!.OriginalFunction(view, focus, a3);
         });
         _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
@@ -202,6 +209,44 @@ public unsafe class Queues : Plugin
             if (position > 0) _labelledFocusItems[item] = (name, shown);
             else _labelledFocusItems.Remove(item);
         }
+    }
+
+    /// <summary>
+    /// Unqueues <paramref name="focus"/> and every queued focus that can no longer be reached without it: one of its
+    /// prerequisite blocks held an unqueued focus and now has none completed, in progress or still queued.
+    /// </summary>
+    void UnqueueFocus(nint focus)
+    {
+        var country = Game.Country(Game.PlayerTag);
+        var progress = country == 0 ? 0 : *(nint*)(country + FocusOfCountry);
+        var removed = new HashSet<nint> { focus };
+        _focus.Items.Remove(focus);
+        bool Satisfied(nint f) => _focus.Items.Contains(f) || progress != 0 && (*(nint*)(progress + FocusInProgress) == f || _focusCompleted(progress, f) != 0);
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            foreach (var queued in _focus.Items.ToList())
+            {
+                var lost = false;
+                foreach (var block in Native.PdxArray(queued + Prerequisites))
+                {
+                    var options = Native.PdxArray(block + FocusesOfGroup);
+                    var hit = false;
+                    var met = false;
+                    foreach (var option in options)
+                    {
+                        hit |= removed.Contains(option);
+                        met |= Satisfied(option);
+                    }
+                    if (hit && !met) lost = true;
+                }
+                if (!lost) continue;
+                _focus.Items.Remove(queued);
+                removed.Add(queued);
+                changed = true;
+            }
+        }
+        Log.Info($"focus: unqueued {removed.Count} (with what needed it), {_focus.Items.Count} left");
     }
 
     void Toggle(Queue queue, nint item)
