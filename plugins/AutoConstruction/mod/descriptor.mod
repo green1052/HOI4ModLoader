@@ -1,6 +1,6 @@
 version="1.0"
 tags={
-	"Gameplay"
+    "Gameplay"
 }
 name="Auto Construction UI"
 supported_version="1.19.*"

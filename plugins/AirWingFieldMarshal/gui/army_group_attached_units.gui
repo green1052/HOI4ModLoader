@@ -1,11 +1,11 @@
 
 
-		# AirWingFieldMarshal: attached air wing slots, like leader_groups_portrait_window has.
-		# Last in the window so it draws over the card frame (which is taller than an army card's).
-		gridBoxType = {
-			name = "attached_units"
-			position = { x = 1 y = -77 }
-			size = {width=27 height=68 }
-			slotsize = {width=27 height=68}
-			max_slots_vertical = 1
-		}
+        # AirWingFieldMarshal: attached air wing slots, like leader_groups_portrait_window has.
+        # Last in the window so it draws over the card frame (which is taller than an army card's).
+        gridBoxType = {
+            name = "attached_units"
+            position = { x = 1 y = -77 }
+            size = {width=27 height=68 }
+            slotsize = {width=27 height=68}
+            max_slots_vertical = 1
+        }

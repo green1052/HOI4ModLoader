@@ -1,0 +1,3 @@
+﻿l_english:
+ com.green1052.autotrade.auto:0 "Auto"
+ com.green1052.autotrade.desc:0 "Shift+click a resource in the trade view: its shortage is imported from your subjects, your faction, then the biggest seller."

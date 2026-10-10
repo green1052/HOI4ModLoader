@@ -18,4 +18,9 @@
         <PlatformTarget>x64</PlatformTarget>
     </PropertyGroup>
 
+    <!-- Translations (Loc.cs): localisation\<language>.yml, embedded as "localisation/<language>.yml". -->
+    <ItemGroup>
+        <EmbeddedResource Include="localisation\*.yml" LogicalName="localisation/%(Filename).yml" />
+    </ItemGroup>
+
 </Project>

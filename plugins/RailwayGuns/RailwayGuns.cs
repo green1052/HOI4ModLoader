@@ -105,7 +105,7 @@ public abstract unsafe class RailwayGunAssign : Plugin
 /// AirWingFieldMarshal's card patch shows). His guns take positions along all of his armies' divisions. Changes the
 /// game (army groups own guns), so single player only; in multiplayer <see cref="RailwayGunFieldMarshalMultiplayer"/> runs.
 /// </summary>
-[Plugin("com.green1052.railwayguns", "Railway Gun Field Marshal", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true, Description = "Railway guns can be assigned to field marshals and position along all of their armies.")]
+[Plugin("com.green1052.railwayguns", "Railway Gun Field Marshal", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class RailwayGunFieldMarshal : RailwayGunAssign
 {
     [Function(CallingConventions.Microsoft)] public delegate void DistributeFn(nint controller, int a2, int a3);
@@ -131,7 +131,7 @@ public unsafe class RailwayGunFieldMarshal : RailwayGunAssign
 /// Multiplayer stand-in for <see cref="RailwayGunFieldMarshal"/>: right-clicking a field marshal's card with railway guns
 /// selected spreads them over his armies with the vanilla assign command, so other players need nothing.
 /// </summary>
-[Plugin("com.green1052.railwayguns.multiplayer", "Railway Gun Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true, Description = "Right-click a field marshal's card with railway guns selected to assign them to his armies.")]
+[Plugin("com.green1052.railwayguns.multiplayer", "Railway Gun Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true)]
 public class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
 {
     protected override nint[] Targets(OrdersGroup group) => group.IsArmyGroup ? [.. group.Armies] : [group.Ptr];
@@ -142,7 +142,7 @@ public class RailwayGunFieldMarshalMultiplayer : RailwayGunAssign
 /// (enemy-controlled or with hostile units) get a large penalty, so guns sit just behind the line instead of being overrun,
 /// and guns never ship out by sea (where submarines sink them). Changes the game's distribution, so single player only.
 /// </summary>
-[Plugin("com.green1052.railwaygunmovement", "Railway Gun Movement", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true, Description = "Railway guns stay just behind the front line and never cross the sea.")]
+[Plugin("com.green1052.railwaygunmovement", "Railway Gun Movement", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class RailwayGunMovement : Plugin
 {
     private const int RecordSize = 48, HostileUnits = 12, ControllerAtWar = 25; // province records of the distribution
@@ -172,7 +172,7 @@ public unsafe class RailwayGunMovement : Plugin
         });
     }
 
-    /// <summary>The province or a neighbour has hostile units or an enemy controller, per the distribution's own records.</summary>
+    /// <summary>The province or a neighbor has hostile units or an enemy controller, per the distribution's own records.</summary>
     private static bool IsFront(nint records, int province)
     {
         if (Enemy(records, province)) return true;

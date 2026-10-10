@@ -1,5 +1,10 @@
 root = true
 
+# 4 spaces, everywhere.
+[*]
+indent_style = space
+indent_size = 4
+
 [*.cs]
 # Always write access modifiers (private included).
 dotnet_style_require_accessibility_modifiers = always:warning

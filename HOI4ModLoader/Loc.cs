@@ -1,40 +1,63 @@
-using System.Runtime.InteropServices;
-using System.Text;
+using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Text in the player's language, from the game's own localisation (localisation\&lt;language&gt;\*_l_&lt;language&gt;.yml in
-/// any enabled mod; the HOI4ModLoader UI mod ships English and Korean for the loader and its plugins). A key the game
-/// doesn't know gives the fallback, so everything still reads in English without the mod.
+/// Text in the game's language. Every assembly (the loader, each plugin) carries its own translations as embedded
+/// localisation\&lt;language&gt;.yml files in the game's format (`l_english:` then ` key:0 "text"` lines); the loader reads them,
+/// so they work without any HOI4 mod. A key missing in the game's language falls back to English, then to the given text.
 /// </summary>
-public static unsafe class Loc
+public static partial class Loc
 {
-    /// <summary>Localize(std::string* out, const char* key, args, flags) (clausewitzlib localize.cpp): the key's text, or the key.</summary>
-    [Signature] public const string LocalizeSig = "48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 50 45 33 FF 41 8B E9 44 38 3D ? ? ? ? 4D 8B F0 48 8B F2";
+    /// <summary>The game's language, e.g. "korean" (settings.txt `language="l_korean"`), "english" if unknown.</summary>
+    public static readonly string Language = ReadLanguage();
 
-    private static delegate* unmanaged<nint, byte*, nint, int, nint> _localize;
+    private static Dictionary<string, string> _game = [], _english = [];
 
-    /// <summary>The text of <paramref name="key"/> in the game's language, or <paramref name="fallback"/> if no loaded file has it.</summary>
-    public static string Get(string key, string fallback)
-    {
-        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
-        if (_localize == null) _localize = (delegate* unmanaged<nint, byte*, nint, int, nint>)Sig.Find(LocalizeSig);
-        var text = (nint)NativeMemory.AllocZeroed(32); // an empty std::string for the result
-        try
-        {
-            var name = Encoding.UTF8.GetBytes(key + "\0");
-            fixed (byte* p = name) _localize(text, p, 0, 0);
-            var result = Encoding.UTF8.GetString(Native.MsvcString(text));
-            return result.Length == 0 || result == key ? fallback : result;
-        }
-        finally
-        {
-            if (*(long*)(text + 0x18) >= 16) Allocator.Free(*(nint*)text); // the game's heap buffer
-            NativeMemory.Free((void*)text);
-        }
-    }
+    /// <summary>The text of <paramref name="key"/> in the game's language, else in English, else <paramref name="fallback"/>.</summary>
+    public static string Get(string key, string fallback) =>
+        _game.TryGetValue(key, out var text) || _english.TryGetValue(key, out text) ? text : fallback;
 
     /// <summary><see cref="Get"/> with {0}, {1}... filled in (string.Format).</summary>
     public static string Format(string key, string fallback, params object[] args) => string.Format(Get(key, fallback), args);
+
+    /// <summary>Reads the translations of <paramref name="assemblies"/> (the loader's included by the caller), replacing the last set.</summary>
+    internal static void Load(IEnumerable<Assembly> assemblies)
+    {
+        Dictionary<string, string> game = [], english = [];
+        foreach (var assembly in assemblies.Distinct())
+        {
+            Read(assembly, "english", english);
+            if (Language != "english") Read(assembly, Language, game);
+        }
+        (_game, _english) = (game, english);
+    }
+
+    private static void Read(Assembly assembly, string language, Dictionary<string, string> into)
+    {
+        using var stream = assembly.GetManifestResourceStream($"localisation/{language}.yml");
+        if (stream == null) return;
+        using var reader = new StreamReader(stream);
+        while (reader.ReadLine() is { } line)
+            if (Entry().Match(line) is { Success: true } m)
+                into[m.Groups[1].Value] = m.Groups[2].Value.Replace("\\\"", "\"").Replace("\\n", "\n");
+    }
+
+    private static string ReadLanguage()
+    {
+        try
+        {
+            var settings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Paradox Interactive", "Hearts of Iron IV", "settings.txt");
+            var match = Setting().Match(File.ReadAllText(settings));
+            return match.Success ? match.Groups[1].Value : "english";
+        }
+        catch (IOException) { return "english"; }
+    }
+
+    [GeneratedRegex("""^\s*([^\s:#]+):\d*\s*"(.*)"\s*$""")]
+    private static partial Regex Entry();
+
+    [GeneratedRegex(@"language\s*=\s*""l_(\w+)""")]
+    private static partial Regex Setting();
 }

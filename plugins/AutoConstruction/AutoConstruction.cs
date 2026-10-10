@@ -42,7 +42,7 @@ public static class Signatures
 /// plus queued) is under its target, more is queued with the construction tab's own command (so multiplayer stays in
 /// sync), in the best state first: core states, then higher infrastructure, then more free building slots.
 /// </summary>
-[Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.3", Description = "Shift+click a building in the construction tab to set a target count; missing levels are queued in the best states.")]
+[Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class AutoConstruction : Plugin
 {
     // Layouts for HOI4 1.19.3.

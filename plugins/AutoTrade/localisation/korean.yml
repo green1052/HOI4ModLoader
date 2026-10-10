@@ -1,0 +1,4 @@
+﻿l_korean:
+ com.green1052.autotrade.auto:0 "자동"
+ com.green1052.autotrade.name:0 "자동 무역"
+ com.green1052.autotrade.desc:0 "무역 화면에서 자원을 Shift+클릭하면 부족분을 괴뢰국, 세력, 가장 많이 파는 나라 순으로 수입합니다."

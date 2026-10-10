@@ -54,7 +54,7 @@ public static class PoliticalSignatures
 /// "N. " in front of their name. The first queued entry the game accepts (its own command check, which includes the cost)
 /// is taken with the same command the UI sends, one at a time, so it happens as soon as there's enough political power.
 /// </summary>
-[Plugin("com.green1052.politicalqueue", "Political Power Queue", "1.0.0", GameVersion = "1.19.3", Description = "Shift+click advisors, ideas, laws and decisions to queue them; they are taken when you have the political power.")]
+[Plugin("com.green1052.politicalqueue", "Political Power Queue", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class PoliticalQueue : Plugin
 {
     // Layouts for HOI4 1.19.3.

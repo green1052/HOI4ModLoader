@@ -1,14 +1,14 @@
 
 
-		# AutoConstruction: the auto construction target of this building (set by code, empty when none).
-		instantTextboxType = {
-			name = "hoimod_auto"
-			position = { x = 1 y = 31 }
-			font = "hoi_16mbs"
-			text = ""
-			maxWidth = 42
-			maxHeight = 14
-			format = right
-			vertical_alignment = center
-			alwaystransparent = yes
-		}
+        # AutoConstruction: the auto construction target of this building (set by code, empty when none).
+        instantTextboxType = {
+            name = "hoimod_auto"
+            position = { x = 1 y = 31 }
+            font = "hoi_16mbs"
+            text = ""
+            maxWidth = 42
+            maxHeight = 14
+            format = right
+            vertical_alignment = center
+            alwaystransparent = yes
+        }

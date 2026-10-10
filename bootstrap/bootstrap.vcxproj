@@ -1,44 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <!-- version.dll proxy that boots the C# loader. Built by HOI4ModLoader.csproj (BuildBootstrap) with the Visual Studio C++ tools; not in the .slnx because SDK-style projects and C++ need different MSBuilds. -->
-  <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Release|x64">
-      <Configuration>Release</Configuration>
-      <Platform>x64</Platform>
-    </ProjectConfiguration>
-  </ItemGroup>
-  <PropertyGroup Label="Globals">
-    <VCProjectVersion>17.0</VCProjectVersion>
-    <ProjectGuid>{6E1B3C5A-2F4D-4B8E-9A7C-3D5E8F1A2B4C}</ProjectGuid>
-    <RootNamespace>bootstrap</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-  </PropertyGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-  <PropertyGroup Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
-    <CharacterSet>Unicode</CharacterSet>
-  </PropertyGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <PropertyGroup>
-    <TargetName>version</TargetName>
-    <OutDir>$(MSBuildThisFileDirectory)bin\$(Configuration)\</OutDir>
-    <IntDir>$(MSBuildThisFileDirectory)obj\$(Configuration)\</IntDir>
-  </PropertyGroup>
-  <ItemDefinitionGroup>
-    <ClCompile>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <Optimization>MaxSpeed</Optimization>
-    </ClCompile>
-    <Link>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-    </Link>
-  </ItemDefinitionGroup>
-  <ItemGroup>
-    <ClCompile Include="bootstrap.cpp" />
-    <ClCompile Include="allocator.c" />
-  </ItemGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+    <!-- version.dll proxy that boots the C# loader. Built by HOI4ModLoader.csproj (BuildBootstrap) with the Visual Studio C++ tools; not in the .slnx because SDK-style projects and C++ need different MSBuilds. -->
+    <ItemGroup Label="ProjectConfigurations">
+        <ProjectConfiguration Include="Release|x64">
+            <Configuration>Release</Configuration>
+            <Platform>x64</Platform>
+        </ProjectConfiguration>
+    </ItemGroup>
+    <PropertyGroup Label="Globals">
+        <VCProjectVersion>17.0</VCProjectVersion>
+        <ProjectGuid>{6E1B3C5A-2F4D-4B8E-9A7C-3D5E8F1A2B4C}</ProjectGuid>
+        <RootNamespace>bootstrap</RootNamespace>
+        <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    </PropertyGroup>
+    <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+    <PropertyGroup Label="Configuration">
+        <ConfigurationType>DynamicLibrary</ConfigurationType>
+        <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+        <CharacterSet>Unicode</CharacterSet>
+    </PropertyGroup>
+    <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+    <PropertyGroup>
+        <TargetName>version</TargetName>
+        <OutDir>$(MSBuildThisFileDirectory)bin\$(Configuration)\</OutDir>
+        <IntDir>$(MSBuildThisFileDirectory)obj\$(Configuration)\</IntDir>
+    </PropertyGroup>
+    <ItemDefinitionGroup>
+        <ClCompile>
+            <LanguageStandard>stdcpp17</LanguageStandard>
+            <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+            <Optimization>MaxSpeed</Optimization>
+        </ClCompile>
+        <Link>
+            <GenerateDebugInformation>true</GenerateDebugInformation>
+        </Link>
+    </ItemDefinitionGroup>
+    <ItemGroup>
+        <ClCompile Include="bootstrap.cpp" />
+        <ClCompile Include="allocator.c" />
+    </ItemGroup>
+    <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 
 </Project>

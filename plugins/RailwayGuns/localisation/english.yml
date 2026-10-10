@@ -1,0 +1,6 @@
+﻿l_english:
+ com.green1052.railwaygunmovement.FrontPenalty:0 "Front line penalty"
+ com.green1052.railwaygunmovement.NoSeaTransfer:0 "No sea transfer"
+ com.green1052.railwayguns.desc:0 "Railway guns can be assigned to field marshals and position along all of their armies."
+ com.green1052.railwayguns.multiplayer.desc:0 "Right-click a field marshal's card with railway guns selected to assign them to his armies."
+ com.green1052.railwaygunmovement.desc:0 "Railway guns stay just behind the front line and never cross the sea."

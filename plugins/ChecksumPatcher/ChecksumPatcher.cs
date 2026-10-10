@@ -18,7 +18,7 @@ public static class Signatures
 /// Keeps achievements and ironman available when mods change the game checksum, by forcing the
 /// "checksum is vanilla" comparison to succeed. Patches memory only; hoi4.exe on disk is untouched.
 /// </summary>
-[Plugin("com.green1052.checksumpatcher", "Checksum Patcher", "1.0.0", Description = "Lets modded games keep achievements and Ironman by patching the checksum check.")]
+[Plugin("com.green1052.checksumpatcher", "Checksum Patcher", "1.0.0")]
 public class ChecksumPatcher : Plugin
 {
     // test eax,eax -> xor eax,eax: the following sete always yields "unmodified".

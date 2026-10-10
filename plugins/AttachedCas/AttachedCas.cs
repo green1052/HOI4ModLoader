@@ -17,7 +17,7 @@ public static class Signatures
 /// Air wings attached to a general give close air support to every combat in their mission regions, like unattached wings,
 /// instead of only to combats their own army's divisions fight in.
 /// </summary>
-[Plugin("com.green1052.attachedcas", "Attached CAS", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true, Description = "Air wings attached to a general give close air support to every battle in their mission regions.")]
+[Plugin("com.green1052.attachedcas", "Attached CAS", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class AttachedCas : Plugin
 {
     public override void Load()

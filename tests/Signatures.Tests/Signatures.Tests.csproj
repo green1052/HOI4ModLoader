@@ -1,31 +1,31 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Checks every [Signature] pattern in the loader and the plugins against the installed hoi4.exe (no game launch).
-       Run after every game update: a failure names the pattern that broke. -->
-  <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
-  </PropertyGroup>
+    <!-- Checks every [Signature] pattern in the loader and the plugins against the installed hoi4.exe (no game launch).
+         Run after every game update: a failure names the pattern that broke. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0-windows</TargetFramework>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+        <PackageReference Include="xunit" Version="2.9.3" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
 
-  <ItemGroup>
-    <Using Include="Xunit" />
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>HOI4Dir</_Parameter1>
-      <_Parameter2>$(HOI4Dir)</_Parameter2>
-    </AssemblyAttribute>
-  </ItemGroup>
+    <ItemGroup>
+        <Using Include="Xunit" />
+        <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+            <_Parameter1>HOI4Dir</_Parameter1>
+            <_Parameter2>$(HOI4Dir)</_Parameter2>
+        </AssemblyAttribute>
+    </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\HOI4ModLoader\HOI4ModLoader.csproj" />
-    <ProjectReference Include="..\..\plugins\*\*.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\..\HOI4ModLoader\HOI4ModLoader.csproj" />
+        <ProjectReference Include="..\..\plugins\*\*.csproj" />
+    </ItemGroup>
 
 </Project>

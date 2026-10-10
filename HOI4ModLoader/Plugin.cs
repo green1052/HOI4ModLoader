@@ -5,11 +5,9 @@ namespace HOI4ModLoader;
 public sealed class PluginAttribute(string id, string name, string version) : Attribute
 {
     public string Id { get; } = id;
+    /// <summary>English name; other languages from "&lt;id&gt;.name" in the plugin's localisation, its description from "&lt;id&gt;.desc".</summary>
     public string Name { get; } = name;
     public string Version { get; } = version;
-
-    /// <summary>One or two sentences on what the plugin does, shown in the settings window's Mods tab.</summary>
-    public string? Description { get; init; }
 
     /// <summary>
     /// Game version the plugin was reverse engineered against, matched as a prefix of launcher-settings.json's rawVersion

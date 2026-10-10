@@ -17,7 +17,7 @@ public static class Signatures
 /// telemetry option says. Nothing else changes (account login, multiplayer, mods, crash reports), so it works in
 /// multiplayer too.
 /// </summary>
-[Plugin("com.green1052.notelemetry", "No Telemetry", "1.0.0", GameVersion = "1.19.3", Description = "Gameplay telemetry is dropped instead of being sent to Paradox.")]
+[Plugin("com.green1052.notelemetry", "No Telemetry", "1.0.0", GameVersion = "1.19.3")]
 public class NoTelemetry : Plugin
 {
     public override void Load()

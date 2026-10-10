@@ -187,7 +187,7 @@ internal static unsafe class SettingsMods
     private static string PluginTooltip(PluginAttribute plugin)
     {
         var text = new StringBuilder(Loader.Name(plugin)).Append(' ').Append(plugin.Version);
-        var description = Loc.Get($"{plugin.Id}.desc", plugin.Description ?? "");
+        var description = Loc.Get($"{plugin.Id}.desc", "");
         if (description.Length > 0) text.Append('\n').Append(description);
         text.Append("\n\n").Append(
             Loader.IsLoaded(plugin.Id) ? Loc.Get("HOIMOD_STATUS_RUNNING", "Running.") :

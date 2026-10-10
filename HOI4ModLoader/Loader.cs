@@ -188,6 +188,7 @@ public static class Loader
         }
 
         Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
+        Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins' names too
         var state = new Dictionary<string, bool?>(); // null while loading: a dependency cycle reads as failed
         foreach (var id in found.Keys.Order()) Load(id);
 

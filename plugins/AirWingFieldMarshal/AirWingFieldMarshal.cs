@@ -59,7 +59,7 @@ internal static unsafe class Card
 /// Lets air wings be attached to army groups (field marshals), not only armies (generals).
 /// Ships the "AirWingFieldMarshal" HOI4 mod (attach slots on the marshal card), generated into Documents on build.
 /// </summary>
-[Plugin("com.green1052.airwingfieldmarshal", "Air Wing Field Marshal", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true, Description = "Air wings can be attached to field marshals (army groups), not only to generals.")]
+[Plugin("com.green1052.airwingfieldmarshal", "Air Wing Field Marshal", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class AirWingFieldMarshal : Plugin
 {
     [Function(CallingConventions.Microsoft)] public delegate void GroupFn(nint group);
@@ -138,7 +138,7 @@ public unsafe class AirWingFieldMarshal : Plugin
 /// with the vanilla attach command; the game then runs their missions and bases like any army's wings. Other players
 /// need nothing.
 /// </summary>
-[Plugin("com.green1052.airwingfieldmarshal.multiplayer", "Air Wing Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true, Description = "Right-click a field marshal's card with air wings selected to attach them to his armies.")]
+[Plugin("com.green1052.airwingfieldmarshal.multiplayer", "Air Wing Field Marshal (multiplayer)", "1.0.0", GameVersion = "1.19.3", MultiplayerOnly = true)]
 public class AirWingFieldMarshalMultiplayer : Plugin
 {
     [Function(CallingConventions.Microsoft)] public delegate void CardFn(nint card);

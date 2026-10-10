@@ -59,7 +59,7 @@ public static class Signatures
 /// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
 /// "N." on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (Queues UI mod).
 /// </summary>
-[Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.3", Description = "Shift+click techs, focuses and intelligence agency upgrades to queue them; they start when a slot is free.")]
+[Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class Queues : Plugin
 {
     // Layouts for HOI4 1.19.3.
