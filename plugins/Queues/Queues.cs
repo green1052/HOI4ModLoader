@@ -124,7 +124,7 @@ public unsafe class Queues : Plugin
         _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
         {
             if (!Gui.ShiftHeld) return _agencyClick!.OriginalFunction(entry);
-            Toggle(_agency, *(nint*)(entry + UpgradeOfEntry));
+            AddLevel(*(nint*)(entry + AgencyOfEntry), *(nint*)(entry + UpgradeOfEntry));
             if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
             return 0;
         });
@@ -215,6 +215,27 @@ public unsafe class Queues : Plugin
         }
     }
 
+    /// <summary>
+    /// Queues one more level of a repeatable agency upgrade, up to the levels left; past that, unqueues all of it. A plain
+    /// upgrade (one level) toggles.
+    /// </summary>
+    void AddLevel(nint agency, nint upgrade)
+    {
+        if (agency == 0 || upgrade == 0) return;
+        var queued = _agency.Items.Count(i => i == upgrade);
+        var left = LevelsLeft(agency, upgrade);
+        if (queued < left)
+        {
+            _agency.Items.Add(upgrade);
+            Log.Info($"agency upgrade: queued #{_agency.Items.Count} ({queued + 1} of {left} levels left)");
+        }
+        else
+        {
+            _agency.Items.RemoveAll(i => i == upgrade);
+            Log.Info($"agency upgrade: unqueued, {_agency.Items.Count} left");
+        }
+    }
+
     /// <summary>Writes the 1-based queue position of <paramref name="item"/> into the window's number box (empty if not queued).</summary>
     void ShowPosition(nint window, Queue queue, nint item)
     {
@@ -226,7 +247,8 @@ public unsafe class Queues : Plugin
         }
         if (box == 0) return;
         var index = queue.Items.IndexOf(item);
-        Gui.SetText(box, index < 0 ? "" : (index + 1).ToString());
+        var levels = queue.Items.Count(i => i == item);
+        Gui.SetText(box, index < 0 ? "" : levels > 1 ? $"{index + 1}x{levels}" : (index + 1).ToString());
     }
 
     /// <summary>
@@ -240,9 +262,13 @@ public unsafe class Queues : Plugin
         var upgrade = *(nint*)(entry + UpgradeOfEntry);
         var button = *(nint*)(entry + ButtonOfEntry);
         if (agency == 0 || upgrade == 0 || button == 0 || !Gui.IsHidden(button)) return;
-        if (upgrade == *(nint*)(agency + AgencyUpgradeInProgress) || TimesDone(agency, upgrade) >= *(int*)(upgrade + MaxRepetitions)) return;
+        if (LevelsLeft(agency, upgrade) <= 0) return; // the running upgrade too, if it has levels after this one
         Gui.Show(button);
     }
+
+    /// <summary>Levels of <paramref name="upgrade"/> not done nor running.</summary>
+    static int LevelsLeft(nint agency, nint upgrade) =>
+        *(int*)(upgrade + MaxRepetitions) - TimesDone(agency, upgrade) - (*(nint*)(agency + AgencyUpgradeInProgress) == upgrade ? 1 : 0);
 
     static int TimesDone(nint agency, nint upgrade)
     {
@@ -304,6 +330,7 @@ public unsafe class Queues : Plugin
     void StartFirst(Queue queue, int slot, int tag, Action<nint>? fill = null)
     {
         var now = Environment.TickCount64;
+        queue.Idle(slot);
         if (queue.Sent.TryGetValue(slot, out var sent))
         {
             if (now < sent.Until) return;
@@ -329,19 +356,29 @@ public unsafe class Queues : Plugin
         public int CommandSize { get; } = commandSize;
         public List<nint> Items { get; } = new();
         public Dictionary<int, (nint Item, long Until)> Sent { get; } = new(); // by slot: sent, not seen running yet
+        readonly Dictionary<int, nint> _running = new(); // by slot: what was running at the last pump
 
-        /// <summary><paramref name="item"/> is running in <paramref name="slot"/>, whether we sent it or the player started it.</summary>
+        /// <summary>
+        /// <paramref name="item"/> is running in <paramref name="slot"/>, whether we sent it or the player started it. Takes one
+        /// entry off the queue when it starts (an item can be queued more than once: repeatable agency upgrades).
+        /// </summary>
         public void Running(int slot, nint item)
         {
+            if (_running.TryGetValue(slot, out var was) && was == item) return;
+            _running[slot] = item;
             Sent.Remove(slot);
             foreach (var other in Sent.Where(s => s.Value.Item == item).Select(s => s.Key).ToList()) Sent.Remove(other); // started elsewhere
             Items.Remove(item);
         }
 
+        /// <summary><paramref name="slot"/> runs nothing.</summary>
+        public void Idle(int slot) => _running.Remove(slot);
+
         public void Clear()
         {
             Items.Clear();
             Sent.Clear();
+            _running.Clear();
         }
     }
 }
