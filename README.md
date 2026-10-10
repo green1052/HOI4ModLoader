@@ -89,7 +89,7 @@ Front line micro a player does by hand. Divisions taken off a front go back onto
 - **Plugging:** a defence of ours that is being lost gets the nearest fresh division (resting, unassigned, or spare on a quiet part of a front).
 - **Escape:** a division in a salient whose way back narrows to one province next to the enemy pulls back before the pocket closes.
 - **Opportunity attack / mop-up:** empty enemy provinces next to the line are taken, surrounded enemy divisions attacked.
-- Settings: every threshold, each feature on/off, rotation and plugging for AI countries too (single player; their army management is kept off the divisions it handles), and AI countries taking empty enemy provinces (single player, on by default).
+- Settings: every threshold, each feature on/off, rotation and plugging for AI countries too (single player; their army management is kept off the divisions it handles), AI countries taking empty enemy provinces and AI divisions escaping closing pockets (single player, both on by default).
 
 ### ChecksumPatcher
 Keeps achievements and ironman available when the checksum changes. Patched in memory only.
@@ -100,10 +100,13 @@ Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports 
 ### AiAssist
 An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.
 - **Production:** factories move from equipment the AI has plenty of (or nothing uses) to equipment it is short of. Air and land totals stay as vanilla split them.
-- **Offensive readiness:** an army doesn't start an attack while its divisions are worn out or out of supply.
-- **Local attacks:** pocket-closing targets first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, empty or worn defences), then ones that shorten the front; armor avoids terrain and rivers that cripple it; line infantry holds while breakthrough divisions push.
-- **Hold the line:** at war, every province on the line keeps a defender; vanilla can ship a whole fighting front away (supply crisis, another front).
-- **Concentration:** fronts with no enemy at war keep a thin screen, the rest goes where the enemy is strong; fronts at war are never thinned.
+- **Offensive readiness:** an army doesn't start an attack while its divisions are worn out or out of supply, or while its country has too few divisions for the line it holds (advancing would widen it and get the spearhead encircled).
+- **Local attacks:** pocket-closing targets first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, empty or worn defences), then ones that shorten the front — all on the day's breakthrough axis, the front's thinnest enemy sector, so the pushes don't zig-zag; armor avoids terrain and rivers that cripple it; line infantry holds while breakthrough divisions push.
+- **Hold the line:** at war, every province on the line keeps a defender; vanilla can ship a whole fighting front away (supply crisis, another front). The AI's regrouping can't take a province's last defender or the divisions walling in a pocket (it would staff the new front from far away and let the pocket break out meanwhile), free divisions walk back into empty line provinces, and a country short of divisions for its line doesn't start attacks.
+- **Defence priority:** holes are refilled where holding counts first — ports, victory points, river banks, cities and mountains — and key ground is worth walking twice as far for.
+- **Reserves:** a country with divisions to spare keeps reserve posts a province behind its line, on the ground covering the most front; the theatre shuffle leaves them there.
+- **Beach defence:** a naval landing is answered at once: free divisions next to it wall the beachhead in and attack into it, instead of waiting for the front to collapse.
+- **Concentration:** fronts with no enemy at war keep a thin screen, the rest goes where the enemy is strong; borders of a country in a warring country's faction keep their garrison, and fronts at war are never thinned.
 - **Air:** planes leave regions where the AI keeps losing the air war badly.
 - **Leaders:** the biggest, fighting, attacking fronts choose their field marshals and generals first; infantry traits, doctrine and bad status count.
 

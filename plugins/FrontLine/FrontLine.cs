@@ -43,7 +43,7 @@ public static class Signatures
 /// - Attack: an empty enemy province next to the line is taken by a fresh division; enemy divisions already surrounded are
 ///   attacked by up to two (a province of ours always keeps one).
 /// Divisions taken off a front go back onto it once rested and free (after a reload that memory is gone: a rested division
-/// on no order then joins its army's front). ApplyToAi does rotation and plugging for the AI countries too (single player), with their theatre distribution and army balancing kept off the divisions it handles (they'd regroup them into new small armies).
+/// on no order then joins its army's front). ApplyToAi does rotation and plugging for the AI countries too (single player), with their theatre distribution and army balancing kept off the divisions it handles (they'd regroup them into new small armies). AiEscape runs the escape for them as well: a salient about to be cut off is worth a hole in the AI's own placement.
 /// </summary>
 [Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class FrontLine : Plugin
@@ -122,9 +122,11 @@ public unsafe class FrontLine : Plugin
         MainThread.Every(TimeSpan.FromSeconds(2), () => Manage(Game.ControlledTag, false));
         _aiOpportunity = Config.Bind("AI", "AiOpportunity", true,
             "AI countries take empty enemy provinces next to their line with a fresh division (single player); vanilla's local attacks often skip them.");
+        _aiEscape = Config.Bind("AI", "AiEscape", true,
+            "AI divisions pull back out of a salient whose way back is closing, like the player's; they go back to their front once away.");
         _aiFront = ai;
-        if (!ai && !_aiOpportunity || Multiplayer) return; // AI decisions exist on one machine only; in multiplayer they'd be the host's to make
-        if (ai) LoadAiFilters(); // only rotation and plugging take divisions off fronts
+        if (!ai && !_aiOpportunity && !_aiEscape || Multiplayer) return; // AI decisions exist on one machine only; in multiplayer they'd be the host's to make
+        if (ai || _aiEscape) LoadAiFilters(); // rotation, plugging and escape take divisions off fronts
         MainThread.Every(TimeSpan.FromMinutes(1), () =>
         {
             if (_aiRotations + _aiPlugs + _aiEscapes + _aiAttacks > 0)
@@ -228,9 +230,17 @@ public unsafe class FrontLine : Plugin
         foreach (var member in Native.PdxArray(order + MembersOfOrder))
             orders[member] = order;
 
+        // Rested AI divisions we took off (escape, or rotation when its own pass isn't running) go back to their front.
+        if (ai && !(_rotation && _aiFront))
+            foreach (var (unit, rest) in _resting.Where(r => r.Value.Tag == tag).ToList())
+            {
+                if (_pending.ContainsKey(unit) || orders.ContainsKey(unit + MemberOfUnit) || *(int*)(unit + Path + 0xC) != 0) continue;
+                if (Org(unit) < _returnOrg || Str(unit) < _returnStrength) continue;
+                if (Assign(unit, rest.Group, rest.Order)) _pending[unit] = now + PendingMs;
+            }
         if (_rotation && (!_ai || _aiFront)) foreach (var group in groups) RotateArmy(country, tag, group, orders, now);
         if (_plugging && (!_ai || _aiFront)) Plug(country, tag, units, orders, now);
-        if (_escape && !_ai) Escape(country, tag, units, orders, now); // the AI re-places its own fronts: a pulled-out division leaves a hole
+        if (_escape && (!_ai || _aiEscape)) Escape(country, tag, units, orders, now);
         if (_ai ? _aiOpportunity : _opportunity || _mopUp) Attack(country, tag, units, now); // AI: empty provinces only
     }
 
@@ -464,7 +474,7 @@ public unsafe class FrontLine : Plugin
 
     // AI actions per minute, for the log (AI ones aren't logged one by one).
     private int _aiRotations, _aiPlugs, _aiEscapes, _aiAttacks;
-    private bool _aiFront, _aiOpportunity;
+    private bool _aiFront, _aiOpportunity, _aiEscape;
 
     private void Count(ref int counter)
     {
