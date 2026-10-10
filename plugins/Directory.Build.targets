@@ -1,8 +1,10 @@
 <Project>
 
-    <!-- Every build copies the plugin (and its symbols) into <DeployDir>\HOI4ModLoader\plugins; a running game hot reloads it. -->
+    <!-- Every build copies the plugin (and, in Debug, its symbols) into <DeployDir>\HOI4ModLoader\plugins; a running game hot reloads it. -->
     <Target Name="DeployPlugin" AfterTargets="Build" Condition="'$(DeployPath)' != ''">
-        <Copy SourceFiles="$(TargetPath);$(TargetDir)$(TargetName).pdb" DestinationFolder="$(DeployPath)\HOI4ModLoader\plugins" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DeployPath)\HOI4ModLoader\plugins" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
+        <Copy Condition="$(DeploySymbols)" SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(DeployPath)\HOI4ModLoader\plugins" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
+        <Delete Condition="!$(DeploySymbols)" Files="$(DeployPath)\HOI4ModLoader\plugins\$(TargetName).pdb" ContinueOnError="WarnAndContinue" /> <!-- a stale one would not match -->
     </Target>
 
     <Import Project="$(MSBuildThisFileDirectory)..\HOI4Mod.targets" />

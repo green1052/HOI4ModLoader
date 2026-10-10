@@ -80,7 +80,9 @@
         <ItemGroup>
             <!-- FASM.DLL is the 32-bit assembler; hoi4.exe is 64-bit and uses FASMX64.DLL. -->
             <_CoreFile Include="$(OutDir)**\*" Exclude="$(OutDir)**\*.targets;$(OutDir)FASM.DLL" />
+            <_CoreFile Remove="$(OutDir)**\*.pdb" Condition="!$(DeploySymbols)" />
         </ItemGroup>
+        <Delete Condition="!$(DeploySymbols)" Files="$(DeployPath)\HOI4ModLoader\core\$(TargetName).pdb" ContinueOnError="WarnAndContinue" /> <!-- a stale one would not match -->
         <Copy SourceFiles="@(_CoreFile)" DestinationFiles="@(_CoreFile->'$(DeployPath)\HOI4ModLoader\core\%(RecursiveDir)%(Filename)%(Extension)')"
               SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />
         <Copy Condition="Exists('$(BootstrapDll)')" SourceFiles="$(BootstrapDll)" DestinationFolder="$(DeployPath)" SkipUnchangedFiles="true" Retries="0" ContinueOnError="WarnAndContinue" />

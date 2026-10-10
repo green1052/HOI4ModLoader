@@ -37,7 +37,7 @@ HOI4ModLoader\LogOutput.log  실행마다 새로 씁니다
 ## 빌드
 `dotnet build`. 빌드할 때마다 게임 폴더(Steam 레지스트리로 찾음, `HOI4Dir`로 변경 가능)에 배포됩니다. 게임이 켜져 있으면 플러그인은 핫 리로드되고, 잠긴 코어 파일은 경고만 내고 넘어갑니다. `bootstrap`은 VS C++ 도구로 소스가 바뀌었을 때만 빌드됩니다.
 
-배포용 폴더(`out\`, 저장소 기준):
+배포용 폴더(`out\`, 저장소 기준). Release 빌드에는 .pdb(오류 줄 번호, 디버깅용)를 넣지 않습니다:
 ```
 dotnet build -c Release -p:DeployDir=out -p:HOI4ModDir=out\mod
 ```

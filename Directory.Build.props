@@ -9,6 +9,8 @@
         <HOI4ModDir Condition="'$(HOI4ModDir)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.MyDocuments))\Paradox Interactive\Hearts of Iron IV\mod</HOI4ModDir>
         <!-- Where they resolve to: relative paths are from this folder (the repository), the same for every project and shell. -->
         <DeployPath Condition="'$(DeployDir)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '$(DeployDir)'))))</DeployPath>
+        <!-- Symbols (.pdb: line numbers in LogOutput.log, debugging) go out with Debug builds only. -->
+        <DeploySymbols Condition="'$(DeploySymbols)' == ''">$([System.String]::Equals('$(Configuration)', 'Debug'))</DeploySymbols>
         <HOI4ModPath Condition="'$(HOI4ModDir)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '$(HOI4ModDir)'))))</HOI4ModPath>
     </PropertyGroup>
 
