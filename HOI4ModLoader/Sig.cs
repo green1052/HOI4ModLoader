@@ -40,6 +40,7 @@ public sealed unsafe class Image
     private readonly long _pointerBase; // what absolute pointers in the image are relative to: actual base when loaded, preferred base when mapped as data
     private readonly List<(nint Start, int Size, bool Code)> _sections = new();
     private readonly (int Begin, int End)[] _functions;
+    private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = new(); // code sections with patched bytes put back
 
     private Image(nint b, bool relocated = true)
     {
@@ -95,7 +96,7 @@ public sealed unsafe class Image
         foreach (var (start, size, code) in _sections)
         {
             if (!code) continue;
-            var span = new ReadOnlySpan<byte>((void*)start, size);
+            var span = Unpatched(start, size);
             // Jump between occurrences of the first concrete byte (vectorized IndexOf), then compare the rest.
             for (int i = first, next; (next = span[i..].IndexOf((byte)pat[first])) >= 0; i++)
             {
@@ -108,6 +109,23 @@ public sealed unsafe class Image
             }
         }
         return hits;
+    }
+
+    /// <summary>A code section as the game shipped it: bytes our patches and hooks changed are read from before they did.</summary>
+    private ReadOnlySpan<byte> Unpatched(nint start, int size)
+    {
+        var live = new ReadOnlySpan<byte>((void*)start, size);
+        if (this != Game || !Patches.Originals.Keys.Any(a => a >= start && a < start + size)) return live;
+        if (_pristine.TryGetValue(start, out var copy) && copy.Version == Patches.OriginalsVersion) return copy.Bytes;
+        // Code only changes through Patches, which records the original first: a copy stays valid once its overlays are redone.
+        var bytes = copy.Bytes ?? live.ToArray();
+        foreach (var (at, original) in Patches.Originals)
+        {
+            var offset = (int)(at - start);
+            if (offset >= 0 && offset < size) original.AsSpan(0, Math.Min(original.Length, size - offset)).CopyTo(bytes.AsSpan(offset));
+        }
+        _pristine[start] = (Patches.OriginalsVersion, bytes);
+        return bytes;
     }
 
     /// <summary>

@@ -19,6 +19,13 @@ public static unsafe partial class Patches
     private static readonly Dictionary<long, string> Claims = new();
     private static readonly Dictionary<string, List<Action>> Undo = new();
     private static readonly List<object> KeepAlive = new();
+
+    /// <summary>
+    /// The game's own bytes at every address a patch or hook changed (first one wins: a hook over a hook keeps the game's),
+    /// so signature scans still find functions another plugin already hooked.
+    /// </summary>
+    internal static readonly Dictionary<nint, byte[]> Originals = new();
+    internal static int OriginalsVersion;
     private static readonly Logger Log = new("Patches");
 
     /// <summary>The Reloaded.Hooks instance, for anything the helpers below don't cover.</summary>
@@ -37,6 +44,7 @@ public static unsafe partial class Patches
         if (!found.SequenceEqual(want))
             throw new InvalidOperationException($"unexpected bytes at 0x{at:X}: {Convert.ToHexString(found)} (wanted {Convert.ToHexString(want)})");
         Claim(at, want.Length);
+        RememberOriginal(at, want);
         WriteCode(at, with);
         Record(() => WriteCode(at, want));
     }
@@ -110,11 +118,18 @@ public static unsafe partial class Patches
         var after = new ReadOnlySpan<byte>((void*)at, Window).ToArray();
         var changed = Window;
         while (changed > 0 && before[changed - 1] == after[changed - 1]) changed--;
+        RememberOriginal(at, before[..changed]);
         Record(() =>
         {
             disable();
             if (new ReadOnlySpan<byte>((void*)at, changed).SequenceEqual(after.AsSpan(0, changed))) WriteCode(at, before[..changed]);
         }, hook); // also keeps the hook's delegates alive: a thread may still be inside it
+    }
+
+    private static void RememberOriginal(nint at, byte[] bytes)
+    {
+        if (bytes.Length == 0 || !Originals.TryAdd(at, bytes)) return;
+        OriginalsVersion++;
     }
 
     /// <summary>Runs <paramref name="undo"/> when the current <see cref="Owner"/> is reverted (failed load, hot reload).</summary>
