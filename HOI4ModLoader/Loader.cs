@@ -31,6 +31,17 @@ public static class Loader
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
                 "Reload all plugins when a DLL in hoi4mods\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
+            if (config.Bind("Performance", "Mimalloc", true, "Use mimalloc for the game's memory allocations instead of the Windows heap (takes effect at the next start)."))
+            {
+                Patches.Owner = "HOI4ModLoader"; // never reverted: mimalloc's blocks can't go back to the Windows heap
+                try
+                {
+                    Allocator.UseMimalloc();
+                    Log.Info("mimalloc on");
+                }
+                catch (Exception e) { Log.Error($"mimalloc: {e.Message}"); }
+                finally { Patches.Owner = null; }
+            }
 
             Log.Info($"HOI4 {Game.Version}, .NET {Environment.Version}");
             var followMultiplayer = true;

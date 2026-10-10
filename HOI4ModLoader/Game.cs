@@ -99,7 +99,7 @@ public static unsafe class Native
 
     /// <summary>
     /// Replaces the contents of the MSVC std::string at <paramref name="at"/>. Heap buffers come from and go back to the
-    /// CRT heap, the same process heap the game's statically linked CRT uses.
+    /// game's own heap (<see cref="Allocator"/>), like the game's strings.
     /// </summary>
     public static void SetMsvcString(nint at, string value) => SetMsvcString(at, Encoding.UTF8.GetBytes(value));
 
@@ -108,8 +108,8 @@ public static unsafe class Native
     {
         var bytes = value.ToArray(); // value may point into the buffer freed below
         if (bytes.Length >= 0xFFF) throw new ArgumentException("too long: MSVC over-aligns buffers of 4 KB and more"); // and frees them differently
-        if (*(long*)(at + 0x18) >= 16) NativeMemory.Free(*(void**)at);
-        var data = bytes.Length < 16 ? (byte*)at : (byte*)NativeMemory.Alloc((nuint)bytes.Length + 1);
+        if (*(long*)(at + 0x18) >= 16) Allocator.Free(*(nint*)at);
+        var data = bytes.Length < 16 ? (byte*)at : (byte*)Allocator.Alloc(bytes.Length + 1);
         if (data != (byte*)at) *(byte**)at = data;
         bytes.CopyTo(new Span<byte>(data, bytes.Length));
         data[bytes.Length] = 0;

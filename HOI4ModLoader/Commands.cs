@@ -24,12 +24,12 @@ public static unsafe class Commands
     /// <summary>
     /// A new <paramref name="className"/> command (e.g. "CSetResearchCommand") of <paramref name="size"/> bytes, laid out like
     /// the game's constructors do: CCommand base, then the country tag and the target. Fill any further fields yourself.
-    /// The memory is from the CRT heap, the same process heap hoi4.exe's statically linked CRT frees commands from.
+    /// The memory is from the game's own heap (<see cref="Allocator"/>), which frees commands once they ran.
     /// </summary>
     public static nint New(string className, int size, int tag, nint target)
     {
         if (!VTables.TryGetValue(className, out var vtable)) VTables[className] = vtable = Sig.VTable(className);
-        var cmd = (nint)NativeMemory.AllocZeroed((nuint)size);
+        var cmd = Allocator.AllocZeroed(size);
         *(nint*)cmd = vtable;
         *(int*)(cmd + 12) = -1;
         *(int*)(cmd + 20) = -65536;
@@ -67,7 +67,7 @@ public static unsafe class Commands
     }
 
     /// <summary>Releases a command that was never posted.</summary>
-    public static void Free(nint cmd) => NativeMemory.Free((void*)cmd);
+    public static void Free(nint cmd) => Allocator.Free(cmd);
 
     /// <summary>Posts the command if the game would accept it; otherwise frees it.</summary>
     public static bool TryPost(nint cmd)

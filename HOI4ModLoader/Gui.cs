@@ -44,7 +44,7 @@ public static unsafe class Gui
         if (_setText == null) _setText = (delegate* unmanaged<nint, nint, void>)Sig.Find(SetTextSig);
         var str = NewString(text);
         try { _setText(textBox, str); }
-        finally { NativeMemory.Free((void*)str); } // SetText already took (and freed) any heap buffer
+        finally { Allocator.Free(str); } // SetText already took (and freed) any heap buffer
     }
 
     public static bool IsHidden(nint widget) => (*(byte*)(widget + Flags) & HiddenFlag) != 0;
@@ -64,7 +64,7 @@ public static unsafe class Gui
 
     private static nint NewString(ReadOnlySpan<byte> value)
     {
-        var s = (nint)NativeMemory.AllocZeroed(32);
+        var s = Allocator.AllocZeroed(32);
         *(long*)(s + 24) = 15; // empty, inline buffer
         Native.SetMsvcString(s, value);
         return s;
@@ -72,7 +72,7 @@ public static unsafe class Gui
 
     private static void FreeString(nint s)
     {
-        if (*(long*)(s + 24) >= 16) NativeMemory.Free(*(void**)s);
-        NativeMemory.Free((void*)s);
+        if (*(long*)(s + 24) >= 16) Allocator.Free(*(nint*)s);
+        Allocator.Free(s);
     }
 }
