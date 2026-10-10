@@ -6,6 +6,7 @@
     <Project Path="plugins/AutoConstruction/AutoConstruction.csproj" />
     <Project Path="plugins/AutoTrade/AutoTrade.csproj" />
     <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
+    <Project Path="plugins/NoTelemetry/NoTelemetry.csproj" />
     <Project Path="plugins/Queues/Queues.csproj" />
     <Project Path="plugins/RailwayGuns/RailwayGuns.csproj" />
   </Folder>
