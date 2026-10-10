@@ -50,7 +50,7 @@ public unsafe class AutoConstruction : Plugin
     private const int ProvincesOfState = 24, IdOfState = 88, CoresOfState = 176, BuildingsOfState = 288;
     private const int IdOfProvince = 164, BuildingsOfProvince = 400;
     private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
-    private const int LevelOfBuilding = 64, TypeOfBuilding = 480;  // CBuilding: int16 level
+    private const int LevelOfBuilding = 64, ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: int16 level, its container
     private const int Lines = 112, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
     private const int Items = 1440, WindowOfItem = 16, TypeOfItem = 32; // construction view building buttons
     private const int Location = 56, Building = 60, Levels = 72, Insertion = 76; // CAddConstructionCommand
@@ -91,8 +91,8 @@ public unsafe class AutoConstruction : Plugin
             if (type == 0 || !Gui.ShiftHeld && !Gui.CtrlHeld) return _click!.OriginalFunction(item);
             var country = Game.Country(Game.PlayerTag);
             var count = country == 0 ? 0 : Count(country, type);
-            // The first click starts from what the country has (built and queued): +1 means one more than now.
-            var from = _targets.TryGetValue(type, out var current) ? current : count;
+            // Targets count from what the country has (built and queued): +1 means one more than now.
+            var from = Math.Max(count, _targets.GetValueOrDefault(type, count));
             var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? 5 : 1));
             if (target <= count && !Gui.ShiftHeld) _targets.Remove(type); // lowered to what's there: off
             else _targets[type] = target;
@@ -112,7 +112,10 @@ public unsafe class AutoConstruction : Plugin
 
     private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));
 
-    /// <summary>Writes the target (or nothing) into the button's target box, a small number in its bottom right corner.</summary>
+    /// <summary>
+    /// Writes how many more the target wants ("+N", "+0" once reached) into the button's target box, a small number in its
+    /// bottom right corner; nothing without a target.
+    /// </summary>
     private void ShowTarget(nint item)
     {
         var type = *(nint*)(item + TypeOfItem);
@@ -125,7 +128,8 @@ public unsafe class AutoConstruction : Plugin
             if (box == 0) Log.Info($"no '{TargetBox}' element: targets work but don't show (is the Auto Construction UI mod enabled?)");
         }
         if (box == 0) return;
-        var text = _targets.TryGetValue(type, out var target) ? target.ToString() : "";
+        var country = Game.Country(Game.PlayerTag);
+        var text = _targets.TryGetValue(type, out var target) && country != 0 ? $"+{Math.Max(0, target - Count(country, type))}" : "";
         if (Native.Utf8(Gui.Text(box)) != text) Gui.SetText(box, text);
     }
 
@@ -185,47 +189,50 @@ public unsafe class AutoConstruction : Plugin
         return building == 0 ? 0 : *(short*)(building + LevelOfBuilding);
     }
 
-    /// <summary>Queues up to <paramref name="wanted"/> levels at the best place that has room; false if there's none.</summary>
+    /// <summary>
+    /// Queues up to <paramref name="wanted"/> levels, one per place (state, or province for province buildings) from the
+    /// best down, places that already have a line of this building last: separate lines are built at the same time, while
+    /// the levels of one line are built one after another. False if nothing could be queued.
+    /// </summary>
     private bool Queue(nint country, int tag, nint type, int wanted)
     {
         var perProvince = *(int*)(type + ProvinceLevel) > 0;
-        (nint Container, int Id, int Free, (int, int, int, int) Rank) best = default;
+        var building = new HashSet<nint>(); // containers with a construction line of this type
+        var production = *(nint*)(country + ProductionOfCountry);
+        if (production != 0)
+            foreach (var line in Native.PdxArray(production + Lines))
+            {
+                var b = *(nint*)line == Sig.VTable(Signatures.BuildingLine) ? *(nint*)(line + BuildingOfLine) : 0;
+                if (b != 0 && *(nint*)(b + TypeOfBuilding) == type) building.Add(*(nint*)(b + ContainerOfBuilding));
+            }
+
+        var places = new List<(nint Container, int Id, int Free, (int, int, int, int, int) Rank)>();
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
         {
             if (_canBuildInState(country, state, type, 1) == 0) continue;
-            var rank = (IsCore(state, tag) ? 1 : 0, _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure),
+            var rank = (0, IsCore(state, tag) ? 1 : 0, _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure),
                 _freeSharedSlots(state), -*(int*)(state + IdOfState));
-            if (best.Container != 0 && rank.CompareTo(best.Rank) <= 0) continue;
-            if (!perProvince)
-            {
-                var free = _freeLevels(state + BuildingsOfState, type);
-                if (free > 0) best = (state + BuildingsOfState, *(int*)(state + IdOfState), free, rank);
-                continue;
-            }
-            foreach (var province in Native.PdxArray(state + ProvincesOfState))
-            {
-                if (_canBuildInProvince(country, province, type, 1) == 0) continue;
-                var free = _freeLevels(province + BuildingsOfProvince, type);
-                if (free <= 0) continue;
-                best = (province + BuildingsOfProvince, *(int*)(province + IdOfProvince), free, rank);
-                break; // ponytail: first buildable province of the best state; rank provinces too if placement matters
-            }
+            if (!perProvince) places.Add((state + BuildingsOfState, *(int*)(state + IdOfState), _freeLevels(state + BuildingsOfState, type), rank));
+            else
+                foreach (var province in Native.PdxArray(state + ProvincesOfState))
+                    if (_canBuildInProvince(country, province, type, 1) != 0)
+                        places.Add((province + BuildingsOfProvince, *(int*)(province + IdOfProvince), _freeLevels(province + BuildingsOfProvince, type), rank));
         }
-        if (best.Container == 0) return false;
+        var order = places.Where(p => p.Free > 0)
+            .OrderBy(p => building.Contains(p.Container)).ThenByDescending(p => p.Rank).ToList();
 
-        var levels = Math.Min(wanted, best.Free);
-        var cmd = Commands.New(Signatures.ConstructionCommand, 0x50, tag, Sig.VTable(Signatures.BuildingReference));
-        *(int*)(cmd + Location) = best.Id;
-        *(int*)(cmd + Building) = *(int*)(type + TokenOfType);
-        *(int*)(cmd + Levels) = levels;
-        *(byte*)(cmd + Insertion) = AtEnd;
-        if (!Commands.TryPost(cmd))
+        var queued = 0;
+        foreach (var place in order.Take(wanted))
         {
-            Log.Info($"{Name(type)}: the game refused {levels} in {(perProvince ? "province" : "state")} {best.Id}");
-            return false;
+            var cmd = Commands.New(Signatures.ConstructionCommand, 0x50, tag, Sig.VTable(Signatures.BuildingReference));
+            *(int*)(cmd + Location) = place.Id;
+            *(int*)(cmd + Building) = *(int*)(type + TokenOfType);
+            *(int*)(cmd + Levels) = 1;
+            *(byte*)(cmd + Insertion) = AtEnd;
+            if (Commands.TryPost(cmd)) queued++;
         }
-        Log.Info($"{Name(type)}: queued {levels} in {(perProvince ? "province" : "state")} {best.Id}");
-        return true;
+        if (queued > 0) Log.Info($"{Name(type)}: queued 1 level in each of {queued} {(perProvince ? "provinces" : "states")}");
+        return queued > 0;
     }
 
     private static bool IsCore(nint state, int tag)
