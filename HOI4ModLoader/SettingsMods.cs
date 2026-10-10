@@ -20,6 +20,9 @@ internal static unsafe class SettingsMods
     /// <summary>CSettingsScreen::UpdateTabButtons(screen): marks the tab button of the shown container selected, the others not.</summary>
     [Signature] public const string UpdateTabsSig = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B F1 48 8D 1D ? ? ? ? 48 8D 2D ? ? ? ? 66 66 66 0F 1F 84 00 00 00 00 00 48 8B 8E 98 5E 00 00";
 
+    /// <summary>CSettingsScreen::OnOpen(screen): shows the window and re-shows the shown tab, if it is one of the four vanilla ones.</summary>
+    [Signature] public const string OpenSig = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 48 8B EC 48 83 EC 40 48 8B F1 48 8B 89 98 5E 00 00 48 83 C1 30 48 8B 01 FF 50 78";
+
     /// <summary>CCheckBox::UpdateSprite(checkbox): shows the frame of its state.</summary>
     [Signature] public const string CheckBoxSpriteSig = "40 53 48 83 EC 40 80 B9 BB 01 00 00 00 48 8B D9 48 89 74 24 58 75 22 48 8B 89 C0 00 00 00 48 8B 01 FF 90 60 02 00 00";
 
@@ -41,9 +44,11 @@ internal static unsafe class SettingsMods
 
     [Function(CallingConventions.Microsoft)] public delegate nint InitFn(nint screen, nint window);
     [Function(CallingConventions.Microsoft)] public delegate nint TabsFn(nint screen);
+    [Function(CallingConventions.Microsoft)] public delegate nint OpenFn(nint screen);
 
     private static IHook<InitFn>? _init;
     private static IHook<TabsFn>? _updateTabs;
+    private static IHook<OpenFn>? _open;
     private static delegate* unmanaged<nint, void> _checkBoxSprite;
     private static nint _tooltipVTable;
     private static readonly Logger Log = new("Settings");
@@ -70,6 +75,12 @@ internal static unsafe class SettingsMods
         {
             var result = _init!.OriginalFunction(screen, window);
             Build(screen);
+            return result;
+        });
+        _open = Patches.Hook<OpenFn>(Sig.Find(OpenSig), screen =>
+        {
+            var result = _open!.OriginalFunction(screen);
+            if (screen == _screen && _page != 0 && *(nint*)(screen + ShownTab) == _page) Guard(ShowPage); // reopened on the Mods tab
             return result;
         });
         _updateTabs = Patches.Hook<TabsFn>(Sig.Find(UpdateTabsSig), screen =>
@@ -123,15 +134,20 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnTab(nint unused) => Guard(() =>
     {
+        if (*(nint*)(_screen + ShownTab) != _page) ShowPage();
+    });
+
+    /// <summary>Shows the Mods page (its plugin list) in place of the shown tab.</summary>
+    private static void ShowPage()
+    {
         var shown = *(nint*)(_screen + ShownTab);
-        if (shown == _page) return;
-        if (shown != 0) Visible(shown, false);
+        if (shown != 0 && shown != _page) Visible(shown, false);
         Visible(_page, true);
         *(nint*)(_screen + ShownTab) = _page; // a vanilla tab's click hides it again
         ShowList();
         _updateTabs!.OriginalFunction(_screen);
         ((delegate* unmanaged<nint, int, void>)(*(nint**)_tab)[SetFrameSlot])(_tab, 1);
-    });
+    }
 
     // ---- plugin list ----
 
