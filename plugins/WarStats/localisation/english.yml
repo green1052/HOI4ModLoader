@@ -1,6 +1,6 @@
 ﻿l_english:
  com.green1052.warstats.name:0 "War Statistics"
- com.green1052.warstats.desc:0 "A ledger of every war: casualties both sides have taken and the war score, in a window opened from a button under the topbar's flag."
+ com.green1052.warstats.desc:0 "A ledger of every war: casualties, war score, sea-region naval strength, in a window opened from a button under the topbar's flag."
  com.green1052.warstats.Enabled:0 "War statistics button"
  com.green1052.warstats.Enabled.desc:0 "The war statistics button under the topbar's flag."
  com.green1052.warstats.button:0 "War statistics"
@@ -8,3 +8,4 @@
  com.green1052.warstats.score:0 "war score"
  com.green1052.warstats.none:0 "No wars."
  com.green1052.warstats.equipment:0 "Equipment stockpile"
+ com.green1052.warstats.naval:0 "Naval strength by region (spotted)"

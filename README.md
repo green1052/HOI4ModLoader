@@ -45,7 +45,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | NoTelemetry | Blocks gameplay telemetry | ✅ |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 | PlanTools | Batch stance and battle-plan controls for all your armies at once | ✅ |
-| WarStats | A war ledger: casualties, war score and equipment stockpile trends of every war, in one window | ✅ |
+| WarStats | A war ledger: casualties, war score, sea-region naval strength and equipment stockpile trends of every war, in one window | ✅ |
 | SupplyOverlay | Where a starving division's supply comes from, and your trade routes, drawn on any map mode | ✅ |
 
 ### Queues
@@ -104,7 +104,7 @@ Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports 
 Hotkeys for all your armies and army groups at once, each posting the same command the battle-plan window's button posts: Ctrl+Alt+1/2/3 sets every stance (careful, balanced, rush), Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them. Each key is a setting.
 
 ### WarStats
-A button under the topbar's flag opens a war ledger: every war with the casualties both sides have taken and the war score, biggest wars first, plus each produced equipment's stockpile as a 30-day trend line. Read-only, updated every second.
+A button under the topbar's flag opens a war ledger: every war with the casualties both sides have taken and the war score, biggest wars first, each sea region where our fleets meet an enemy's with both sides' spotted strength, plus each produced equipment's stockpile as a 30-day trend line. Read-only, updated every second.
 
 ### SupplyOverlay
 **Ctrl+Alt+S** draws an arrow from the supply hub feeding each of your starving divisions to the division itself, in the supply map's own arrow style — in any map mode, without switching. Read-only, refreshed while on.

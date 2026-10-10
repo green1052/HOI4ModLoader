@@ -43,6 +43,8 @@ public unsafe class WarStats : Plugin
     private const int War = 14346;
     private const int ProductionOfCountry = 0xF68, LogisticsOfCountry = 0xF98, MilitaryLines = 88; // AutoProduction's layouts
     private const int VariantOfLine = 136, TypeOfVariant = 1008, ArchetypeOfType = 1240;
+    private const int RegionsOfGameState = 0x2E0, ForcesOfRegion = 0xF8; // strategic regions; the task forces spotted in one (AiAssist's layouts)
+    private const int OwnerOfForce = 0x1D8, ShipsOfForce = 0x348, StrengthOfShip = 0x6F8;
     private const int Days = 30;                    // days of equipment stockpile history kept
 
     [Function(CallingConventions.Microsoft)] private delegate nint FindFn(nint window, nint name, byte logIfMissing);
@@ -127,6 +129,7 @@ public unsafe class WarStats : Plugin
     {
         var me = Game.ControlledTag;
         var seen = new HashSet<long>();
+        var enemies = new HashSet<int>();
         var wars = new List<(string Title, long Mine, long Theirs, long Score)>();
         foreach (var country in Game.Countries)
         {
@@ -138,6 +141,8 @@ public unsafe class WarStats : Plugin
                 var a = *(int*)(relation + TagAOfRelation);
                 var b = *(int*)(relation + TagBOfRelation);
                 if (!seen.Add((long)Math.Min(a, b) << 32 | (uint)Math.Max(a, b))) continue; // both sides carry the war
+                if (a == me) enemies.Add(b);
+                if (b == me) enemies.Add(a);
                 var la = *(long*)(relation + LossesAOfRelation);
                 var lb = *(long*)(relation + LossesBOfRelation);
                 var score = Score(*(nint*)(relation + a == me ? BreakdownAOfRelation : BreakdownBOfRelation));
@@ -153,6 +158,9 @@ public unsafe class WarStats : Plugin
                 .Append("    ").Append(Loc.Get("com.green1052.warstats.score", "war score")).Append(' ').Append(war.Score)
                 .Append('\n');
         if (text.Length == 0) text.Append(Loc.Get("com.green1052.warstats.none", "No wars."));
+        var naval = Naval(enemies);
+        if (naval.Length > 0)
+            text.Append('\n').Append(Loc.Get("com.green1052.warstats.naval", "Naval strength by region (spotted)")).Append('\n').Append(naval);
         if (_history.Count > 0)
         {
             text.Append('\n').Append(Loc.Get("com.green1052.warstats.equipment", "Equipment stockpile")).Append(" (").Append(Days).Append(')').Append('\n');
@@ -162,6 +170,35 @@ public unsafe class WarStats : Plugin
                     .Append("  ").Append(Bar(run)).Append('\n');
         }
         Gui.SetText(_text, Gui.Literal(text.ToString()));
+    }
+
+    /// <summary>Each sea region where our fleets and an enemy's meet: the strength of each side's task forces spotted
+    /// there. Only what is spotted shows, like the game's own map information.</summary>
+    private static StringBuilder Naval(HashSet<int> enemies)
+    {
+        var text = new StringBuilder();
+        var regions = Game.State == 0 ? 0 : *(nint*)(Game.State + RegionsOfGameState);
+        if (regions == 0 || enemies.Count == 0) return text;
+        for (int id = 1, n = *(int*)(Game.State + RegionsOfGameState + 0xC); id < n; id++)
+        {
+            var region = ((nint*)regions)[id];
+            if (region == 0) continue;
+            long ours = 0, theirs = 0;
+            foreach (var force in Native.PdxArray(region + ForcesOfRegion))
+            {
+                var mine = *(int*)(force + OwnerOfForce) == Game.ControlledTag;
+                if (!mine && !enemies.Contains(*(int*)(force + OwnerOfForce))) continue;
+                foreach (var ship in Native.PdxArray(force + ShipsOfForce))
+                {
+                    if (mine) ours += *(long*)(ship + StrengthOfShip);
+                    else theirs += *(long*)(ship + StrengthOfShip);
+                }
+            }
+            if (ours + theirs <= 0) continue;
+            text.Append("  ").Append(Loc.Get($"STRATEGIC_REGION_{id}", $"region {id}")).Append(' ')
+                .Append(Fmt(ours / Native.FixedPoint)).Append(" vs ").Append(Fmt(theirs / Native.FixedPoint)).Append('\n');
+        }
+        return text;
     }
 
     /// <summary>One stockpile sample per equipment archetype the country produces lines for.</summary>

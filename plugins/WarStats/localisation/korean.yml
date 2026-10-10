@@ -1,6 +1,6 @@
 ﻿l_korean:
  com.green1052.warstats.name:0 "전쟁 통계"
- com.green1052.warstats.desc:0 "모든 전쟁의 사상자와 전쟁 점수를 한 창에 모아 보는 전쟁 통계 창입니다."
+ com.green1052.warstats.desc:0 "모든 전쟁의 사상자, 전쟁 점수, 해역별 해군 전력을 한 창에 모아 보는 전쟁 통계 창입니다."
  com.green1052.warstats.Enabled:0 "전쟁 통계 버튼"
  com.green1052.warstats.Enabled.desc:0 "상단 플래그 아래에 있는 전쟁 통계 버튼입니다."
  com.green1052.warstats.button:0 "전쟁 통계"
@@ -8,3 +8,4 @@
  com.green1052.warstats.score:0 "전쟁 점수"
  com.green1052.warstats.none:0 "진행 중인 전쟁이 없습니다."
  com.green1052.warstats.equipment:0 "장비 재고"
+ com.green1052.warstats.naval:0 "해역별 해군 전력 (발견된 함대)"
