@@ -44,6 +44,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | ChecksumPatcher | Keeps achievements and ironman with mods | ✅ |
 | NoTelemetry | Blocks gameplay telemetry | ✅ |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
+| PlanTools | Batch stance and battle-plan controls for all your armies at once | ✅ |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show `N. ` in front of their name.
@@ -96,6 +97,9 @@ Keeps achievements and ironman available when the checksum changes. Patched in m
 
 ### NoTelemetry
 Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports are untouched.
+
+### PlanTools
+Hotkeys for all your armies and army groups at once, each posting the same command the battle-plan window's button posts: Ctrl+Alt+1/2/3 sets every stance (careful, balanced, rush), Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them. Each key is a setting.
 
 ### AiAssist
 An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.
