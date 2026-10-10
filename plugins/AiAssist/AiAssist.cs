@@ -28,6 +28,18 @@ public static class Signatures
     /// <summary>PostAICommand(command, int* postingTag) -> bool: every AI command, from every AI path; an invalid one is deleted and 0 returned.</summary>
     [Signature] public const string PostAICommand = "40 53 48 83 EC 40 80 3D ? ? ? ? 00 48 8B D9 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 75 ? 48 8B CA E8";
 
+    /// <summary>
+    /// CMoveCommand ctor (mem[0x88], CArmy* unit, int province, bool clearQueue, int moveType, ...): a plain move, the same
+    /// one the battle plan UI sends. The command holds the unit as a CRef at +0x38 and its provinces at +0x40.
+    /// </summary>
+    [Signature] public const string MoveCommand = "48 89 4C 24 ? 53 48 83 EC 60 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10 C7 43 14 00 00 FF FF 66 89 4B 18 48 89 4B 1C 48 8D 05 ? ? ? ? 48 89 03 48 8D 4B 28";
+
+    /// <summary>The AI theatre distribution: collect divisions it may move to other fronts (ctx, CPdxArray&lt;{CArmy*, slot*}&gt;* out): every army member on no order.</summary>
+    [Signature] public const string CollectReassignableUnits = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 98 00 00 00 4C 8B FA";
+
+    /// <summary>CAIFront: put its divisions into armies (front, CPdxArray&lt;CArmy*&gt;* units, CPdxArray&lt;CPdxArray&lt;int&gt;&gt;* partitions by army, specs, log): assigns, or makes new armies.</summary>
+    [Signature] public const string ApplyArmiesBalancing = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC 50 49 8B F9 49 8B F0";
+
     /// <summary>CRef::Resolve(int* ref) -> object.</summary>
     [Signature] public const string ResolveRef = "48 83 EC 28 8B 01 3D 68 12 00 00 76";
 
@@ -143,9 +155,10 @@ public unsafe class AiAssist : Plugin
         _roles = Config.Bind("AI", "Roles", false,
             "Line infantry holds the line: provinces with only infantry make local attacks only into empty provinces or pockets; armored and breakthrough divisions do the pushing (not for armies with no such divisions).");
         _holdLine = Config.Bind("AI", "HoldTheLine", true,
-            "At war, the AI keeps a division in every province of a front that borders the enemy (enemy divisions or not); it no longer ships them all off (supply crisis, another front) and leaves the line empty while fighting.");
+            "At war, the AI keeps a division in every province of a front that borders the enemy (enemy divisions or not); it no longer ships them all off (supply crisis, another front) and leaves the line empty while fighting. "
+            + "Its regrouping can't take a province's last defender or the divisions walling in a pocket, free divisions walk back into empty line provinces, and a country short of divisions for its line doesn't start attacks (advancing would widen it and get the spearhead cut off).");
         _concentration = Config.Bind("AI", "Concentration", true,
-            "The AI keeps only a thin screen on fronts with no enemy at war (neutral or friendly borders) and sends the rest to fronts facing more enemy divisions than they hold; fronts at war are never thinned.");
+            "The AI keeps only a thin screen on fronts with no enemy at war (neutral or friendly borders) and sends the rest to fronts facing more enemy divisions than they hold; borders of a country in a warring country's faction keep their garrison, and fronts at war are never thinned.");
         _targetValue = Config.Bind("AI", "TargetValue", true,
             "The AI's local attacks go for valuable provinces first: victory points, capitals, supply hubs, airfields, resources, empty or worn-out defences (after pockets, before front shortening).");
         var leaders = Config.Bind("AI", "Leaders", true,
@@ -159,11 +172,21 @@ public unsafe class AiAssist : Plugin
         if (airRetreat) LoadAirRetreat();
         if (leaders) LoadLeaders();
         if (_concentration || _holdLine) LoadConcentration();
+        if (_holdLine)
+        {
+            _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(Signatures.MoveCommand);
+            _game = new PerGame(() =>
+            {
+                _sent.Clear();
+                _gap.Clear();
+            });
+            MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
+        }
         MainThread.Every(TimeSpan.FromMinutes(1), () =>
         {
-            var (held, steered, pulled, concentrated) = (Interlocked.Exchange(ref _held, 0), Interlocked.Exchange(ref _steered, 0), Interlocked.Exchange(ref _pulled, 0), Interlocked.Exchange(ref _concentrated, 0));
-            if (held + steered + pulled + concentrated > 0)
-                Log.Info($"last minute: held {held} AI attack(s) until the army recovers, skipped {steered} local attack target(s) for better ones, lowered {pulled} lost air region(s), rescaled {concentrated} front request(s)");
+            var (held, steered, pulled, concentrated, filled) = (Interlocked.Exchange(ref _held, 0), Interlocked.Exchange(ref _steered, 0), Interlocked.Exchange(ref _pulled, 0), Interlocked.Exchange(ref _concentrated, 0), Interlocked.Exchange(ref _backfilled, 0));
+            if (held + steered + pulled + concentrated + filled > 0)
+                Log.Info($"last minute: held {held} AI attack(s) until the army recovers, skipped {steered} local attack target(s) for better ones, lowered {pulled} lost air region(s), rescaled {concentrated} front request(s), filled {filled} hole(s) in AI lines");
         });
         if (!production) return;
         _balance = (delegate* unmanaged<nint, long*, nint, long*>)Sig.Find(Signatures.GetBalance);
@@ -256,11 +279,12 @@ public unsafe class AiAssist : Plugin
     private void LoadReadiness()
     {
         _resolve = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.ResolveRef);
+        _allied = (delegate* unmanaged<nint, int*, byte, byte, byte>)Sig.Find(Signatures.SameOrAllied);
         _findOrder = (delegate* unmanaged<nint, int, nint>)Sig.Find(Signatures.FindOrder);
         _executeVTable = Sig.VTable(Signatures.ExecuteCommand);
         _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAICommand), (cmd, tag) =>
         {
-            if (*(nint*)cmd != _executeVTable || *(byte*)(cmd + ExecuteOn) == 0 || *(int*)tag == Game.ControlledTag || !SheepMod.Active || Ready(cmd))
+            if (*(nint*)cmd != _executeVTable || *(byte*)(cmd + ExecuteOn) == 0 || *(int*)tag == Game.ControlledTag || !SheepMod.Active || Ready(cmd, tag))
                 return _post!.OriginalFunction(cmd, tag);
             ((delegate* unmanaged<nint, int, void>)(*(nint**)cmd)[0])(cmd, 1); // deleted, as the game does with an invalid command
             Interlocked.Increment(ref _held);
@@ -269,7 +293,7 @@ public unsafe class AiAssist : Plugin
     }
 
     /// <summary>Whether the army (and an army group's armies) of an "attack on" command is fit to attack. Read only: AI threads.</summary>
-    private bool Ready(nint cmd)
+    private bool Ready(nint cmd, nint tag)
     {
         var reference = (int*)(cmd + GroupOfCommand);
         if (reference[0] == 0 && reference[1] == 0) return true;
@@ -298,7 +322,8 @@ public unsafe class AiAssist : Plugin
             supply += *(long*)(unit + SupplyOfUnit);
             if (o < WeakOrg) weak++;
         }
-        return count == 0 || org / count >= _minOrg && strength / count >= _minStrength && supply / count >= _minSupply && weak * 100 <= count * MaxWeakPercent;
+        return count == 0 || org / count >= _minOrg && strength / count >= _minStrength && supply / count >= _minSupply && weak * 100 <= count * MaxWeakPercent
+            && Manned(*(int*)tag); // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
     }
 
     // ---- Pocket closing: the micro attack candidate check, patched at its one call site ----
@@ -760,6 +785,7 @@ public unsafe class AiAssist : Plugin
 
     private const int MinWanted = 0x90, DesiredWanted = 0x94, MaxWanted = 0x98, FixedRequest = 0x9C, CountryOfFront = 0xE0, FrontOfAiFront = 0xE8;
     private const int SectionOfAiFront = 0xF0, AreaDefense = 0x104, InvasionTarget = 0x120, AttackingFront = 0x218 + 0x84, OtherRequest = 0x1DC;
+    private const int FactionMemberOfCountry = 0xF88, FactionOfMember = 0x290; // CCountry -> member status -> its CFaction (CIsInFactionWith compares the pointers)
     private const int SectionsOfFront = 0x58, IdOfSection = 8, PairsOfSection = 0x48, CombatsInProvince = 0x17C; // province: combats count
     private const double QuietFactor = 0.25, HotBoost = 1.25;
 
@@ -776,6 +802,7 @@ public unsafe class AiAssist : Plugin
     {
         _resolve = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.ResolveRef);
         _atWar = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.IsAtWarWith);
+        _allied = (delegate* unmanaged<nint, int*, byte, byte, byte>)Sig.Find(Signatures.SameOrAllied);
         _unitRequests = Patches.Hook<GeneralRetFn>(Sig.Find(Signatures.UpdateFrontUnitRequests), general =>
         {
             var result = _unitRequests!.OriginalFunction(general);
@@ -785,6 +812,47 @@ public unsafe class AiAssist : Plugin
             });
             return result;
         });
+        if (!_holdLine) return;
+        // The regrouping drains fronts through here (unassign, then one mass move a turn), which no front request can block:
+        // the last defender of a province, and the wall around a pocket, are kept out of its lists instead. Vanilla would
+        // reassign them and staff the new front with divisions from far away, while the replacements walk the pocket breaks out.
+        _collect = Patches.Hook<CollectFn>(Sig.Find(Signatures.CollectReassignableUnits), (context, list) =>
+        {
+            var result = _collect!.OriginalFunction(context, list);
+            Safely(() =>
+            {
+                if (!SheepMod.Active) return;
+                var data = *(nint*)list;
+                int n = *(int*)(list + 0xC), kept = 0;
+                for (var i = 0; i < n; i++)
+                {
+                    var entry = data + 16 * i; // {CArmy*, front slot*}
+                    if (Pinned(*(nint*)entry)) continue;
+                    if (kept != i) Buffer.MemoryCopy((void*)entry, (void*)(data + 16 * kept), 16, 16);
+                    kept++;
+                }
+                *(int*)(list + 0xC) = kept;
+            });
+            return result;
+        });
+        _balanceFronts = Patches.Hook<BalanceFn>(Sig.Find(Signatures.ApplyArmiesBalancing), (front, units, partitions, specs, log) =>
+        {
+            Safely(() =>
+            {
+                if (!SheepMod.Active) return;
+                var unit = (nint*)*(nint*)units;
+                for (int p = 0, parts = *(int*)(partitions + 0xC); p < parts; p++)
+                {
+                    var part = *(nint*)partitions + 0x18 * p; // CPdxArray<int>: indices into units, for army p
+                    var indices = (int*)*(nint*)part;
+                    int n = *(int*)(part + 0xC), kept = 0;
+                    for (var k = 0; k < n; k++)
+                        if (!Pinned(unit[indices[k]])) indices[kept++] = indices[k];
+                    *(int*)(part + 0xC) = kept; // the game skips empty partitions
+                }
+            });
+            _balanceFronts!.OriginalFunction(front, units, partitions, specs, log);
+        });
     }
 
     /// <summary>Rescales each land front's requests by the enemy actually facing it, before the theatre's divisions are shared out.</summary>
@@ -793,8 +861,6 @@ public unsafe class AiAssist : Plugin
         var other = stackalloc int[2]; // {tag, tag index} of a province's controller
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
-            if (*(byte*)(front + FixedRequest) != 0 || *(int*)(front + AreaDefense) != 0 || *(nint*)(front + InvasionTarget) != 0 || *(byte*)(front + OtherRequest) != 0)
-                continue; // area defense, invasions and fixed shares: as the game asks
             var country = *(nint*)(front + CountryOfFront);
             var tag = country == 0 ? 0 : *(int*)(country + 8);
             if (tag == 0 || tag == Game.ControlledTag) continue;
@@ -807,11 +873,22 @@ public unsafe class AiAssist : Plugin
                 if (*(int*)(s + IdOfSection) == *(int*)(front + SectionOfAiFront)) { section = s; break; }
             if (section == 0) continue;
 
+            // Factions of the countries at war with us: a member's border may go hot any day, so it keeps its garrison.
+            var warFactions = new HashSet<nint>();
+            foreach (var c in Game.Countries)
+            {
+                var t = c == 0 ? 0 : *(int*)(c + 8);
+                if (t <= 0 || t == tag) continue;
+                (other[0], other[1]) = (t, Game.TagIndex(t));
+                if (_atWar(country, other) != 0) warFactions.Add(FactionOf(c));
+            }
             // Both sides of the section: enemy provinces (held by a country at war with us) and their divisions; our provinces
             // facing enemy divisions (each needs a defender), and whether any of ours is fighting.
             var enemyHeld = new Dictionary<nint, bool>();
             var contact = new HashSet<nint>();    // ours facing any enemy-held province
+            var threatened = new HashSet<nint>(); // ours facing enemy divisions: a hole there lets them through
             var fighting = false;
+            var aligned = false;                  // across sits a country of a warring country's faction (not at war with us itself)
             var enemy = 0;
             var pairs = *(nint*)(section + PairsOfSection);
             for (int i = 0, n = *(int*)(section + PairsOfSection + 0xC); i < n; i++)
@@ -825,15 +902,23 @@ public unsafe class AiAssist : Plugin
                     (other[0], other[1]) = (controller, controller > 0 ? Game.TagIndex(controller) : 0);
                     held = enemyHeld[theirs] = controller > 0 && controller != tag && _atWar(country, other) != 0;
                     if (held) enemy += *(int*)(theirs + DivisionsInProvince);
+                    else if (controller > 0 && controller != tag && warFactions.Contains(FactionOf(Game.Country(controller)))) aligned = true;
                 }
-                if (held && ours != 0) contact.Add(ours);
+                if (held && ours != 0)
+                {
+                    contact.Add(ours);
+                    if (*(int*)(theirs + DivisionsInProvince) > 0) threatened.Add(ours);
+                }
             }
             var hostile = enemyHeld.ContainsValue(true);
+            var hour = *(int*)(Game.State + HourOfGameState);
+            if (threatened.Count > 0) _line[front] = (hour, tag, threatened); // the attack gate and the backfill read this
+            if (aligned || *(int*)(front + AreaDefense) != 0 || *(nint*)(front + InvasionTarget) != 0) continue; // a warring country's faction border, garrisons and invasions: as the game asks
+            if (hostile && (*(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0)) continue; // fixed shares on a front that is at war; quiet ones are thinned
             var enemyProvinces = enemyHeld.Count(e => e.Value);
             int min = *(int*)(front + MinWanted), desired = *(int*)(front + DesiredWanted), max = *(int*)(front + MaxWanted);
             // Requests are redone every hour; a factor that followed every enemy move would march divisions back and forth.
             // So a factor holds for a day, and a front gives divisions away only a week after its last battle.
-            var hour = *(int*)(Game.State + HourOfGameState);
             if (fighting) LastBattle[front] = hour;
             var factor = 1.0;
             if (_concentration)
@@ -855,6 +940,171 @@ public unsafe class AiAssist : Plugin
             (*(int*)(front + MinWanted), *(int*)(front + DesiredWanted), *(int*)(front + MaxWanted)) = (min, desired, max);
             Interlocked.Increment(ref _concentrated);
         }
+    }
+
+    // ---- Hold the line: pinned defenders, holes refilled, attacks wait on a thinly manned line ----
+
+    private const int LocationOfUnit = 0x1F0, OwnerOfUnit = 0x1E0, Path = 0x200, Retreating = 0x24C, Busy = 0x2F8;
+    private const int LineFreshHours = 48, MaxBackfills = 2, BackfillRadius = 10, MinBackfillOrg = 60;
+    private const long SentMs = 120_000, GapMs = 600_000; // a helper walks without new orders; a hole isn't refilled at once
+
+    [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
+    [Function(CallingConventions.Microsoft)] public delegate void BalanceFn(nint front, nint units, nint partitions, nint specs, nint log);
+
+    private IHook<CollectFn>? _collect;
+    private IHook<BalanceFn>? _balanceFronts;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, HashSet<nint> Provinces)> _line = new(); // AI front -> its threatened provinces, refreshed hourly
+    private readonly Dictionary<nint, long> _sent = []; // unit -> until: a division sent at a hole is left alone while it walks
+    private readonly Dictionary<int, long> _gap = [];   // province id -> until: a hole a helper is walking to
+    private PerGame _game = null!;
+    private delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
+    private int _backfilled;
+
+    /// <summary>The AI's regrouping can't take this division: it is the last one of its country in a province enemy divisions
+    /// can walk into, or it stands on the wall of a pocket (an enemy province with divisions whose neighbours are all ours).</summary>
+    private static bool Pinned(nint unit)
+    {
+        if (unit == 0) return false;
+        var tag = *(int*)(unit + CommanderOfUnit);
+        if (tag <= 0 || tag == Game.ControlledTag) return false;
+        var country = Game.Country(tag);
+        var location = *(nint*)(unit + LocationOfUnit);
+        if (country == 0 || location == 0) return false;
+        var alone = true;
+        foreach (var other in Native.PdxArray(location + UnitsInProvince))
+            if (other != unit && *(int*)(other + CommanderOfUnit) == tag) alone = false;
+        foreach (var id in Game.Neighbours(location))
+        {
+            var p = Game.Province(id);
+            if (p == 0 || *(int*)(p + DivisionsInProvince) == 0 || !Enemy(country, tag, p)) continue;
+            if (alone || Game.Neighbours(p).All(n => Game.Province(n) is var q && (q == 0 || *(int*)(q + ControllerOfProvince) == 0 || !Enemy(country, tag, q))))
+                return true; // nothing else holds the province, or a cut-off pocket sits against it
+        }
+        return false;
+    }
+
+    /// <summary>The country's tracked threatened line (fresh for two days), or null.</summary>
+    private HashSet<nint>? LineOf(int tag, int hour)
+    {
+        HashSet<nint>? line = null;
+        foreach (var e in _line)
+            if (e.Value.Tag == tag && hour - e.Value.Hour is >= 0 and < LineFreshHours)
+                (line ??= []).UnionWith(e.Value.Provinces);
+        return line;
+    }
+
+    /// <summary>
+    /// The country may start attacks: its divisions standing on the threatened line outnumber the line's provinces by a
+    /// margin, or no line is tracked. Attacking on a barely manned line widens it, the holes open, and the spearhead gets
+    /// cut off. Attacks already running are never touched.
+    /// </summary>
+    private bool Manned(int tag)
+    {
+        var line = LineOf(tag, *(int*)(Game.State + HourOfGameState));
+        if (line == null || line.Count == 0) return true;
+        var country = Game.Country(tag);
+        var divisions = 0;
+        foreach (var province in line)
+            divisions += Standing(country, tag, province);
+        return line.Count * 6 <= divisions * 5; // ~1.2 divisions per threatened province
+    }
+
+    /// <summary>Divisions of the tag or its allies standing in the province.</summary>
+    private static int Standing(nint country, int tag, nint province)
+    {
+        var divisions = 0;
+        var other = stackalloc int[2]; // {tag, tag index} of a division's commander
+        foreach (var unit in Native.PdxArray(province + UnitsInProvince))
+        {
+            var commander = *(int*)(unit + CommanderOfUnit);
+            if (commander == tag) { divisions++; continue; }
+            (other[0], other[1]) = (commander, Game.TagIndex(commander));
+            if (commander > 0 && _allied(country, other, 0, 0) != 0) divisions++;
+        }
+        return divisions;
+    }
+
+    /// <summary>Free divisions walk back into empty provinces of the threatened line, a couple per country at a time.</summary>
+    private void Backfill()
+    {
+        _game.Check();
+        if (!SheepMod.Active) return;
+        var now = Environment.TickCount64;
+        foreach (var (unit, until) in _sent.ToArray()) if (now >= until) _sent.Remove(unit);
+        foreach (var (province, until) in _gap.ToArray()) if (now >= until) _gap.Remove(province);
+        var hour = *(int*)(Game.State + HourOfGameState);
+        var player = Game.ControlledTag;
+        foreach (var country in Game.Countries)
+        {
+            var tag = country == 0 ? 0 : *(int*)(country + 8);
+            if (tag <= 0 || tag == player) continue;
+            var line = LineOf(tag, hour);
+            if (line == null) continue;
+            var sent = 0;
+            foreach (var province in line)
+            {
+                if (sent == MaxBackfills) break;
+                var id = *(int*)(province + 0xA4);
+                if (_gap.ContainsKey(id) || Standing(country, tag, province) > 0) continue;
+                var helper = Helper(tag, province, line);
+                if (helper == 0) continue; // nothing free nearby: the attack gate keeps the front still instead
+                Move(helper, id);
+                _sent[helper] = now + SentMs;
+                _gap[id] = now + GapMs;
+                sent++;
+                Interlocked.Increment(ref _backfilled);
+            }
+        }
+    }
+
+    /// <summary>The nearest free, rested division of the tag within BackfillRadius provinces of ours, not standing on the line itself, or 0.</summary>
+    private nint Helper(int tag, nint target, HashSet<nint> line)
+    {
+        var seen = new HashSet<int> { *(int*)(target + 0xA4) };
+        var frontier = new List<nint> { target };
+        for (var depth = 1; depth <= BackfillRadius && frontier.Count > 0; depth++)
+        {
+            var next = new List<nint>();
+            foreach (var province in frontier)
+            foreach (var id in Game.Neighbours(province))
+            {
+                if (!seen.Add(id)) continue;
+                var p = Game.Province(id);
+                if (p == 0 || *(int*)(p + ControllerOfProvince) != tag) continue;
+                if (!line.Contains(p))
+                    foreach (var unit in Native.PdxArray(p + UnitsInProvince))
+                        if (Spare(unit, tag)) return unit;
+                next.Add(p);
+            }
+            frontier = next;
+        }
+        return 0;
+    }
+
+    /// <summary>A land division of the tag that can move now: rested, idle, and not one we sent already.</summary>
+    private bool Spare(nint unit, int tag)
+    {
+        if (*(int*)(unit + KindOfUnit) != 0 || *(int*)(unit + CommanderOfUnit) != tag || *(int*)(unit + OwnerOfUnit) != tag) return false;
+        if (*(int*)(unit + CombatsOfUnit) != 0 || *(byte*)(unit + Retreating) != 0 || *(nint*)(unit + Busy) != 0) return false;
+        if (*(int*)(unit + Path + 0xC) != 0 || _sent.ContainsKey(unit)) return false;
+        long org;
+        ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[OrgRatioSlot])(unit, &org);
+        return org >= (long)MinBackfillOrg * Native.FixedPoint / 100;
+    }
+
+    /// <summary>A plain move of a free division into an empty line province, posted the way the AI posts its own moves.</summary>
+    private void Move(nint unit, int province)
+    {
+        var cmd = Allocator.AllocZeroed(0x88);
+        _move(cmd, unit, province, 1, 2, 0, 0, 0, 0, 0);
+        Commands.TryPost(cmd, true);
+    }
+
+    /// <summary>The country's faction, or 0 when it is in none (CIsInFactionWith compares these pointers).</summary>
+    private static nint FactionOf(nint country)
+    {
+        var member = country == 0 ? 0 : *(nint*)(country + FactionMemberOfCountry);
+        return member == 0 ? 0 : *(nint*)(member + FactionOfMember);
     }
 
     private void Safely(Action action)
