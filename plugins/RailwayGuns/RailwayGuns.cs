@@ -84,26 +84,27 @@ public unsafe class RailwayGunFieldMarshal : Plugin
         {
             // ponytail: round-robin in selection order, not weighted by army size or front.
             var share = all.Where((_, i) => i % targets.Length == t).ToArray();
+            var target = targets[t];
             foreach (var gun in share)
             {
-                var from = *(nint*)(gun + AssignedTo);
-                if (from != 0 && from - GunsOfGroup != targets[t]) WithArray([gun], view1 => _postUnassign(view, view1, from - GunsOfGroup));
+                var from = *(nint*)(gun + AssignedTo) - GunsOfGroup;
+                if (from != -GunsOfGroup && from != target) WithArray([gun], array => _postUnassign(view, array, from));
             }
-            WithArray(share, view1 => posted |= _postAssign!.OriginalFunction(view, view1, targets[t]));
+            posted |= WithArray(share, array => _postAssign!.OriginalFunction(view, array, target));
         }
         if (og.IsArmyGroup) Log.Info($"{all.Length} railway guns assigned across {Math.Min(targets.Length, all.Length)} of the marshal's armies");
         return posted;
     }
 
-    /// <summary>Runs <paramref name="action"/> with a CPdxArray view of <paramref name="items"/> (the commands read only data +0 and size +0xC).</summary>
-    private static void WithArray(nint[] items, Action<nint> action)
+    /// <summary>Calls <paramref name="post"/> with a CPdxArray view of <paramref name="items"/> (the commands read only data +0 and size +0xC).</summary>
+    private static byte WithArray(nint[] items, Func<nint, byte> post)
     {
-        var view = stackalloc nint[2];
+        var array = stackalloc nint[2];
         fixed (nint* data = items)
         {
-            view[0] = (nint)data;
-            ((int*)view)[2] = ((int*)view)[3] = items.Length;
-            action((nint)view);
+            array[0] = (nint)data;
+            ((int*)array)[2] = ((int*)array)[3] = items.Length;
+            return post((nint)array);
         }
     }
 }

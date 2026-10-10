@@ -1,4 +1,3 @@
-using System.Text;
 using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
