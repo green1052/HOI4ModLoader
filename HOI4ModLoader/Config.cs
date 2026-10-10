@@ -43,6 +43,35 @@ public sealed class ConfigFile
         return defaultValue;
     }
 
+    /// <summary>Every entry in file order: section, key, raw value and its description (the comment lines above it).</summary>
+    public List<(string Section, string Key, string Value, string Description)> Entries()
+    {
+        var entries = new List<(string, string, string, string)>();
+        var section = "";
+        var comment = new List<string>();
+        foreach (var raw in _lines)
+        {
+            var line = raw.Trim();
+            if (line.StartsWith('#')) comment.Add(line.TrimStart('#').Trim());
+            else if (line.StartsWith('[') && line.EndsWith(']')) (section, comment) = (line[1..^1], new List<string>());
+            else if (line.Split('=', 2) is [var key, var value])
+            {
+                entries.Add((section, key.Trim(), value.Trim(), string.Join(" ", comment)));
+                comment.Clear();
+            }
+            else comment.Clear();
+        }
+        return entries;
+    }
+
+    /// <summary>Stores <paramref name="value"/> (adding the entry with its description if it's missing) and saves the file.</summary>
+    public void Set<T>(string section, string key, T value, string description) where T : IConvertible
+    {
+        Bind(section, key, value, description);
+        _lines[Find(section, key).Key] = $"{key} = {Convert.ToString(value, CultureInfo.InvariantCulture)}";
+        File.WriteAllLines(_path, _lines);
+    }
+
     private (int Section, int Key) Find(string section, string key)
     {
         int sectionAt = -1;

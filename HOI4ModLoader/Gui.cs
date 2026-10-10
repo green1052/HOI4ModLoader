@@ -16,7 +16,7 @@ public static unsafe class Gui
     [Signature] public const string HasTextBoxSig = "48 83 EC 28 48 8B C2 4C 8D 81 E0 11 00 00 48 8D 91 F8 11 00 00 48 8B C8 E8 ? ? ? ? 48 85 C0 0F 95 C0 48 83 C4 28 C3";
 
     private const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
-    private const int ShowSlot = 15, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), flags byte
+    private const int ShowSlot = 15, HideSlot = 16, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), Hide(), flags byte
     private const int TextOffset = 0x110; // CInstantTextBox: std::string text
 
     private static delegate* unmanaged<nint, nint, void> _setText;
@@ -27,12 +27,22 @@ public static unsafe class Gui
     {
         if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, byte>)Sig.Find(HasTextBoxSig);
         var str = NewString(Encoding.ASCII.GetBytes(name));
-        try
-        {
-            return _hasTextBox(window, str) == 0 ? 0 : ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[FindTextBoxSlot])(window, str, 0);
-        }
+        try { return _hasTextBox(window, str) == 0 ? 0 : Find(window, FindTextBoxSlot, str); }
         finally { FreeString(str); }
     }
+
+    /// <summary>
+    /// A child of <paramref name="window"/> by name through one of CContainerWindow's lookups (vtable slot: 13 button,
+    /// 15 instantTextBox, 21 checkbox, 55 window). Like the game's own calls, only for children the .gui defines.
+    /// </summary>
+    public static nint Find(nint window, int slot, string name)
+    {
+        var str = NewString(Encoding.ASCII.GetBytes(name));
+        try { return Find(window, slot, str); }
+        finally { FreeString(str); }
+    }
+
+    private static nint Find(nint window, int slot, nint name) => ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[slot])(window, name, 0);
 
     /// <summary>The text box's current text (the game's bytes; valid until its text changes).</summary>
     public static ReadOnlySpan<byte> Text(nint textBox) => Native.MsvcString(textBox + TextOffset);
@@ -54,6 +64,13 @@ public static unsafe class Gui
     {
         *(byte*)(widget + Flags) &= unchecked((byte)~HiddenFlag);
         ((delegate* unmanaged<nint, void>)(*(nint**)widget)[ShowSlot])(widget);
+    }
+
+    /// <summary>Hides a widget (what the game does: set the hidden flag, then Hide()).</summary>
+    public static void Hide(nint widget)
+    {
+        *(byte*)(widget + Flags) |= HiddenFlag;
+        ((delegate* unmanaged<nint, void>)(*(nint**)widget)[HideSlot])(widget);
     }
 
     public static bool ShiftHeld => (GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT

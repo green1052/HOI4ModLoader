@@ -36,6 +36,14 @@
               Command="set MSBuildSDKsPath=&amp; set MSBuildExtensionsPath=&amp; set MSBUILD_EXE_PATH=&amp; set MSBuildLoadMicrosoftTargetsReadOnly=&amp; &quot;$(_VcMSBuild)&quot; &quot;..\bootstrap\bootstrap.vcxproj&quot; -nologo -v:m -p:Configuration=Release -p:Platform=x64" />
     </Target>
 
+    <!-- The "HOI4ModLoader UI" mod: the settings window's Mods page (SettingsMods.cs), appended to the ingame settings window. -->
+    <ItemGroup>
+        <!-- The ingame settings window's 4 tabs become 5 (narrower) and the Mods page goes in after its Back button. -->
+        <GuiPatch Include="interface\settings.gui" Snippet="gui\settings_mods.gui"
+                  Match="(?s)(name = &quot;menu_settings_ingame&quot;.*?)buttonType = \{\s*name = &quot;settings_tab_1&quot;.*?name = &quot;settings_tab_4&quot;.*?\n\t\t\t\}(.*?shortcut = &quot;ESCAPE&quot;\s*\})" />
+    </ItemGroup>
+    <Import Project="..\HOI4Mod.targets" />
+
     <!-- mimalloc: Microsoft's official release build (pinned and hash-checked), shipped next to the loader (see Allocator.cs). -->
     <PropertyGroup>
         <MimallocRelease>v3.5.3</MimallocRelease>

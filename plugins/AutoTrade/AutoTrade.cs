@@ -33,7 +33,7 @@ public static class Signatures
 /// a shortage of that resource is imported with the trade view's own command (so multiplayer stays in sync), from our
 /// subjects first, then our faction, then the country that can sell the most.
 /// </summary>
-[Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.3")]
+[Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.3", Description = "Shift+click a resource in the trade view: its shortage is imported from your subjects, your faction, then the biggest seller.")]
 public unsafe class AutoTrade : Plugin
 {
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.

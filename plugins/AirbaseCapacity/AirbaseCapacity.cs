@@ -25,7 +25,7 @@ public static class Signatures
 /// planes there and on their way. Wings that don't fit stay where they are. Only the UI's selection list is trimmed, so the
 /// game sends its own transfer commands (multiplayer works).
 /// </summary>
-[Plugin("com.green1052.airbasecapacity", "Airbase Capacity", "1.0.0", GameVersion = "1.19.3")]
+[Plugin("com.green1052.airbasecapacity", "Airbase Capacity", "1.0.0", GameVersion = "1.19.3", Description = "Shift+right-click an airbase with air wings selected to send only the wings that fit its free capacity.")]
 public unsafe class AirbaseCapacity : Plugin
 {
     // Layouts for HOI4 1.19.3.

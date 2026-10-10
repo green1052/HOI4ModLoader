@@ -15,6 +15,10 @@ public static class Loader
 
     // Plugins loaded now, in load order (hooks keep reverted ones' detours alive: a game thread may still be in one).
     private static readonly List<Plugin> Loaded = new();
+
+    /// <summary>Every plugin found in the plugins folder at the last load, loaded or not, by id.</summary>
+    internal static IReadOnlyList<PluginAttribute> Known { get; private set; } = [];
+    private static volatile bool _reloadRequested;
     private static string _loadedFiles = "", _changedFiles = "";
     private static int _generation;
     private static bool _multiplayer;
@@ -57,7 +61,20 @@ public static class Loader
             Patches.Owner = "HOI4ModLoader";
             if (followMultiplayer) MainThread.Every(TimeSpan.FromMilliseconds(250), FollowMultiplayer);
             if (hotReload) MainThread.Every(TimeSpan.FromSeconds(1), ReloadIfChanged);
-            try { VersionLabel.Install(() => $"\nHOI4ModLoader {typeof(Loader).Assembly.GetName().Version!.ToString(3)} ({Loaded.Count} plugins)"); }
+            MainThread.Every(TimeSpan.FromMilliseconds(100), () =>
+            {
+                if (!_reloadRequested) return;
+                _reloadRequested = false;
+                Reload();
+            });
+            try { SettingsMods.Install(); }
+            catch (Exception e) { Log.Error($"settings Mods page: {e.Message}"); }
+            try
+            {
+                var version = typeof(Loader).Assembly.GetName().Version!.ToString(3);
+                VersionLabel.Install(() => $" | {Loaded.Count} plugins",
+                    () => $"HOI4ModLoader {version}\n" + (Loaded.Count == 0 ? "No plugins loaded" : string.Join("\n", Loaded.Select(p => $"- {p.Info.Name} {p.Info.Version}"))));
+            }
             catch (Exception e) { Log.Error($"version label: {e.Message}"); }
         }
         catch (Exception e)
@@ -102,6 +119,21 @@ public static class Loader
         Reload();
     }
 
+    /// <summary>Reloads every plugin on the next main thread tick (e.g. after a plugin was switched on or off).</summary>
+    internal static void RequestReload() => _reloadRequested = true;
+
+    /// <summary>A plugin's config file.</summary>
+    internal static ConfigFile Config(string id) => new(Path.Combine(ModsDir, "config", id + ".cfg"));
+
+    /// <summary>Whether the plugin is loaded now.</summary>
+    internal static bool IsLoaded(string id) => Loaded.Any(p => p.Info.Id == id);
+
+    /// <summary>Whether the game is a multiplayer one (as the plugins were last loaded for).</summary>
+    internal static bool Multiplayer => _multiplayer;
+
+    /// <summary>Whether the plugin's config lets it load ([General] Enabled).</summary>
+    internal static bool IsEnabled(string id) => Config(id).Bind("General", "Enabled", true, "Load this plugin.");
+
     private static void Reload()
     {
         for (var i = Loaded.Count - 1; i >= 0; i--) Patches.Revert(Loaded[i].Info.Id);
@@ -144,6 +176,7 @@ public static class Loader
             }
         }
 
+        Known = found.Values.Select(f => f.Info).OrderBy(i => i.Id).ToList();
         var state = new Dictionary<string, bool?>(); // null while loading: a dependency cycle reads as failed
         foreach (var id in found.Keys.Order()) Load(id);
 
@@ -168,7 +201,7 @@ public static class Loader
             Patches.Owner = info.Id;
             try // anything a plugin brings (constructor, config file, Load) only skips that plugin
             {
-                var config = new ConfigFile(Path.Combine(ModsDir, "config", info.Id + ".cfg"));
+                var config = Config(info.Id);
                 if (!config.Bind("General", "Enabled", true, "Load this plugin."))
                 {
                     log.Info("disabled in config");
