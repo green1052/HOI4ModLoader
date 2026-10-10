@@ -69,8 +69,18 @@ public static unsafe class Game
     public static nint Country(int tag)
     {
         var gs = State;
-        return gs == 0 || tag <= 0 ? 0 : *(nint*)(*(nint*)(gs + _countries) + 8L * _tagIndex((nint)(&tag)));
+        return gs == 0 || tag <= 0 ? 0 : *(nint*)(*(nint*)(gs + _countries) + 8L * TagIndex(tag));
     }
+
+    /// <summary>Index of <paramref name="tag"/> into the game's per-country arrays (what the game pairs with a tag as a TagIdx).</summary>
+    public static int TagIndex(int tag)
+    {
+        Resolve();
+        return _tagIndex((nint)(&tag));
+    }
+
+    /// <summary>Every CCountry, empty before a game is loaded.</summary>
+    public static ReadOnlySpan<nint> Countries => State == 0 ? default : Native.PdxArray(State + _countries);
 }
 
 /// <summary>Readers for engine containers.</summary>
