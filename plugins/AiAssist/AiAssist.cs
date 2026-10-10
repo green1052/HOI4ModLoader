@@ -131,16 +131,16 @@ public unsafe class AiAssist : Plugin
         _surplusPercent = Math.Max(0, Config.Bind("AI", "SurplusPercent", 50, "Equipment more than this much (%) above what its army needs counts as surplus."));
         var readiness = Config.Bind("AI", "OffensiveReadiness", true,
             "The AI holds an attack while the army's divisions are worn out (average organisation or strength below the settings below); it starts once they recover.");
-        _minOrg = Math.Clamp(Config.Bind("AI", "MinOrganisation", 70, "Average organisation (%) an army needs to start an attack."), 0, 100) * Native.FixedPoint / 100;
-        _minStrength = Math.Clamp(Config.Bind("AI", "MinStrength", 75, "Average strength (%: equipment and manpower) an army needs to start an attack."), 0, 100) * Native.FixedPoint / 100;
-        _minSupply = Math.Clamp(Config.Bind("AI", "MinSupply", 50, "Average supply (%) an army needs to start an attack."), 0, 100) * Native.FixedPoint / 100;
+        _minOrg = Math.Clamp(Config.Bind("AI", "MinOrganisation", 50, "Average organisation (%) an army needs to start an attack."), 0, 100) * Native.FixedPoint / 100;
+        _minStrength = Math.Clamp(Config.Bind("AI", "MinStrength", 60, "Average strength (%: equipment and manpower) an army needs to start an attack."), 0, 100) * Native.FixedPoint / 100;
+        _minSupply = Math.Clamp(Config.Bind("AI", "MinSupply", 0, "Average supply (%) an army needs to start an attack (0: not checked; colonial fronts are always short)."), 0, 100) * Native.FixedPoint / 100;
         _pocketClosing = Config.Bind("AI", "PocketClosing", true,
             "The AI's local attacks go for provinces that cut off enemy divisions first, when there are any.");
         _frontShortening = Config.Bind("AI", "FrontShortening", true,
             "Otherwise the AI's local attacks prefer provinces whose capture shortens the front over ones that lengthen it.");
         _armorTerrain = Config.Bind("AI", "ArmorTerrain", true,
             "Armored and motorized divisions don't make local attacks into terrain that cripples them (forest, hills, marsh...) or across a river into mountains, marsh, jungle or cities.");
-        _roles = Config.Bind("AI", "Roles", true,
+        _roles = Config.Bind("AI", "Roles", false,
             "Line infantry holds the line: provinces with only infantry make local attacks only into empty provinces or pockets; armored and breakthrough divisions do the pushing (not for armies with no such divisions).");
         var concentration = Config.Bind("AI", "Concentration", true,
             "The AI keeps only a thin screen on fronts with no enemy at war (neutral or friendly borders) and sends the rest to fronts facing more enemy divisions than they hold; fronts at war are never thinned.");

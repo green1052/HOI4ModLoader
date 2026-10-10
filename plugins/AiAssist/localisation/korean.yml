@@ -14,7 +14,7 @@
  com.green1052.aiassist.PocketClosing:0 "포위 우선 공격"
  com.green1052.aiassist.PocketClosing.desc:0 "AI의 국지 공격이 적 사단을 고립시킬 수 있는 프로빈스가 있으면 그곳부터 노립니다. 바닐라는 조건을 통과한 목표 중 무작위로 고릅니다."
  com.green1052.aiassist.MinSupply:0 "공격 기준: 평균 보급(%)"
- com.green1052.aiassist.MinSupply.desc:0 "야전군 사단의 평균 보급률이 이 이상이어야 공격을 시작합니다. 보급이 끊긴 군은 공격을 미룹니다."
+ com.green1052.aiassist.MinSupply.desc:0 "야전군 사단의 평균 보급률이 이 이상이어야 공격을 시작합니다. 0이면 보급은 보지 않습니다(식민지 전선은 늘 보급이 모자람)."
  com.green1052.aiassist.FrontShortening:0 "전선 단축 공격"
  com.green1052.aiassist.FrontShortening.desc:0 "포위할 목표가 없으면, AI의 국지 공격이 전선을 늘리는 목표 대신 전선을 줄이는 목표를 고릅니다."
  com.green1052.aiassist.ArmorTerrain:0 "기갑 지형 판단"
