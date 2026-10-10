@@ -110,6 +110,12 @@ public static class Signatures
 
     /// <summary>CSetNavyEngagementCommand ctor (cmd, CTaskForce*, int level 0-4): every AI aggression change posts it; the player's button uses it too.</summary>
     [Signature] public const string NavyEngagement = "48 89 5C 24 20 48 89 4C 24 08 55 56 57 48 83 EC 30 41 8B F0 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10";
+
+    /// <summary>
+    /// CAirMission::CollectTacticalTargets(mission, CPdxArray&lt;STacticalTarget&gt;* targets, ...): the battles a close air
+    /// support mission sees, in region province-list order — the order the plane budget is spent in. Main thread.
+    /// </summary>
+    [Signature] public const string CollectTacticalTargets = "4C 8B DC 49 89 4B 08 56 57 41 55 48 81 EC C0 00 00 00 83 79 44 00 41 8B F9 49 63 F0 4C 8B EA 0F 84 ? ? ? ? 48 8B 41 30 48 83 B8 98 00 00 00 00";
 }
 
 /// <summary>
@@ -172,8 +178,16 @@ public unsafe class AiAssist : Plugin
             "The AI's local attacks go for valuable provinces first: victory points, capitals, supply hubs, airfields, resources, empty or worn-out defences (after pockets, before front shortening).");
         var leaders = Config.Bind("AI", "Leaders", true,
             "The AI gives its best field marshals and generals to its biggest, fighting, attacking fronts first, and counts the traits it ignores: infantry traits for infantry armies, offensive or defensive doctrine for attacking or holding fronts, bad status.");
-        var airRetreat = Config.Bind("AI", "AirRetreat", true,
+        _airRetreat = Config.Bind("AI", "AirRetreat", true,
             "The AI pulls its planes out of regions where it is losing the air war badly (low air superiority, heavy losses, few kills) and uses them where it can win.");
+        _airbaseEvac = Config.Bind("AI", "AirbaseEvacuation", true,
+            "The AI's planes leave airbases the enemy is about to overrun instead of sitting there until the base falls.");
+        _casConcentration = Config.Bind("AI", "CasConcentration", true,
+            "The AI's close air support backs its breakthrough axis first: battles on the axis get the planes before ones elsewhere in the region.");
+        _entrenchment = Config.Bind("AI", "Entrenchment", true,
+            "The AI's local attacks count the defenders' dig-in: a province held by entrenched divisions is a worse target than its garrison numbers alone say.");
+        _stationing = Config.Bind("AI", "Stationing", true,
+            "A division the theatre shuffle just walked to a new front stays there for a week; vanilla re-shuffles freshly arrived divisions back and forth.");
         _defensePriority = Config.Bind("AI", "DefensePriority", true,
             "Holes are refilled where holding counts: ports, victory points, river banks, cities and mountains first.");
         _axis = Config.Bind("AI", "BreakthroughAxis", true,
@@ -190,9 +204,10 @@ public unsafe class AiAssist : Plugin
         if (readiness) LoadReadiness();
         if (_targetValue || _defensePriority) LoadTargetValue();
         if (_pocketClosing || _frontShortening || _armorTerrain || _roles || _targetValue || _axis) LoadPockets();
-        if (airRetreat) LoadAirRetreat();
+        if (_airRetreat || _airbaseEvac) LoadAirRetreat();
+        if (_casConcentration) LoadCas();
         if (leaders) LoadLeaders();
-        if (_concentration || _holdLine || _reserve || _axis) LoadConcentration();
+        if (_concentration || _holdLine || _reserve || _axis || _stationing) LoadConcentration();
         if (_navalSortie || _navalEscort) LoadNavy();
         if (_holdLine || _reserve || _beachDefense)
         {
@@ -211,9 +226,9 @@ public unsafe class AiAssist : Plugin
         }
         MainThread.Every(TimeSpan.FromMinutes(1), () =>
         {
-            var (held, steered, pulled, concentrated, filled, reserved, defended, sortied, escorted) = (Interlocked.Exchange(ref _held, 0), Interlocked.Exchange(ref _steered, 0), Interlocked.Exchange(ref _pulled, 0), Interlocked.Exchange(ref _concentrated, 0), Interlocked.Exchange(ref _backfilled, 0), Interlocked.Exchange(ref _reserved, 0), Interlocked.Exchange(ref _defended, 0), Interlocked.Exchange(ref _sortied, 0), Interlocked.Exchange(ref _escorted, 0));
-            if (held + steered + pulled + concentrated + filled + reserved + defended + sortied + escorted > 0)
-                Log.Info($"last minute: held {held} AI attack(s) until the army recovers, skipped {steered} local attack target(s) for better ones, lowered {pulled} lost air region(s), rescaled {concentrated} front request(s), filled {filled} hole(s) in AI lines, posted {reserved} reserve(s), answered {defended} landing(s), chose {sortied} engagement level(s), escorted {escorted} convoy run(s)");
+            var (held, steered, pulled, concentrated, filled, reserved, defended, sortied, escorted, stationed, evacuated, cas) = (Interlocked.Exchange(ref _held, 0), Interlocked.Exchange(ref _steered, 0), Interlocked.Exchange(ref _pulled, 0), Interlocked.Exchange(ref _concentrated, 0), Interlocked.Exchange(ref _backfilled, 0), Interlocked.Exchange(ref _reserved, 0), Interlocked.Exchange(ref _defended, 0), Interlocked.Exchange(ref _sortied, 0), Interlocked.Exchange(ref _escorted, 0), Interlocked.Exchange(ref _stationed, 0), Interlocked.Exchange(ref _evacuated, 0), Interlocked.Exchange(ref _cas, 0));
+            if (held + steered + pulled + concentrated + filled + reserved + defended + sortied + escorted + stationed + evacuated + cas > 0)
+                Log.Info($"last minute: held {held} AI attack(s) until the army recovers, skipped {steered} local attack target(s) for better ones, lowered {pulled} lost air region(s), rescaled {concentrated} front request(s), filled {filled} hole(s) in AI lines, posted {reserved} reserve(s), answered {defended} landing(s), chose {sortied} engagement level(s), escorted {escorted} convoy run(s), left {stationed} fresh arrival(s) in place, emptied {evacuated} threatened airbase(s), focused {cas} CAS pass(es) on the axis");
         });
         if (!production) return;
         _balance = (delegate* unmanaged<nint, long*, nint, long*>)Sig.Find(Signatures.GetBalance);
@@ -549,10 +564,11 @@ public unsafe class AiAssist : Plugin
     private const int ProvincesOfState = 0x18, IdOfState = 0x58, BestVictoryPoints = 0x85C, BuildingsOfState = 0x120, ResourcesOfState = 0x30;
     private const int ResourceEntries = 0xF8, SupplyNodeType = 0x3A0, AirBaseTypes = 0x298, CapitalOfCountry = 0x1018;
     private const int NavalBaseType = 0x400;
+    private const int EntrenchOfUnit = 0x458, MaxEntrenchOfUnit = 0x460; // CArmy: dig-in now and at most (1e5)
     private const int MinTargetValue = 30;
     private const long CapitalsCacheMs = 60_000;
 
-    private static bool _targetValue;
+    private static bool _targetValue, _entrenchment;
     private static nint _buildingDb; // address of the building database global
     private static delegate* unmanaged<nint, nint, nint> _findBuilding;
     private static (long Until, HashSet<int> States) _capitals = (0, []);
@@ -597,6 +613,7 @@ public unsafe class AiAssist : Plugin
         var defenders = Native.PdxArray(target + UnitsInProvince);
         if (defenders.Length == 0) return value + 25;
         long org = 0, strength = 0;
+        var dugIn = 0;
         foreach (var unit in defenders)
         {
             long o, s;
@@ -604,9 +621,10 @@ public unsafe class AiAssist : Plugin
             ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[StrengthRatioSlot])(unit, &s);
             org += o;
             strength += s;
+            if (_entrenchment && *(long*)(unit + MaxEntrenchOfUnit) > 0 && *(long*)(unit + EntrenchOfUnit) * 100 >= 60 * *(long*)(unit + MaxEntrenchOfUnit)) dugIn++;
         }
         if (org / defenders.Length < 30_000 || strength / defenders.Length < 50_000) return value + 10;
-        return value - 5 * defenders.Length * (1 + _fortLevel(target) / 2.0);
+        return value - 5 * defenders.Length * (1 + _fortLevel(target) / 2.0) - 4 * dugIn;
     }
 
     /// <summary>Every country's capital state id (cached a minute).</summary>
@@ -637,6 +655,7 @@ public unsafe class AiAssist : Plugin
     private const int SuperiorityRecords = 0xE0, SuperiorityRecordSize = 0xA0, OurSuperiority = 0x00, EnemySuperiority = 0x08;
     private const int CombatData = 0x170, OwnWings = 0x08, OtherWings = 0x20, WingDataSize = 0x98, HourOfWingData = 0x0C, DamageTaken = 0x38;
     private const int SuperiorityIdOfRegion = 0x60, CombatIdOfRegion = 0x58, HourOfGameState = 0x468;
+    private const int ProvinceOfBase = 0x70, BaseEntrySize = 24, FreeOfBase = 8; // CAirBase's cached province; the module's base list entries
     private const int WindowHours = 168, MinLosses = 20;
     private const long MinShare = 35_000, PullOutShare = 15_000; // our share of the region's air superiority
     private const int LossesPerKillPercent = 150;
@@ -647,6 +666,9 @@ public unsafe class AiAssist : Plugin
     private IHook<PrioritiesFn>? _priorities;
     private int _holderOffset, _countOffset, _arrayOffset;
     private int _pulled;
+    private static int _evacuated;
+    private static bool _airRetreat, _airbaseEvac;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Hour, bool Threat)> BaseThreat = new(); // base province -> enemy close, for an hour
 
     private void LoadAirRetreat()
     {
@@ -658,9 +680,61 @@ public unsafe class AiAssist : Plugin
             _priorities!.OriginalFunction(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
             Safely(() =>
             {
-                if (SheepMod.Active) AirRetreat(country, entries);
+                if (!SheepMod.Active) return;
+                AirRetreat(country, entries);
+                if (_airbaseEvac) EvacuateAirbases(country, bases);
             });
         });
+    }
+
+    /// <summary>
+    /// Airbases about to be overrun stop taking wings: their free capacity goes far negative in the module's base list,
+    /// so vanilla's own picker skips them and rebases the wings sitting there. Read only: AI worker threads.
+    /// </summary>
+    private static void EvacuateAirbases(nint country, nint bases)
+    {
+        var tag = *(int*)(country + 8);
+        if (tag == 0 || tag == Game.ControlledTag) return;
+        var hour = *(int*)(Game.State + HourOfGameState);
+        var data = *(nint*)bases;
+        for (int i = 0, n = *(int*)(bases + 0xC); i < n; i++)
+        {
+            var entry = data + BaseEntrySize * i; // {CAirBase*, free capacity, slot}
+            if (*(int*)(entry + FreeOfBase) <= 0) continue; // full or already emptied
+            var province = *(nint*)(*(nint*)entry + ProvinceOfBase);
+            if (province == 0) continue;
+            var id = *(int*)(province + 0xA4);
+            if (!BaseThreat.TryGetValue(id, out var cached) || hour - cached.Hour is < 0 or >= 60) // a game hour, one pass of most AIs
+                BaseThreat[id] = cached = (hour, Threatened(country, tag, province));
+            if (!cached.Threat) continue;
+            *(int*)(entry + FreeOfBase) = -1_000_000;
+            Interlocked.Increment(ref _evacuated);
+        }
+    }
+
+    /// <summary>Enemy divisions within two provinces: the base's ground is about to fall.</summary>
+    private static bool Threatened(nint me, int tag, nint province)
+    {
+        var seen = new HashSet<int> { *(int*)(province + 0xA4) };
+        var ring = new List<nint> { province };
+        for (var depth = 0; depth < 2; depth++)
+        {
+            var next = new List<nint>();
+            foreach (var p in ring)
+            {
+                var info = *(nint*)(p + StaticOfProvince);
+                var records = *(nint*)(info + AdjacenciesOfStatic);
+                for (int i = 0, n = *(int*)(info + AdjacenciesOfStatic + 0xC); i < n; i++)
+                {
+                    var q = Game.Province(*(int*)(records + i * 0x30 + 8));
+                    if (q == 0 || *(int*)(q + ControllerOfProvince) == 0 || !seen.Add(*(int*)(q + 0xA4))) continue; // sea, or walked already
+                    if (*(int*)(q + DivisionsInProvince) > 0 && Enemy(me, tag, q)) return true;
+                    next.Add(q);
+                }
+            }
+            ring = next;
+        }
+        return false;
     }
 
     /// <summary>Scales down the score of regions where we hold under 35 % of air superiority, lost 20+ planes in a week and 1.5+ per kill; under 15 %: 0.</summary>
@@ -728,6 +802,64 @@ public unsafe class AiAssist : Plugin
         if (controller == tag) return true;
         var other = stackalloc int[] { controller, Game.TagIndex(controller) };
         return _allied(me, other, 0, 0) != 0;
+    }
+
+    // ---- CAS concentration: battles on the day's breakthrough axis get the planes first ----
+
+    private const int MissionBitsOfAirMission = 0x14, WingOfAirMission = 0x28, PoolOfWing = 0x38, CountryOfPool = 0x20;
+    private const int CasMission = 2, TargetSize = 40, ProvinceOfTarget = 0x10; // STacticalTarget: inline, province id within
+
+    [Function(CallingConventions.Microsoft)] public delegate nint TacticalFn(nint mission, nint targets, int chanceBase, int seed, byte includeDivisions, byte firstOnly);
+
+    private IHook<TacticalFn>? _tactical;
+    private static bool _casConcentration;
+    private static int _cas;
+
+    private void LoadCas()
+    {
+        _tactical = Patches.Hook<TacticalFn>(Sig.Find(Signatures.CollectTacticalTargets), (mission, targets, chanceBase, seed, includeDivisions, firstOnly) =>
+        {
+            var result = _tactical!.OriginalFunction(mission, targets, chanceBase, seed, includeDivisions, firstOnly);
+            Safely(() =>
+            {
+                if (SheepMod.Active && _casConcentration && (*(int*)(mission + MissionBitsOfAirMission) & CasMission) != 0)
+                    ConcentrateCas(mission, targets);
+            });
+            return result;
+        });
+    }
+
+    /// <summary>
+    /// The plane budget is spent in the collector's array order, so battles on the axis move to the front of it (stable:
+    /// between two axis battles the game's own order decides). Read only: main thread, per wing and hour.
+    /// </summary>
+    private static void ConcentrateCas(nint mission, nint targets)
+    {
+        var wing = *(nint*)(mission + WingOfAirMission);
+        var pool = wing == 0 ? 0 : *(nint*)(wing + PoolOfWing);
+        var country = pool == 0 ? 0 : *(nint*)(pool + CountryOfPool);
+        if (country == 0) return;
+        var tag = *(int*)(country + 8);
+        if (tag == 0 || tag == Game.ControlledTag) return;
+        var hour = *(int*)(Game.State + HourOfGameState);
+        if (!Axes.TryGetValue(tag, out var axis) || hour - axis.Hour is < 0 or >= 2 * AxisRetryHours) return; // stale: no axis today
+        var data = (byte*)*(nint*)targets;
+        int n = *(int*)(targets + 0xC);
+        if (data == null || n < 2) return;
+        var onAxis = new bool[n];
+        var count = 0;
+        for (var i = 0; i < n; i++)
+            if (axis.Core.Contains(*(int*)(data + (nint)i * TargetSize + ProvinceOfTarget))) { onAxis[i] = true; count++; }
+        if (count == 0 || count == n) return;
+        var copy = new byte[(nint)n * TargetSize];
+        fixed (byte* dest = copy)
+        {
+            var k = 0;
+            for (var i = 0; i < n; i++) if (onAxis[i]) Buffer.MemoryCopy(data + (nint)i * TargetSize, dest + (nint)k++ * TargetSize, TargetSize, TargetSize);
+            for (var i = 0; i < n; i++) if (!onAxis[i]) Buffer.MemoryCopy(data + (nint)i * TargetSize, dest + (nint)k++ * TargetSize, TargetSize, TargetSize);
+            Buffer.MemoryCopy(dest, data, copy.Length, copy.Length);
+        }
+        Interlocked.Increment(ref _cas);
     }
 
     // ---- Leaders: the most important fronts choose first; infantry, doctrine and status traits count ----
@@ -951,7 +1083,8 @@ public unsafe class AiAssist : Plugin
 
     private IHook<GeneralRetFn>? _unitRequests;
     private int _concentrated;
-    private static bool _concentration, _holdLine, _defensePriority, _axis, _reserve, _beachDefense;
+    private static int _stationed;
+    private static bool _concentration, _holdLine, _defensePriority, _axis, _reserve, _beachDefense, _stationing;
     private const int FactorHours = 24, CalmHours = 168;
     private const int AxisRetryHours = 24, ThinSectorWeight = 8;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, double Factor)> Factors = new(); // AI front -> its factor, for a day
@@ -972,7 +1105,7 @@ public unsafe class AiAssist : Plugin
             });
             return result;
         });
-        if (!_holdLine && !_reserve) return;
+        if (!_holdLine && !_reserve && !_stationing) return;
         // The regrouping drains fronts through here (unassign, then one mass move a turn), which no front request can block:
         // the last defender of a province, and the wall around a pocket, are kept out of its lists instead. Vanilla would
         // reassign them and staff the new front with divisions from far away, while the replacements walk the pocket breaks out.
@@ -987,7 +1120,8 @@ public unsafe class AiAssist : Plugin
                 for (var i = 0; i < n; i++)
                 {
                     var entry = data + 16 * i; // {CArmy*, front slot*}
-                    if (Pinned(*(nint*)entry)) continue;
+                    var unit = *(nint*)entry;
+                    if (Pinned(unit) || _stationing && FreshlyArrived(unit)) continue;
                     if (kept != i) Buffer.MemoryCopy((void*)entry, (void*)(data + 16 * kept), 16, 16);
                     kept++;
                 }
@@ -995,6 +1129,7 @@ public unsafe class AiAssist : Plugin
             });
             return result;
         });
+        if (!_holdLine && !_reserve) return;
         _balanceFronts = Patches.Hook<BalanceFn>(Sig.Find(Signatures.ApplyArmiesBalancing), (front, units, partitions, specs, log) =>
         {
             Safely(() =>
@@ -1156,6 +1291,7 @@ public unsafe class AiAssist : Plugin
     // ---- Hold the line: pinned defenders, holes refilled, attacks wait on a thinly manned line ----
 
     private const int LocationOfUnit = 0x1F0, OwnerOfUnit = 0x1E0, Path = 0x200, Retreating = 0x24C, Busy = 0x2F8;
+    private const int ArrivalOfUnit = 0x160, FreshHours = 168;
     private const int LineFreshHours = 48, MaxBackfills = 2, BackfillRadius = 10, MinBackfillOrg = 60;
     private const long SentMs = 120_000, GapMs = 600_000; // a helper walks without new orders; a hole isn't refilled at once
     private const int KeyBackfillRadius = 20, KeyHole = 60;
@@ -1179,6 +1315,19 @@ public unsafe class AiAssist : Plugin
     private PerGame _game = null!;
     private delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
     private int _backfilled, _reserved, _defended;
+
+    /// <summary>
+    /// A division that took up its post only days ago: the theatre shuffle would march it somewhere else and back
+    /// (ping-pong). While it walks, its arrival field is a schedule, not a stamp; a stale schedule reads as long ago.
+    /// </summary>
+    private static bool FreshlyArrived(nint unit)
+    {
+        if (*(int*)(unit + Path + 0xC) != 0) return false;
+        var age = *(int*)(Game.State + HourOfGameState) - *(int*)(unit + ArrivalOfUnit);
+        if (age is < 0 or >= FreshHours) return false;
+        Interlocked.Increment(ref _stationed);
+        return true;
+    }
 
     /// <summary>The AI's regrouping can't take this division: it is the last one of its country in a province enemy divisions
     /// can walk into, or it stands on the wall of a pocket (an enemy province with divisions whose neighbours are all ours).</summary>
