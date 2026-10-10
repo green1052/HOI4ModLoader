@@ -6,6 +6,7 @@
     <Project Path="plugins/AutoTrade/AutoTrade.csproj" />
     <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
     <Project Path="plugins/Queues/Queues.csproj" />
+    <Project Path="plugins/RailwayGuns/RailwayGuns.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Signatures.Tests/Signatures.Tests.csproj" />
