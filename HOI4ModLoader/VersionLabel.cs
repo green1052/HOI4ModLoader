@@ -28,7 +28,9 @@ public static unsafe class VersionLabel
     private static IHook<TextFn>? _hook;
     private static readonly Logger Log = new("VersionLabel");
 
-    private static string Tooltip() => $"HOI4ModLoader {Loader.Version}\n" + (Loader.LoadedCount == 0
+    private static string Tooltip() => $"HOI4ModLoader {Loader.Version}\n"
+        + (Updater.Installed is { } update ? Loc.Format("HOIMOD_UPDATE_INSTALLED", "{0} installed: restart the game to use it", update) + "\n" : "")
+        + (Loader.LoadedCount == 0
         ? Loc.Get("HOIMOD_NO_PLUGINS", "No plugins loaded")
         : string.Join("\n", Loader.LoadedPlugins.Select(p => $"- {Loader.Name(p)} {p.Version}")));
 

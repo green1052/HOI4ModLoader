@@ -18,7 +18,9 @@ The bundled plugins add quality-of-life features: research, focus and political 
 There is no mod to enable in the launcher. The few interface files the plugins change are built from your installed game each time it starts, so they keep up with game updates.
 
 ### Update
-Delete the old `HOI4ModLoader\plugins` folder first (plugins get merged or renamed between versions), then install as above. Your settings in `HOI4ModLoader\config` stay.
+Automatic: at startup and every 6 hours the loader checks the latest GitHub release and installs a newer one in the background; it takes effect at the next start (the main menu version tooltip says when one is waiting). `[Update] CheckHours` in `HOI4ModLoader\config\HOI4ModLoader.cfg` sets the interval (0: only at startup, -1: off).
+
+By hand: delete the old `HOI4ModLoader\plugins` folder first (plugins get merged or renamed between versions), then install as above. Your settings in `HOI4ModLoader\config` stay.
 
 ### Uninstall
 Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.

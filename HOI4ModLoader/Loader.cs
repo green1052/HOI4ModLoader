@@ -57,6 +57,11 @@ public static class Loader
             }
 
             Log.Info($"HOI4 {Game.Version}, .NET {Environment.Version}");
+            try { Updater.Finish(PluginsDir); } // before the plugins load: an update staged last session moves in now
+            catch (Exception e) { Log.Error($"update: {e.Message}"); }
+            var updateHours = config.Bind("Update", "CheckHours", 6,
+                "Check GitHub for a newer HOI4ModLoader at startup and then every this many hours, and install it for the next start. 0: only at startup, -1: never.");
+            if (updateHours >= 0) Updater.Start(TimeSpan.FromHours(updateHours));
             var followMultiplayer = true;
             try { _ = Game.IsMultiplayer; } // resolves its signature now, before any game rule plugin loads
             catch (Exception e)
