@@ -37,15 +37,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="bootstrap.cpp" />
-    <ClCompile Include="allocator.c">
-      <AdditionalIncludeDirectories>mimalloc\include</AdditionalIncludeDirectories>
-    </ClCompile>
-    <!-- mimalloc (git submodule, pinned release), all of it in one translation unit. -->
-    <ClCompile Include="mimalloc\src\static.c">
-      <AdditionalIncludeDirectories>mimalloc\include</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <WarningLevel>TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
+    <ClCompile Include="allocator.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 

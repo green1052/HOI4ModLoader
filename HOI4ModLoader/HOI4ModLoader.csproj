@@ -36,6 +36,26 @@
               Command="set MSBuildSDKsPath=&amp; set MSBuildExtensionsPath=&amp; set MSBUILD_EXE_PATH=&amp; set MSBuildLoadMicrosoftTargetsReadOnly=&amp; &quot;$(_VcMSBuild)&quot; &quot;..\bootstrap\bootstrap.vcxproj&quot; -nologo -v:m -p:Configuration=Release -p:Platform=x64" />
     </Target>
 
+    <!-- mimalloc: Microsoft's official release build (pinned and hash-checked), shipped next to the loader (see Allocator.cs). -->
+    <PropertyGroup>
+        <MimallocRelease>v3.5.3</MimallocRelease>
+        <MimallocVersion>v2.5.2</MimallocVersion>
+        <MimallocSha256>4AA58C14E00F64018A1AF3503094151B561F12F137FA77C3F1CA370FAD785D5E</MimallocSha256>
+        <MimallocDir>$(MSBuildThisFileDirectory)obj\mimalloc-$(MimallocVersion)\</MimallocDir>
+    </PropertyGroup>
+    <ItemGroup>
+        <None Include="$(MimallocDir)bin\mimalloc.dll;$(MimallocDir)bin\mimalloc-redirect.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    </ItemGroup>
+    <Target Name="FetchMimalloc" BeforeTargets="BeforeBuild" Condition="!Exists('$(MimallocDir)bin\mimalloc.dll')">
+        <DownloadFile SourceUrl="https://github.com/microsoft/mimalloc/releases/download/$(MimallocRelease)/mimalloc-$(MimallocVersion)-windows-x64.tar.gz"
+                      DestinationFolder="$(MimallocDir)" DestinationFileName="mimalloc.tar.gz" />
+        <GetFileHash Files="$(MimallocDir)mimalloc.tar.gz" Algorithm="SHA256">
+            <Output TaskParameter="Hash" PropertyName="_MimallocHash" />
+        </GetFileHash>
+        <Error Condition="'$(_MimallocHash)' != '$(MimallocSha256)'" Text="mimalloc download doesn't match its pinned SHA-256 (got $(_MimallocHash))." />
+        <Exec Command="tar -xzf mimalloc.tar.gz" WorkingDirectory="$(MimallocDir)" />
+    </Target>
+
     <!-- Every build copies the loader into <DeployDir>\hoi4mods\core and version.dll next to hoi4.exe. Locked files (game running) only warn. -->
     <Target Name="DeployCore" AfterTargets="Build" Condition="'$(DeployDir)' != ''">
         <ItemGroup>

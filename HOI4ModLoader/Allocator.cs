@@ -4,9 +4,9 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// The game's own heap: hoi4.exe's statically linked CRT allocation functions. Memory the game frees (commands, string
-/// buffers) or that we free for it must come from and go back to here. Optionally swaps in mimalloc (compiled into
-/// version.dll, see bootstrap\allocator.c) underneath them, which is faster than the Windows heap for the game's many
-/// small allocations.
+/// buffers) or that we free for it must come from and go back to here. Optionally swaps in mimalloc (Microsoft's release
+/// build, hoi4mods\core\mimalloc.dll) underneath them, through native shims in version.dll (bootstrap\allocator.c),
+/// which is faster than the Windows heap for the game's many small allocations.
 /// </summary>
 public static unsafe class Allocator
 {
@@ -19,6 +19,7 @@ public static unsafe class Allocator
     private static delegate* unmanaged<nint, nint> _malloc;
     private static delegate* unmanaged<nint, nint, nint> _calloc;
     private static delegate* unmanaged<nint, void> _free;
+    private static readonly Logger Log = new("Allocator");
 
     private static void Resolve()
     {
@@ -55,12 +56,23 @@ public static unsafe class Allocator
     /// </summary>
     internal static void UseMimalloc()
     {
+        // The release build overrides the whole process's (ucrtbase) malloc when loaded unless told not to: only the
+        // game's own CRT is meant to change.
+        Environment.SetEnvironmentVariable("MIMALLOC_DISABLE_REDIRECT", "1");
+        var mimalloc = NativeLibrary.Load(Path.Combine(Path.GetDirectoryName(typeof(Allocator).Assembly.Location)!, "mimalloc.dll"));
+        nint Mi(string name) => NativeLibrary.GetExport(mimalloc, name);
+        var probe = NativeMemory.Alloc(16); // ucrtbase's malloc
+        var redirected = ((delegate* unmanaged<void*, byte>)Mi("mi_is_in_heap_region"))(probe) != 0;
+        NativeMemory.Free(probe);
+        if (redirected) Log.Error("mimalloc also took over the process's other (ucrtbase) allocations");
+
         var version = NativeLibrary.Load(Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "version.dll"));
         nint Shim(string name) => NativeLibrary.GetExport(version, name);
 
         var free = Sig.Find(FreeSig);
         var heap = free + 22 + *(int*)(free + 18); // mov rcx, [rip+CrtHeap]
-        ((delegate* unmanaged<nint, void>)Shim("hm_set_crt_heap"))(heap);
+        ((delegate* unmanaged<nint, nint, nint, nint, nint, nint, nint, void>)Shim("hm_init"))(heap,
+            Mi("mi_malloc"), Mi("mi_calloc"), Mi("mi_realloc"), Mi("mi_free"), Mi("mi_usable_size"), Mi("mi_is_in_heap_region"));
 
         // Free and size first: once the others hand out mimalloc blocks, these must already recognise them.
         Redirect(free, Shim("hm_free"));
