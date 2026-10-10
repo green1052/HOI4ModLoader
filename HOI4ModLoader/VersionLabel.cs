@@ -30,7 +30,7 @@ public static unsafe class VersionLabel
             var box = Gui.FindTextBox(*(nint*)(view + WindowOfView), "version_label");
             var twoLines = box != 0 && *(int*)(box + MaxHeight) >= 40;
             var added = twoLines ? "\n" + line() : suffix();
-            Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.ASCII.GetBytes(added)]); // bytes: the label is in the game's encoding
+            Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // appended as bytes: the label is in the game's encoding
             Gui.SetTooltip(box, tooltip);
             return result;
         });

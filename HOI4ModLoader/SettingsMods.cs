@@ -123,7 +123,7 @@ internal static unsafe class SettingsMods
             BindCheckBox(Gui.Find(container, CheckBoxSlot, "hoimod_setting_check"), &OnSettingToggle, row);
             var setting = row;
             Gui.SetTooltip(Gui.FindTextBox(container, "hoimod_setting_label"),
-                () => setting < _entries.Count ? $"{_entries[setting].Key} = {_entries[setting].Value}\n{_entries[setting].Description}" : "");
+                () => setting < _entries.Count ? SettingTooltip(_entries[setting]) : "");
         }
         BindButton(Gui.Find(_settings, ButtonSlot, "hoimod_settings_back"), &OnBack, 0);
         BindButton(_tab, &OnTab, 0);
@@ -155,7 +155,8 @@ internal static unsafe class SettingsMods
         Visible(_settings, false);
         Visible(_list, true);
         var plugins = Loader.Known;
-        if (_listTitle != 0) Gui.SetText(_listTitle, $"HOI4ModLoader {Loader.Version}  ({Loader.LoadedCount} of {plugins.Count} plugins running)");
+        if (_listTitle != 0)
+            Gui.SetText(_listTitle, Loc.Format("HOIMOD_TITLE", "HOI4ModLoader {0}  ({1} of {2} plugins running)", Loader.Version, Loader.LoadedCount, plugins.Count));
         for (var row = 0; row < PluginRows; row++)
         {
             var show = row < plugins.Count;
@@ -163,7 +164,7 @@ internal static unsafe class SettingsMods
             Shown(PluginTitles[row], show);
             Shown(PluginArrows[row], show && Settings(plugins[row].Id).Count > 0);
             if (!show) continue;
-            Gui.SetText(PluginTitles[row], Gui.Literal(plugins[row].Name));
+            Gui.SetText(PluginTitles[row], Gui.Literal(Loader.Name(plugins[row])));
             Check(PluginBoxes[row], Loader.IsEnabled(plugins[row].Id));
         }
         if (plugins.Count > PluginRows) Log.Error($"{plugins.Count} plugins, but the Mods tab has {PluginRows} rows");
@@ -185,19 +186,24 @@ internal static unsafe class SettingsMods
     /// <summary>What a plugin does and whether it runs, for its name's tooltip.</summary>
     private static string PluginTooltip(PluginAttribute plugin)
     {
-        var text = new StringBuilder(plugin.Name).Append(' ').Append(plugin.Version);
-        if (plugin.Description != null) text.Append('\n').Append(plugin.Description);
+        var text = new StringBuilder(Loader.Name(plugin)).Append(' ').Append(plugin.Version);
+        var description = Loc.Get($"{plugin.Id}.desc", plugin.Description ?? "");
+        if (description.Length > 0) text.Append('\n').Append(description);
         text.Append("\n\n").Append(
-            Loader.IsLoaded(plugin.Id) ? "Running." :
-            !Loader.IsEnabled(plugin.Id) ? "Off." :
-            plugin.AffectsGameState && Loader.Multiplayer ? "Off in multiplayer: it changes game rules." :
-            plugin.MultiplayerOnly && !Loader.Multiplayer ? "Runs in multiplayer only." :
-            "Failed to load: see HOI4ModLoader\\LogOutput.log.");
-        if (plugin.AffectsGameState && !Loader.Multiplayer) text.Append(" Single player only: it changes game rules.");
+            Loader.IsLoaded(plugin.Id) ? Loc.Get("HOIMOD_STATUS_RUNNING", "Running.") :
+            !Loader.IsEnabled(plugin.Id) ? Loc.Get("HOIMOD_STATUS_OFF", "Off.") :
+            plugin.AffectsGameState && Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_OFF_MP", "Off in multiplayer: it changes game rules.") :
+            plugin.MultiplayerOnly && !Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_MP_ONLY", "Runs in multiplayer only.") :
+            Loc.Get("HOIMOD_STATUS_FAILED", "Failed to load: see HOI4ModLoader/LogOutput.log."));
+        if (plugin.AffectsGameState && !Loader.Multiplayer) text.Append(' ').Append(Loc.Get("HOIMOD_SP_ONLY", "Single player only: it changes game rules."));
         return text.ToString();
     }
 
     // ---- one plugin's settings ----
+
+    /// <summary>A setting's name, value and what it does (its translation, else the config file's comment).</summary>
+    private static string SettingTooltip((string Section, string Key, string Value, string Description) entry) =>
+        $"{Loc.Get($"{_plugin}.{entry.Key}", entry.Key)} = {entry.Value}\n{Loc.Get($"{_plugin}.{entry.Key}.desc", entry.Description)}";
 
     /// <summary>A plugin's editable config entries: everything but [General] (Enabled is the list's checkbox).</summary>
     private static List<(string Section, string Key, string Value, string Description)> Settings(string id) =>
@@ -211,7 +217,7 @@ internal static unsafe class SettingsMods
         _plugin = plugins[(int)row].Id;
         Visible(_list, false);
         Visible(_settings, true);
-        Gui.SetText(_title, Gui.Literal(plugins[(int)row].Name));
+        Gui.SetText(_title, Gui.Literal(Loader.Name(plugins[(int)row])));
         ShowSettings();
     });
 
@@ -228,7 +234,7 @@ internal static unsafe class SettingsMods
             Visible(container, row < _entries.Count);
             if (row >= _entries.Count) continue;
             var (_, key, value, _) = _entries[row];
-            Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Gui.Literal(key));
+            Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Gui.Literal(Loc.Get($"{_plugin}.{key}", key)));
             var isBool = bool.TryParse(value, out var on);
             var isNumber = !isBool && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
             var check = Gui.Find(container, CheckBoxSlot, "hoimod_setting_check");

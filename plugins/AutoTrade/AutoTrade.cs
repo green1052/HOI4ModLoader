@@ -1,3 +1,4 @@
+using System.Text;
 using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
@@ -44,7 +45,6 @@ public unsafe class AutoTrade : Plugin
     private const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
     private const long Fixed = 100_000;
     private const long PendingMs = 10_000;                      // a sent deal shows in the balance at once in single player, a round trip later in multiplayer
-    private static readonly byte[] Label = [.. "Auto "u8];
 
     [Function(CallingConventions.Microsoft)] public delegate void ItemFn(nint item);
     [Function(CallingConventions.Microsoft)] public delegate void UpdateFn(nint item, nint unused);
@@ -94,11 +94,16 @@ public unsafe class AutoTrade : Plugin
     {
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "neededType");
         if (box == 0) return;
+        var label = Encoding.UTF8.GetBytes(Loc.Get("com.green1052.autotrade.auto", "Auto") + " ");
+        Labels(box, label, _auto.Contains(*(nint*)(item + ResourceOfItem)));
+    }
+
+    private static void Labels(nint box, ReadOnlySpan<byte> label, bool on)
+    {
         var text = Gui.Text(box);
-        var labelled = text.StartsWith(Label);
-        var on = _auto.Contains(*(nint*)(item + ResourceOfItem));
-        if (on && !labelled) Gui.SetText(box, [.. Label, .. text]);
-        else if (!on && labelled) Gui.SetText(box, [.. text[Label.Length..]]);
+        var labelled = text.StartsWith(label);
+        if (on && !labelled) Gui.SetText(box, [.. label, .. text]);
+        else if (!on && labelled) Gui.SetText(box, [.. text[label.Length..]]);
     }
 
     private void Pump()

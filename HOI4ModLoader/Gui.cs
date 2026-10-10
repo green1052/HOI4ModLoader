@@ -114,7 +114,7 @@ public static unsafe partial class Gui
         try
         {
             if (TooltipTexts.TryGetValue(((nint*)handler)[1], out var text))
-                Native.SetMsvcString(tooltip, Encoding.ASCII.GetBytes(Literal(text())));
+                Native.SetMsvcString(tooltip, Encoding.UTF8.GetBytes(Literal(text())));
         }
         catch { /* never throw into the game */ }
     }

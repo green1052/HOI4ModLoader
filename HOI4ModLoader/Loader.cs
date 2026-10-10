@@ -76,8 +76,9 @@ public static class Loader
             catch (Exception e) { Log.Error($"settings Mods page: {e.Message}"); }
             try
             {
-                VersionLabel.Install(() => $"HOI4ModLoader {Version} ({Loaded.Count} plugins)", () => $" +{Loaded.Count}",
-                    () => $"HOI4ModLoader {Version}\n" + (Loaded.Count == 0 ? "No plugins loaded" : string.Join("\n", Loaded.Select(p => $"- {p.Info.Name} {p.Info.Version}"))));
+                VersionLabel.Install(() => Loc.Format("HOIMOD_VERSION_LINE", "HOI4ModLoader {0} ({1} plugins)", Version, Loaded.Count), () => $" +{Loaded.Count}",
+                    () => $"HOI4ModLoader {Version}\n" + (Loaded.Count == 0 ? Loc.Get("HOIMOD_NO_PLUGINS", "No plugins loaded")
+                        : string.Join("\n", Loaded.Select(p => $"- {Name(p.Info)} {p.Info.Version}"))));
             }
             catch (Exception e) { Log.Error($"version label: {e.Message}"); }
         }
@@ -131,6 +132,9 @@ public static class Loader
 
     /// <summary>A plugin's config file.</summary>
     internal static ConfigFile Config(string id) => new(Path.Combine(ModsDir, "config", id + ".cfg"));
+
+    /// <summary>A plugin's name in the player's language ("&lt;id&gt;.name" in the localisation), else its [Plugin] name.</summary>
+    internal static string Name(PluginAttribute plugin) => Loc.Get($"{plugin.Id}.name", plugin.Name);
 
     /// <summary>Whether the plugin is loaded now.</summary>
     internal static bool IsLoaded(string id) => Loaded.Any(p => p.Info.Id == id);

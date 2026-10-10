@@ -7,7 +7,7 @@ public static class Signatures
 {
     /// <summary>
     /// Telemetry: submit a finished game event (builder). Every gameplay telemetry event (about 150 builders) ends here; it
-    /// is the only path to PDX::SDK::Api::QueueAndSendTelemetry. The caller destroys the builder afterwards.
+    /// is the only path to PDX::SDK::Api::QueueAndSendTelemetry. The caller destroys the builder afterward.
     /// </summary>
     [Signature] public const string SubmitEvents = "48 89 5C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 0F 29 74 24 30 48 8B F9 33 DB 89 9C 24 88 00 00 00 E8 ? ? ? ? 48 8B 90 58 03 00 00 4C 8B 62 50";
 }
