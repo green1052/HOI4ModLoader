@@ -3,12 +3,12 @@
 		# AutoConstruction: the auto construction target of this building (set by code, empty when none).
 		instantTextboxType = {
 			name = "hoimod_auto"
-			position = { x = 0 y = 27 }
-			font = "hoi_18mbs"
+			position = { x = 1 y = 31 }
+			font = "hoi_16mbs"
 			text = ""
-			maxWidth = 45
-			maxHeight = 18
-			format = center
+			maxWidth = 42
+			maxHeight = 14
+			format = right
 			vertical_alignment = center
 			alwaystransparent = yes
 		}

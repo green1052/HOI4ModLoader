@@ -20,6 +20,12 @@ public static class PoliticalSignatures
     /// <summary>Advisor picker, pick lambda (impl, CCharacterStatus*): impl+16 slot occupant, impl+32 std::string* slot.</summary>
     [Signature] public const string AdvisorPick = "48 89 5C 24 ? 57 48 83 EC 20 80 79 ? ? 48 8B DA 48 8B F9 74";
 
+    /// <summary>
+    /// CCountryCharacterSelectionItem click lambda (impl): impl+8 is the item. Runs the pick (AdvisorPick), then marks the
+    /// item clicked (highlight) for the selector to close.
+    /// </summary>
+    [Signature] public const string AdvisorItemClick = "40 53 48 83 EC 20 48 8B 59 08 48 8B 8B A0 06 00 00 48 85 C9 74 ? 48 89 5C 24 30 48 8B 01 48 8D 54 24 30 FF 50 10 48 83 7B 10 00";
+
     /// <summary>CCountryCharacterSelectionItem::SetUnselectable(item, bool): disables the entry's button (can't afford, not allowed).</summary>
     [Signature] public const string AdvisorUnselectable = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 40 0F B6 FA 48 8B F1 48 8B 59 10 48 83 C1 20 E8";
 
@@ -77,7 +83,7 @@ public unsafe class PoliticalQueue : Plugin
     [Function(CallingConventions.Microsoft)] public delegate nint TwoFn(nint a, nint b);
     [Function(CallingConventions.Microsoft)] public delegate nint ThreeFn(nint a, nint b, nint c);
 
-    private IHook<OneFn>? _ideaClick, _decisionClick, _targetedDecisionClick;
+    private IHook<OneFn>? _ideaClick, _decisionClick, _targetedDecisionClick, _advisorItemClick;
     private IHook<TwoFn>? _advisorPick;
     private IHook<ThreeFn>? _ideaUpdate, _advisorUpdate, _decisionSet, _targetedDecisionSet;
     private IHook<TwoFn>? _advisorUnselectable;
@@ -113,12 +119,15 @@ public unsafe class PoliticalQueue : Plugin
         _advisorPick = Patches.Hook<TwoFn>(Sig.Find(PoliticalSignatures.AdvisorPick), (impl, status) =>
         {
             var slot = *(nint*)(impl + SlotOfImpl);
-            if (!Gui.ShiftHeld && _forced.Contains(status - CharacterItemOffset)) return 0;
             if (!Gui.ShiftHeld || status == 0 || slot == 0) return _advisorPick!.OriginalFunction(impl, status);
             Toggle(new Entry(Kind.Advisor, *(nint*)status, SlotName(slot)) { Occupant = *(nint*)(impl + OccupantOfImpl) });
             LabelAdvisor(status - CharacterItemOffset);
             return 0;
         });
+        // A plain click on an advisor the game blocked does nothing, as if it were still disabled: stop it before the item
+        // highlights itself (stopping it at the pick leaves the highlight on and the selector open).
+        _advisorItemClick = Patches.Hook<OneFn>(Sig.Find(PoliticalSignatures.AdvisorItemClick), impl =>
+            !Gui.ShiftHeld && _forced.Contains(*(nint*)(impl + IdeaItemOfImpl)) ? 0 : _advisorItemClick!.OriginalFunction(impl));
         _advisorUpdate = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.AdvisorUpdate), (item, status, flag) =>
         {
             var result = _advisorUpdate!.OriginalFunction(item, status, flag);

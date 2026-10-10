@@ -112,7 +112,7 @@ public unsafe class AutoConstruction : Plugin
 
     private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));
 
-    /// <summary>Writes "auto N" (or nothing) into the button's target box.</summary>
+    /// <summary>Writes the target (or nothing) into the button's target box, a small number in its bottom right corner.</summary>
     private void ShowTarget(nint item)
     {
         var type = *(nint*)(item + TypeOfItem);
@@ -125,7 +125,7 @@ public unsafe class AutoConstruction : Plugin
             if (box == 0) Log.Info($"no '{TargetBox}' element: targets work but don't show (is the Auto Construction UI mod enabled?)");
         }
         if (box == 0) return;
-        var text = _targets.TryGetValue(type, out var target) ? $"auto {target}" : "";
+        var text = _targets.TryGetValue(type, out var target) ? target.ToString() : "";
         if (Native.Utf8(Gui.Text(box)) != text) Gui.SetText(box, text);
     }
 
