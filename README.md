@@ -13,7 +13,7 @@ The bundled plugins add quality-of-life features: research, focus and political 
 2. Download the latest zip from [Releases](../../releases) and extract it.
 3. Put `version.dll` and the `HOI4ModLoader` folder in the game folder (where `hoi4.exe` is).
    - Steam library → right-click Hearts of Iron IV → Manage → Browse local files
-4. Start the game: the main menu's version label shows `HOI4ModLoader 1.0.0` under the game version.
+4. Start the game: the main menu's version label shows `HOI4ModLoader <version>` under the game version.
 
 There is no mod to enable in the launcher. The few interface files the plugins change are built from your installed game each time it starts, so they keep up with game updates.
 
