@@ -25,6 +25,13 @@ Rider에서 `HOI4ModLoader.slnx`를 빌드하거나 `dotnet build`를 실행합�
 
 `bootstrap`(C++)은 C# 빌드가 `vswhere`로 VS C++ 도구를 찾아 소스가 바뀌었을 때만 빌드합니다. C++ MSBuild와 SDK 스타일 MSBuild를 한 솔루션에서 함께 쓸 수 없어서 `.slnx`에는 넣지 않았습니다.
 
+### mimalloc
+게임의 메모리 할당(정적 링크된 CRT의 `malloc`/`free` 등)을 Windows 힙 대신 [mimalloc](https://github.com/microsoft/mimalloc)으로 처리합니다. `[Performance] Mimalloc = true`(기본값, 다음 실행부터 적용)로 켜고 끕니다.
+- 빌드할 때 Microsoft 공식 릴리스(Windows x64, 버전과 SHA-256 고정)를 받아 `hoi4mods\core\mimalloc.dll`(+ 의존하는 `mimalloc-redirect.dll`)로 배포합니다. 저장소에는 소스도 바이너리도 넣지 않습니다.
+- 게임 CRT가 시작되기 전에 로더가 게임의 할당 함수 5개를 `version.dll` 안의 짧은 네이티브 코드(`bootstrap\allocator.c`)로 돌립니다. 할당마다 관리 코드를 거치지 않게 하려고 네이티브로 두었습니다. mimalloc이 할당하지 않은 메모리는 원래 CRT 힙으로 돌려보냅니다.
+- 프로세스 전체(ucrtbase)의 malloc 교체는 끕니다(`MIMALLOC_DISABLE_REDIRECT=1`). 게임 본체는 정적 CRT라 영향이 없고, 다른 DLL만 바뀌어 이득 없이 위험만 커지기 때문입니다.
+- 측정으로는 차이가 오차 범위 안이었습니다(게임 하루 처리 시간 평균 약 11% 감소, 회차 간 편차 최대 ±15%).
+
 배포용 zip(런타임 동봉):
 ```
 dotnet build -c Release -p:DeployDir=%CD%\out -p:HOI4ModDir=%CD%\out\mod -p:BundleRuntime=true
