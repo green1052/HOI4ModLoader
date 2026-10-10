@@ -95,4 +95,4 @@ See [docs/development.md](docs/development.md) for building and writing plugins.
 ## Disclaimer
 HOI4ModLoader is an unofficial fan project. It is not affiliated with, endorsed by or sponsored by Paradox Interactive AB. Hearts of Iron and Paradox Interactive are trademarks of Paradox Interactive AB; they are used here only to say which game this works with.
 
-The loader changes the running game in memory. Use it at your own risk and keep backups of your saves; it comes without any warranty. Achievements and ironman kept by ChecksumPatcher are up to you and to Paradox's terms.
+The loader changes the running game in memory. Use it at your own risk and keep backups of your saves; it comes without any warranty. Keeping achievements with mods (ChecksumPatcher) may go against Paradox's terms: whether to use it is your call.
