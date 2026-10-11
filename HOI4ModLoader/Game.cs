@@ -32,10 +32,32 @@ public static unsafe class Game
         _state = (nint*)(at + 10 + *(int*)(at + 6));
     }
 
-    /// <summary>CGameState, or 0 before a game is loaded.</summary>
+    /// <summary>CGameState, or 0 before the game application is up. One object for the whole process: loading a save
+    /// refills it, so it says nothing about which game runs (see <see cref="Generation"/>).</summary>
     public static nint State
     {
         get { Resolve(); return *_state; }
+    }
+
+    private const int StartedOfGameState = 0xA39; // byte: a game runs (SetGameStarted 0x1401EDFF0 clears it in menus and while loading)
+
+    /// <summary>A game is running: false in the menus, the lobby and while a save loads.</summary>
+    public static bool HasStarted => State is var gs && gs != 0 && *(byte*)(gs + StartedOfGameState) != 0;
+
+    private static (bool Started, int Tag) _seen;
+
+    /// <summary>
+    /// Counts game changes: a start (a save loaded, a new game) or a change of the controlled country. State caches of
+    /// game objects belong to one generation (<see cref="PerGame"/>). Advanced on the main thread every frame.
+    /// </summary>
+    public static int Generation { get; private set; }
+
+    internal static void Track()
+    {
+        var now = (HasStarted, ControlledTag);
+        if (now == _seen) return;
+        _seen = now;
+        Generation++;
     }
 
     /// <summary>The player's country tag, or 0 (main menu, no country).</summary>
@@ -250,13 +272,12 @@ public readonly unsafe struct OrdersGroup(nint ptr)
 /// </summary>
 public sealed class PerGame(Action reset)
 {
-    private (nint GameState, int Tag) _game;
+    private int _generation = -1;
 
     public void Check()
     {
-        var game = (Game.State, Game.ControlledTag);
-        if (game == _game) return;
-        _game = game;
+        if (Game.Generation == _generation) return;
+        _generation = Game.Generation;
         reset();
     }
 }

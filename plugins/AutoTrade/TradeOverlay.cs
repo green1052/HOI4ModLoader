@@ -40,14 +40,14 @@ public static class OverlaySignatures
 public unsafe partial class AutoTrade
 {
     // Layouts for HOI4 1.19.3 (the map arrow manager's CreateArrow calling convention).
-    // TODO(RE): CProvince+0xB8 is a pointer elsewhere (Game.AdjacencyOfProvince, AiAssist's StaticOfProvince, CanBuildInProvince
-    // reads [province+0B8h]+0D2h), not an {int x, y}: the position probably lives behind it.
-    private const int PositionOfProvince = 0xB8; // CProvince: {int x, y}, the map arrow point's 1/100000
-    private const int RoutesOfResources = 0x788;   // CCountryResources: CPdxArray<CResourceDeliveryRoute*>
-    private const int TagAOfRoute = 48, TagBOfRoute = 52; // route: the two trading tags
+    // CProvince+0xB8 -> its static data, whose {int x, y} at +0xB8 is the map arrow point's 1/100000 (the game's own arrows
+    // read it so, 0x141253BC0).
+    private const int StaticOfProvince = 0xB8, PositionOfStatic = 0xB8;
+    private const int RoutesOfResources = 0x788;   // CCountryResources: CResourceDeliveryRoute* per partner tag index; empty slots are 0
+    private const int KindOfRoute = 8, TagAOfRoute = 48, TagBOfRoute = 52; // route: kind (0, 3: no live route), the two trading tags
     private const int StatesOfRoute = 72, RegionsOfRoute = 96; // route: the states (land) / regions (sea) it passes
     private const int ProvincesOfHolder = 24;      // CState and CStrategicRegion: CPdxArray<CProvince*>
-    private const int ColourSize = 32, LabelsSize = 128; // CreateArrow's colour and {colour, 3 label strings} blocks
+    private const int ColourSize = 32, LabelsSize = 96; // CreateArrow's colour block and its 3 label std::strings
     private const string Style = "supply_to_consumers";
     private const long RedrawMs = 5000;
 
@@ -75,7 +75,7 @@ public unsafe partial class AutoTrade
         _visible = (delegate* unmanaged<nint, byte, void>)Sig.Find(OverlaySignatures.SetVisible);
         _create = Patches.Hook<CreateFn>(Sig.Find(OverlaySignatures.CreateArrow), (manager, name, colourA, colourB, labels, layer) =>
         {
-            if (_manager == 0 && EmptyStrings(labels)) Capture(manager, name, colourA, colourB, labels, layer);
+            if (_manager == 0) Capture(manager, name, colourA, colourB, layer);
             return _create!.OriginalFunction(manager, name, colourA, colourB, labels, layer);
         });
         _map = new PerGame(() => // a new map: its manager and arrows are new objects
@@ -88,7 +88,7 @@ public unsafe partial class AutoTrade
     }
 
     /// <summary>The game calls this with every arrow it draws: the first plain call hands us the manager and the colours.</summary>
-    private void Capture(nint manager, nint name, nint colourA, nint colourB, nint labels, uint layer)
+    private void Capture(nint manager, nint name, nint colourA, nint colourB, uint layer)
     {
         _layer = layer;
         _capturedName = Native.Utf8(Native.MsvcString(name));
@@ -96,7 +96,7 @@ public unsafe partial class AutoTrade
         Marshal.Copy(colourB, _colourB, 0, ColourSize);
         Tint(_colourA);
         Tint(_colourB);
-        Marshal.Copy(labels, _labels, 0, LabelsSize);
+        for (var i = 0; i < 3; i++) BitConverter.GetBytes(15L).CopyTo(_labels, 0x20 * i + 0x18); // three empty inline strings: no labels
         _manager = manager; // last: Poll takes a non-zero manager as "everything caught"
         Log.Info($"trade overlay: caught the map's arrow manager (style seen: \"{_capturedName}\")");
     }
@@ -108,10 +108,6 @@ public unsafe partial class AutoTrade
         BitConverter.GetBytes(0.8f).CopyTo(colour, 0x14);
         BitConverter.GetBytes(0.15f).CopyTo(colour, 0x18);
     }
-
-    /// <summary>Whether every label string in the block is empty, so copying the block keeps no dangling heap buffer.</summary>
-    private static bool EmptyStrings(nint labels) =>
-        labels == 0 || *(long*)(labels + 0x30) == 0 && *(long*)(labels + 0x50) == 0 && *(long*)(labels + 0x70) == 0;
 
     private void Poll()
     {
@@ -147,6 +143,7 @@ public unsafe partial class AutoTrade
         var used = 0;
         foreach (var route in Native.PdxArray(resources + RoutesOfResources).ToArray())
         {
+            if (route == 0 || *(byte*)(route + KindOfRoute) is 0 or 3) continue;
             if (*(int*)(route + TagAOfRoute) != tag && *(int*)(route + TagBOfRoute) != tag) continue; // only ours
             var points = new List<(int X, int Y)>();
             Waypoints(route + StatesOfRoute, points);   // over land
@@ -198,12 +195,15 @@ public unsafe partial class AutoTrade
     {
         foreach (var holder in Native.PdxArray(holders).ToArray())
         {
+            if (holder == 0) continue;
             long x = 0, y = 0;
             var n = 0;
             foreach (var province in Native.PdxArray(holder + ProvincesOfHolder))
             {
-                x += *(int*)(province + PositionOfProvince);
-                y += *(int*)(province + PositionOfProvince + 4);
+                var info = province == 0 ? 0 : *(nint*)(province + StaticOfProvince);
+                if (info == 0) continue;
+                x += *(int*)(info + PositionOfStatic);
+                y += *(int*)(info + PositionOfStatic + 4);
                 n++;
             }
             if (n > 0) points.Add(((int)(x / n), (int)(y / n)));

@@ -77,8 +77,8 @@ public static unsafe class Commands
         }
     }
 
-    /// <summary>Releases a command that was never posted.</summary>
-    public static void Free(nint cmd) => Allocator.Free(cmd);
+    /// <summary>Releases a command that was never posted, as the game does (its deleting destructor frees what it owns too).</summary>
+    public static void Free(nint cmd) => ((delegate* unmanaged<nint, int, void>)(*(nint**)cmd)[0])(cmd, 1);
 
     /// <summary>Posts the command if the game would accept it; otherwise frees it.</summary>
     public static bool TryPost(nint cmd) => TryPost(cmd, false);
@@ -104,7 +104,6 @@ public static unsafe class Commands
     private static delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
 
     /// <summary>Moves <paramref name="unit"/> to <paramref name="province"/> (clearing its queue, as the AI moves units) if the game accepts it.</summary>
-    // ponytail: a refused move is freed without its destructor, leaking its small province array; call the deleting dtor if that adds up.
     public static bool Move(nint unit, int province, bool force = false)
     {
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment

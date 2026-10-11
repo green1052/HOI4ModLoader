@@ -335,7 +335,7 @@ public unsafe partial class FrontLine
     private void RunOperations()
     {
         _opGame.Check();
-        if (_operations.Count == 0 || Game.State == 0) return;
+        if (_operations.Count == 0 || !Game.HasStarted) return;
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         if (country == 0) return;

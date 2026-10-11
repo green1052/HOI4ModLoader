@@ -213,7 +213,7 @@ public unsafe partial class FrontLine : Plugin
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
-        if (country == 0 || Game.State == 0) return;
+        if (country == 0 || !Game.HasStarted) return;
         var now = _now = Environment.TickCount64;
         foreach (var (unit, until) in _pending.ToArray())
             if (now >= until) _pending.Remove(unit);
