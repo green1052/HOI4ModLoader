@@ -26,7 +26,8 @@ public unsafe partial class AiAssist
         if (*(ushort*)(site + 5) != 0xC084) throw new InvalidOperationException("micro attack candidate check: no `test al,al` after the call");
         // `call CantMoveInto; test al,al` (7 bytes: the hook's jump takes more than the call's 5) becomes a call of the filter
         // and the same test, for the `jnz skip` right after. rsp is 16-aligned at the call and its home space reserved.
-        Patches.Warmup(ThunkOf(nameof(PocketFilter))); // its first call comes from an AI thread: compile it here first
+        // Its first call comes from an AI thread: compile it here first.
+        Patches.Warmup(typeof(AiAssist).GetMethod(nameof(PocketFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!);
         Patches.Asm(site, 7, "use64", $"mov rax, 0x{(nint)(delegate* unmanaged<nint, nint, nint, byte>)&PocketFilter:X}", "call rax", "test al, al");
     }
 
@@ -35,10 +36,6 @@ public unsafe partial class AiAssist
     /// enemy divisions, every target that wouldn't is skipped too; the game's random pick then takes a pocket-closing one.
     /// Vanilla's own rejections stay. AI threads: read only.
     /// </summary>
-    /// <summary>An UnmanagedCallersOnly thunk's metadata, for <see cref="Patches.Warmup"/>.</summary>
-    private static System.Reflection.MethodInfo ThunkOf(string name) =>
-        typeof(AiAssist).GetMethod(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-
     [UnmanagedCallersOnly]
     private static byte PocketFilter(nint us, nint from, nint to)
     {

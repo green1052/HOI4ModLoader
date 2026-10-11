@@ -170,13 +170,13 @@ public static unsafe partial class Patches
         OriginalsVersion++;
     }
 
-    /// <summary>Runs <paramref name="undo"/> when the current <see cref="Owner"/> is reverted (failed load, hot reload).</summary>
     /// <summary>Throws unless a plugin (or the loader) is being loaded: a patch nobody owns would never be reverted.</summary>
     internal static void RequireOwner()
     {
         if (Owner == null) throw new InvalidOperationException("patches belong to a plugin: make them in Plugin.Load");
     }
 
+    /// <summary>Runs <paramref name="undo"/> when the current <see cref="Owner"/> is reverted (failed load, hot reload).</summary>
     internal static void Record(Action undo, object? keepAlive = null)
     {
         if (keepAlive != null) KeepAlive.Add(keepAlive);
