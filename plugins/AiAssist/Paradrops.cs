@@ -84,7 +84,7 @@ public unsafe partial class AiAssist
     /// <summary>Every half minute: each AI country runs at most one paradrop at a time, from an army on its breakthrough axis.</summary>
     private void PlanParadrops()
     {
-        if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
+        if (!SheepMod.Active || !Game.HasStarted) return; // menus, lobby, loading: no AI commands
         _game.Check(); // CRef ids of an old game must not resolve into this one
         var hour = Hour;
         var player = Game.ControlledTag;

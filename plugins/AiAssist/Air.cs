@@ -169,7 +169,8 @@ public unsafe partial class AiAssist
 
     // ---- Breakthrough axis, in the air: battles on the day's axis get the close air support first ----
 
-    private const int MissionBitsOfAirMission = 0x14, WingOfAirMission = 0x28, PoolOfWing = 0x38, CountryOfPool = 0x20;
+    // The wing's owner as the game reads it (0x140F5AAD0): wing+0x9C4 when set, else *(*(wing+0x38)+0x40)+0x90.
+    private const int MissionBitsOfAirMission = 0x14, WingOfAirMission = 0x28, OwnerOfWing = 0x9C4, EquipmentOfWing = 0x38, OwnerOfEquipment = 0x40, TagOfOwner = 0x90;
     private const int CasMission = 2, TargetSize = 40, ProvinceOfTarget = 0x10; // STacticalTarget: inline, province id within
 
     [Function(CallingConventions.Microsoft)] public delegate nint TacticalFn(nint mission, nint targets, int chanceBase, int seed, byte includeDivisions, byte firstOnly);
@@ -193,16 +194,20 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// The plane budget is spent in the collector's array order, so battles on the axis move to the front of it (stable:
-    /// between two axis battles the game's own order decides). Read only: main thread, per wing and hour.
+    /// between two axis battles the game's own order decides). Game thread hourly; AI threads only count (targets 0).
     /// </summary>
     private static void ConcentrateCas(nint mission, nint targets)
     {
         var wing = *(nint*)(mission + WingOfAirMission);
-        var pool = wing == 0 ? 0 : *(nint*)(wing + PoolOfWing);
-        var country = pool == 0 ? 0 : *(nint*)(pool + CountryOfPool);
-        if (country == 0) return;
-        var tag = *(int*)(country + 8);
-        if (tag == 0 || tag == Game.ControlledTag) return;
+        if (wing == 0) return;
+        var tag = *(int*)(wing + OwnerOfWing);
+        if (tag <= 0)
+        {
+            var equipment = *(nint*)(wing + EquipmentOfWing);
+            var owner = equipment == 0 ? 0 : *(nint*)(equipment + OwnerOfEquipment);
+            tag = owner == 0 ? 0 : *(int*)(owner + TagOfOwner);
+        }
+        if (tag <= 0 || tag == Game.ControlledTag) return;
         var data = (byte*)*(nint*)targets;
         int n = *(int*)(targets + 0xC);
         if (data == null || n < 2) return;

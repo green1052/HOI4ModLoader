@@ -126,7 +126,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private void Backfill()
     {
-        if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
+        if (!SheepMod.Active || !Game.HasStarted) return; // menus, lobby, loading: no AI commands
         var now = Environment.TickCount64;
         Expire(now);
         var hour = Hour;
@@ -357,7 +357,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private void Micro()
     {
-        if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
+        if (!SheepMod.Active || !Game.HasStarted) return; // menus, lobby, loading: no AI commands
         var now = Environment.TickCount64;
         Expire(now);
         var hour = Hour;
@@ -561,7 +561,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private void DefendBeachheads()
     {
-        if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
+        if (!SheepMod.Active || !Game.HasStarted) return; // menus, lobby, loading: no AI commands
         var now = Environment.TickCount64;
         Expire(now);
         if (now - _beachScanned >= LandingScanMs)
