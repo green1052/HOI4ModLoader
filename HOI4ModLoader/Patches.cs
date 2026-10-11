@@ -109,19 +109,6 @@ public static unsafe partial class Patches
     /// <see cref="Hook"/>: a first call there is a just-in-time compile, which is what the crash dumps caught).</summary>
     public static void Warmup(System.Reflection.MethodInfo thunk) => System.Runtime.CompilerServices.RuntimeHelpers.PrepareMethod(thunk.MethodHandle);
 
-    /// <summary>
-    /// Executable memory holding <paramref name="code"/>, freed when its owner reverts: a cave to re-run a function
-    /// whose entry an <see cref="Asm"/> hook replaced — its overwritten first instructions, then a jump back past them.
-    /// </summary>
-    public static nint Cave(byte[] code)
-    {
-        RequireOwner();
-        var at = (nint)NativeMemory.Alloc((nuint)code.Length);
-        WriteCode(at, code);
-        Record(() => NativeMemory.Free((void*)at));
-        return at;
-    }
-
     private static Func<nint, bool>? _keepFromBalancing;
 
     /// <summary>
