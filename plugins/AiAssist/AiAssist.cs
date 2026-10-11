@@ -811,22 +811,54 @@ public unsafe class AiAssist : Plugin
 
     [Function(CallingConventions.Microsoft)] public delegate nint TacticalFn(nint mission, nint targets, int chanceBase, int seed, byte includeDivisions, byte firstOnly);
 
-    private IHook<TacticalFn>? _tactical;
+    private static TacticalFn? _collectTactical; // the collector through its relocated prologue: the entry is an asm stub
+    private static nint _tacticalStack; // the stub's parking spot for the 5th and 6th (stack) arguments
+    private static readonly Logger CasLog = new("AiAssist");
+    private static int _casFailed;
     private static bool _casConcentration;
     private static int _cas;
 
+    /// <summary>
+    /// A managed hook on these 6 arguments crashed the game: two stack arguments make Reloaded's reverse stub enter
+    /// managed code misaligned (CreateArrow's class, dump confirmed). The entry is plain assembly instead: park the
+    /// stack arguments, call <see cref="CollectTactical"/> on an aligned stack with only register arguments (the safe
+    /// shape), and return to the game with its result. The thunk runs the collector through a cave — its moved first
+    /// instructions, then a jump back past the stub — and reorders the targets it filled.
+    /// </summary>
     private void LoadCas()
     {
-        _tactical = Patches.Hook<TacticalFn>(Sig.Find(Signatures.CollectTacticalTargets), (mission, targets, chanceBase, seed, includeDivisions, firstOnly) =>
+        var at = Sig.Find(Signatures.CollectTacticalTargets);
+        _tacticalStack = Allocator.AllocZeroed(8);
+        var cave = new byte[30]; // the collector's first 18 bytes (no relative references), then `mov rax, at+18; jmp rax`
+        new ReadOnlySpan<byte>((void*)at, 18).CopyTo(cave);
+        cave[18] = 0x48; cave[19] = 0xB8; cave[28] = 0xFF; cave[29] = 0xE0;
+        BitConverter.GetBytes(at + 18).CopyTo(cave, 20);
+        _collectTactical = Patches.Function<TacticalFn>(Patches.Cave(cave));
+        Patches.Asm(at, 18,
+            "use64",
+            $"mov r11, 0x{_tacticalStack:X}",
+            "mov r10d, [rsp+0x28]", // includeDivisions: the 5th argument
+            "mov [r11], r10d",
+            "mov r10d, [rsp+0x30]", // firstOnly: the 6th argument
+            "mov [r11+4], r10d",
+            $"mov r10, 0x{(nint)(delegate* unmanaged<nint, nint, int, int, nint>)&CollectTactical:X}",
+            "sub rsp, 8", // the entry's stack is one push off the alignment a call must be made on
+            "call r10",
+            "add rsp, 8",
+            "jmp qword [rsp]"); // to the game's return address, rax = the collector's result
+    }
+
+    [UnmanagedCallersOnly]
+    private static nint CollectTactical(nint mission, nint targets, int chanceBase, int seed)
+    {
+        var result = _collectTactical!(mission, targets, chanceBase, seed, *(byte*)_tacticalStack, *(byte*)(_tacticalStack + 4));
+        try
         {
-            var result = _tactical!.OriginalFunction(mission, targets, chanceBase, seed, includeDivisions, firstOnly);
-            Safely(() =>
-            {
-                if (SheepMod.Active && _casConcentration && (*(int*)(mission + MissionBitsOfAirMission) & CasMission) != 0)
-                    ConcentrateCas(mission, targets);
-            });
-            return result;
-        });
+            if (SheepMod.Active && _casConcentration && (*(int*)(mission + MissionBitsOfAirMission) & CasMission) != 0)
+                ConcentrateCas(mission, targets);
+        }
+        catch (Exception e) { if (Interlocked.Exchange(ref _casFailed, 1) == 0) CasLog.Error($"CAS hook: {e}"); }
+        return result;
     }
 
     /// <summary>
@@ -1130,24 +1162,8 @@ public unsafe class AiAssist : Plugin
             return result;
         });
         if (!_holdLine && !_reserve) return;
-        _balanceFronts = Patches.Hook<BalanceFn>(Sig.Find(Signatures.ApplyArmiesBalancing), (front, units, partitions, specs, log) =>
-        {
-            Safely(() =>
-            {
-                if (!SheepMod.Active) return;
-                var unit = (nint*)*(nint*)units;
-                for (int p = 0, parts = *(int*)(partitions + 0xC); p < parts; p++)
-                {
-                    var part = *(nint*)partitions + 0x18 * p; // CPdxArray<int>: indices into units, for army p
-                    var indices = (int*)*(nint*)part;
-                    int n = *(int*)(part + 0xC), kept = 0;
-                    for (var k = 0; k < n; k++)
-                        if (!Pinned(unit[indices[k]])) indices[kept++] = indices[k];
-                    *(int*)(part + 0xC) = kept; // the game skips empty partitions
-                }
-            });
-            _balanceFronts!.OriginalFunction(front, units, partitions, specs, log);
-        });
+        // FrontLine owns the only ApplyArmiesBalancing hook and applies this through it: a second hook stacks detours, which crashes Reloaded.
+        Patches.KeepFromBalancing += unit => SheepMod.Active && Pinned(unit);
     }
 
     /// <summary>Rescales each land front's requests by the enemy actually facing it, before the theatre's divisions are shared out.</summary>
@@ -1301,10 +1317,7 @@ public unsafe class AiAssist : Plugin
     private const long LandingMs = 300_000, LandingScanMs = 30_000;
 
     [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
-    [Function(CallingConventions.Microsoft)] public delegate void BalanceFn(nint front, nint units, nint partitions, nint specs, nint log);
-
     private IHook<CollectFn>? _collect;
-    private IHook<BalanceFn>? _balanceFronts;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, HashSet<nint> Provinces)> _line = new(); // AI front -> its threatened provinces, refreshed hourly
     private readonly Dictionary<nint, long> _sent = []; // unit -> until: a division sent at a hole is left alone while it walks
     private readonly Dictionary<int, long> _gap = [];   // province id -> until: a hole a helper is walking to

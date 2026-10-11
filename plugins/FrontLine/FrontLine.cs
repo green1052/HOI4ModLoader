@@ -145,7 +145,8 @@ public unsafe class FrontLine : Plugin
         });
     }
 
-    // ---- AI countries: their theatre distribution and army balancing must not regroup the divisions we took off a front ----
+    // ---- AI countries: their theatre distribution and army balancing must not regroup the divisions we took off a front;
+    // this one hook also applies other plugins' Patches.KeepFromBalancing tests, so nobody hooks it a second time ----
 
     [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
     [Function(CallingConventions.Microsoft)] public delegate void BalanceFn(nint front, nint units, nint partitions, nint specs, nint log);
@@ -181,7 +182,7 @@ public unsafe class FrontLine : Plugin
         _balance = Patches.Hook<BalanceFn>(Sig.Find(Signatures.ApplyArmiesBalancing), (front, units, partitions, specs, log) =>
         {
             var managed = Volatile.Read(ref _managed);
-            if (managed.Count > 0)
+            if (managed.Count > 0 || Patches.BalancingActive)
                 try
                 {
                     var unit = (nint*)*(nint*)units;
@@ -191,7 +192,10 @@ public unsafe class FrontLine : Plugin
                         var indices = (int*)*(nint*)part;
                         int n = *(int*)(part + 0xC), kept = 0;
                         for (var k = 0; k < n; k++)
-                            if (!managed.Contains(unit[indices[k]])) indices[kept++] = indices[k];
+                        {
+                            var u = unit[indices[k]];
+                            if (!managed.Contains(u) && !Patches.BalancingKeeps(u)) indices[kept++] = indices[k];
+                        }
                         *(int*)(part + 0xC) = kept; // the game skips empty partitions
                     }
                 }

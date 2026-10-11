@@ -104,6 +104,43 @@ public static unsafe partial class Patches
     /// <summary>Callable delegate for a game function.</summary>
     public static T Function<T>(nint at) where T : Delegate => Hooks.CreateWrapper<T>(at, out _);
 
+    /// <summary>
+    /// Executable memory holding <paramref name="code"/>, freed when its owner reverts: a cave to re-run a function
+    /// whose entry an <see cref="Asm"/> hook replaced — its overwritten first instructions, then a jump back past them.
+    /// </summary>
+    public static nint Cave(byte[] code)
+    {
+        RequireOwner();
+        var at = (nint)NativeMemory.Alloc((nuint)code.Length);
+        WriteCode(at, code);
+        Record(() => NativeMemory.Free((void*)at));
+        return at;
+    }
+
+    private static Func<nint, bool>? _keepFromBalancing;
+
+    /// <summary>
+    /// Tests for units AI army balancing must not move. FrontLine owns the only ApplyArmiesBalancing hook and applies
+    /// every subscriber — a second hook on that function stacks detours, which crashes Reloaded. Undone with the plugin.
+    /// </summary>
+    public static event Func<nint, bool>? KeepFromBalancing
+    {
+        add { _keepFromBalancing += value; Record(() => _keepFromBalancing -= value); }
+        remove { _keepFromBalancing -= value; }
+    }
+
+    /// <summary>Whether any <see cref="KeepFromBalancing"/> test is registered.</summary>
+    public static bool BalancingActive => _keepFromBalancing != null;
+
+    /// <summary>True when any <see cref="KeepFromBalancing"/> subscriber wants the unit left where it is.</summary>
+    public static bool BalancingKeeps(nint unit)
+    {
+        if (_keepFromBalancing == null) return false;
+        foreach (Func<nint, bool> keep in _keepFromBalancing.GetInvocationList())
+            if (keep(unit)) return true;
+        return false;
+    }
+
     private static void Claim(nint at, int length)
     {
         var owner = Owner ?? "?";
