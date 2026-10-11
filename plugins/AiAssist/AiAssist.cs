@@ -214,10 +214,19 @@ public unsafe class AiAssist : Plugin
             _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(Signatures.MoveCommand);
             _game = new PerGame(() =>
             {
+                // Everything cached across games must go: a new world frees the old one's fronts,
+                // provinces and units, and a cached pointer into it is the crash the old build died of.
                 _sent.Clear();
                 _gap.Clear();
                 _posted.Clear();
                 Axes.Clear();
+                Factors.Clear();
+                LastBattle.Clear();
+                Breakthroughs.Clear();
+                BaseThreat.Clear();
+                TraitNames.Clear();
+                _line.Clear();
+                _capitals = (0, []);
                 _beachheads = [];
                 _provinceCount = -1;
             });
@@ -669,7 +678,6 @@ public unsafe class AiAssist : Plugin
     public delegate void PrioritiesFn(nint aiObj, nint country, nint scratch, nint buffer, nint entries, nint bases, nint totals, nint buffer2);
 
     private static PrioritiesFn? _updatePriorities; // the original through its relocated prologue: the entry is an asm stub
-    private static nint _prioritiesStack; // the stub's parking spot for the 5th..8th (stack) arguments
     private static AiAssist? _self; // the loaded plugin: the thunk is static, the retreat logic is instance code
     private static int _thunkFailed;
     private int _holderOffset, _countOffset, _arrayOffset;
@@ -689,7 +697,6 @@ public unsafe class AiAssist : Plugin
         // arguments (the safe shape), and return to the game. The thunk runs the original through a cave — the first 38
         // bytes are position-independent, the 39th is rip-relative — then the retreat logic, as before.
         _self = this;
-        _prioritiesStack = Allocator.AllocZeroed(32);
         var fn = Sig.Find(Signatures.UpdateRegionPriorities);
         var cave = new byte[50]; // the function's first 38 bytes, then `mov rax, fn+38; jmp rax`
         new ReadOnlySpan<byte>((void*)fn, 38).CopyTo(cave);
@@ -699,33 +706,41 @@ public unsafe class AiAssist : Plugin
         Patches.Warmup(ThunkOf(nameof(UpdatePriorities)));
         Patches.Asm(fn, 38,
             "use64",
-            $"mov r11, 0x{_prioritiesStack:X}",
-            "mov rax, [rsp+0x28]", // entries: the 5th argument
-            "mov [r11], rax",
-            "mov rax, [rsp+0x30]", // bases: the 6th argument
-            "mov [r11+8], rax",
-            "mov rax, [rsp+0x38]", // totals: the 7th argument
-            "mov [r11+0x10], rax",
-            "mov rax, [rsp+0x40]", // buffer2: the 8th argument
-            "mov [r11+0x18], rax",
-            $"mov r10, 0x{(nint)(delegate* unmanaged<nint, nint, nint, nint, void>)&UpdatePriorities:X}",
-            "sub rsp, 8", // the entry's stack is one push off the alignment a call must be made on
+            // All eight arguments parked in a frame of this thread's own stack, its address as the
+            // thunk's one argument. A global parking slot races: AI passes of several countries run
+            // in parallel, one thread's parked arguments overwritten before it reads them means it
+            // calls the original with garbage — an access violation the runtime dies of. The parked
+            // values sit above the 32 bytes the callee may use as its own scratch.
+            "sub rsp, 0x78",
+            "mov [rsp+0x28], rcx",
+            "mov [rsp+0x30], rdx",
+            "mov [rsp+0x38], r8",
+            "mov [rsp+0x40], r9",
+            "mov rax, [rsp+0xA0]", // entries: the 5th argument
+            "mov [rsp+0x48], rax",
+            "mov rax, [rsp+0xA8]", // bases: the 6th argument
+            "mov [rsp+0x50], rax",
+            "mov rax, [rsp+0xB0]", // totals: the 7th argument
+            "mov [rsp+0x58], rax",
+            "mov rax, [rsp+0xB8]", // buffer2: the 8th argument
+            "mov [rsp+0x60], rax",
+            "lea rcx, [rsp+0x28]",
+            $"mov r10, 0x{(nint)(delegate* unmanaged<nint, void>)&UpdatePriorities:X}",
             "call r10",
-            "add rsp, 8",
+            "add rsp, 0x78",
             "jmp qword [rsp]"); // to the game's return address
     }
 
     [UnmanagedCallersOnly]
-    private static void UpdatePriorities(nint aiObj, nint country, nint scratch, nint buffer)
+    private static void UpdatePriorities(nint slot)
     {
-        // read before the original runs: if it recurses into itself, the inner call reparks the slot
-        var (entries, bases, totals, buffer2) = (*(nint*)_prioritiesStack, *(nint*)(_prioritiesStack + 8), *(nint*)(_prioritiesStack + 0x10), *(nint*)(_prioritiesStack + 0x18));
-        _updatePriorities!(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
+        var s = (nint*)slot;
+        _updatePriorities!(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]);
         try
         {
             if (!SheepMod.Active) return;
-            _self!.AirRetreat(country, entries);
-            if (_airbaseEvac) EvacuateAirbases(country, bases);
+            _self!.AirRetreat(s[1], s[4]);
+            if (_airbaseEvac) EvacuateAirbases(s[1], s[5]);
         }
         catch (Exception e) { if (Interlocked.Exchange(ref _thunkFailed, 1) == 0) CasLog.Error($"air hook: {e}"); }
     }
@@ -855,7 +870,6 @@ public unsafe class AiAssist : Plugin
     [Function(CallingConventions.Microsoft)] public delegate nint TacticalFn(nint mission, nint targets, int chanceBase, int seed, byte includeDivisions, byte firstOnly);
 
     private static TacticalFn? _collectTactical; // the collector through its relocated prologue: the entry is an asm stub
-    private static nint _tacticalStack; // the stub's parking spot for the 5th and 6th (stack) arguments
     private static readonly Logger CasLog = new("AiAssist");
     private static int _casFailed;
     private static bool _casConcentration;
@@ -871,7 +885,6 @@ public unsafe class AiAssist : Plugin
     private void LoadCas()
     {
         var at = Sig.Find(Signatures.CollectTacticalTargets);
-        _tacticalStack = Allocator.AllocZeroed(8);
         var cave = new byte[30]; // the collector's first 18 bytes (no relative references), then `mov rax, at+18; jmp rax`
         new ReadOnlySpan<byte>((void*)at, 18).CopyTo(cave);
         cave[18] = 0x48; cave[19] = 0xB8; cave[28] = 0xFF; cave[29] = 0xE0;
@@ -880,26 +893,33 @@ public unsafe class AiAssist : Plugin
         Patches.Warmup(ThunkOf(nameof(CollectTactical))); // its first call comes from an AI thread: compile it here first
         Patches.Asm(at, 18,
             "use64",
-            $"mov r11, 0x{_tacticalStack:X}",
-            "mov r10d, [rsp+0x28]", // includeDivisions: the 5th argument
-            "mov [r11], r10d",
-            "mov r10d, [rsp+0x30]", // firstOnly: the 6th argument
-            "mov [r11+4], r10d",
-            $"mov r10, 0x{(nint)(delegate* unmanaged<nint, nint, int, int, nint>)&CollectTactical:X}",
-            "sub rsp, 8", // the entry's stack is one push off the alignment a call must be made on
+            // All six arguments parked in a frame of this thread's own stack (see LoadAirRetreat: a
+            // global parking slot races between threads), above the callee's own 32-byte scratch.
+            "sub rsp, 0x58",
+            "mov [rsp+0x28], rcx",
+            "mov [rsp+0x30], rdx",
+            "mov [rsp+0x38], r8",
+            "mov [rsp+0x40], r9",
+            "mov rax, [rsp+0x80]", // includeDivisions: the 5th argument
+            "mov [rsp+0x48], rax",
+            "mov rax, [rsp+0x88]", // firstOnly: the 6th argument
+            "mov [rsp+0x50], rax",
+            "lea rcx, [rsp+0x28]",
+            $"mov r10, 0x{(nint)(delegate* unmanaged<nint, nint>)&CollectTactical:X}",
             "call r10",
-            "add rsp, 8",
+            "add rsp, 0x58",
             "jmp qword [rsp]"); // to the game's return address, rax = the collector's result
     }
 
     [UnmanagedCallersOnly]
-    private static nint CollectTactical(nint mission, nint targets, int chanceBase, int seed)
+    private static nint CollectTactical(nint slot)
     {
-        var result = _collectTactical!(mission, targets, chanceBase, seed, *(byte*)_tacticalStack, *(byte*)(_tacticalStack + 4));
+        var s = (nint*)slot;
+        var result = _collectTactical!(s[0], s[1], (int)s[2], (int)s[3], (byte)s[4], (byte)s[5]);
         try
         {
-            if (SheepMod.Active && _casConcentration && (*(int*)(mission + MissionBitsOfAirMission) & CasMission) != 0)
-                ConcentrateCas(mission, targets);
+            if (SheepMod.Active && _casConcentration && (*(int*)(s[0] + MissionBitsOfAirMission) & CasMission) != 0)
+                ConcentrateCas(s[0], s[1]);
         }
         catch (Exception e) { if (Interlocked.Exchange(ref _casFailed, 1) == 0) CasLog.Error($"CAS hook: {e}"); }
         return result;
