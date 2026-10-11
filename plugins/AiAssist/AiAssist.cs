@@ -668,7 +668,10 @@ public unsafe class AiAssist : Plugin
     [Function(CallingConventions.Microsoft)]
     public delegate void PrioritiesFn(nint aiObj, nint country, nint scratch, nint buffer, nint entries, nint bases, nint totals, nint buffer2);
 
-    private IHook<PrioritiesFn>? _priorities;
+    private static PrioritiesFn? _updatePriorities; // the original through its relocated prologue: the entry is an asm stub
+    private static nint _prioritiesStack; // the stub's parking spot for the 5th..8th (stack) arguments
+    private static AiAssist? _self; // the loaded plugin: the thunk is static, the retreat logic is instance code
+    private static int _thunkFailed;
     private int _holderOffset, _countOffset, _arrayOffset;
     private int _pulled;
     private static int _evacuated;
@@ -680,16 +683,51 @@ public unsafe class AiAssist : Plugin
         var at = Sig.FindAll(Signatures.StrategicAir, 2)[0];
         (_holderOffset, _countOffset, _arrayOffset) = (*(int*)(at + 3), *(byte*)(at + 14), *(byte*)(at + 36));
         _ = Sig.Find(Signatures.RegionAirData) + Sig.Find(Signatures.RegionCombatData); // the offsets below are still where they were
-        _priorities = Patches.Hook<PrioritiesFn>(Sig.Find(Signatures.UpdateRegionPriorities), (aiObj, country, scratch, buffer, entries, bases, totals, buffer2) =>
+        // A managed detour on these 8 arguments crashed the game: 4 stack arguments make Reloaded's reverse stub enter
+        // managed code misaligned (CreateArrow's and CollectTacticalTargets' crash class, dump confirmed). The entry is
+        // plain assembly instead: park the stack arguments, call the thunk on an aligned stack with only register
+        // arguments (the safe shape), and return to the game. The thunk runs the original through a cave — the first 38
+        // bytes are position-independent, the 39th is rip-relative — then the retreat logic, as before.
+        _self = this;
+        _prioritiesStack = Allocator.AllocZeroed(32);
+        var fn = Sig.Find(Signatures.UpdateRegionPriorities);
+        var cave = new byte[50]; // the function's first 38 bytes, then `mov rax, fn+38; jmp rax`
+        new ReadOnlySpan<byte>((void*)fn, 38).CopyTo(cave);
+        cave[38] = 0x48; cave[39] = 0xB8; cave[48] = 0xFF; cave[49] = 0xE0;
+        BitConverter.GetBytes(fn + 38).CopyTo(cave, 40);
+        _updatePriorities = Patches.Function<PrioritiesFn>(Patches.Cave(cave));
+        Patches.Warmup(ThunkOf(nameof(UpdatePriorities)));
+        Patches.Asm(fn, 38,
+            "use64",
+            $"mov r11, 0x{_prioritiesStack:X}",
+            "mov rax, [rsp+0x28]", // entries: the 5th argument
+            "mov [r11], rax",
+            "mov rax, [rsp+0x30]", // bases: the 6th argument
+            "mov [r11+8], rax",
+            "mov rax, [rsp+0x38]", // totals: the 7th argument
+            "mov [r11+0x10], rax",
+            "mov rax, [rsp+0x40]", // buffer2: the 8th argument
+            "mov [r11+0x18], rax",
+            $"mov r10, 0x{(nint)(delegate* unmanaged<nint, nint, nint, nint, void>)&UpdatePriorities:X}",
+            "sub rsp, 8", // the entry's stack is one push off the alignment a call must be made on
+            "call r10",
+            "add rsp, 8",
+            "jmp qword [rsp]"); // to the game's return address
+    }
+
+    [UnmanagedCallersOnly]
+    private static void UpdatePriorities(nint aiObj, nint country, nint scratch, nint buffer)
+    {
+        // read before the original runs: if it recurses into itself, the inner call reparks the slot
+        var (entries, bases, totals, buffer2) = (*(nint*)_prioritiesStack, *(nint*)(_prioritiesStack + 8), *(nint*)(_prioritiesStack + 0x10), *(nint*)(_prioritiesStack + 0x18));
+        _updatePriorities!(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
+        try
         {
-            _priorities!.OriginalFunction(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
-            Safely(() =>
-            {
-                if (!SheepMod.Active) return;
-                AirRetreat(country, entries);
-                if (_airbaseEvac) EvacuateAirbases(country, bases);
-            });
-        });
+            if (!SheepMod.Active) return;
+            _self!.AirRetreat(country, entries);
+            if (_airbaseEvac) EvacuateAirbases(country, bases);
+        }
+        catch (Exception e) { if (Interlocked.Exchange(ref _thunkFailed, 1) == 0) CasLog.Error($"air hook: {e}"); }
     }
 
     /// <summary>
