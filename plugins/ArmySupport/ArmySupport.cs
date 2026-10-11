@@ -4,7 +4,7 @@ namespace ArmySupport;
 
 /// <summary>
 /// Support for the army: air wings and railway guns for field marshals (FieldMarshal.cs), railway gun positioning
-/// (RailwayGuns.cs), airbase send capacity (Airbases.cs) and auto rebase (Rebase.cs).
+/// (RailwayGuns.cs), airbase send capacity (Airbases.cs), auto rebase (Rebase.cs) and the Ctrl+Alt+G army organizer (Organize.cs).
 /// </summary>
 [Plugin("com.green1052.armysupport", "Army Support", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class ArmySupport : Plugin
@@ -18,10 +18,13 @@ public unsafe partial class ArmySupport : Plugin
         var noSea = Config.Bind("RailwayGuns", "NoSeaTransfer", true, "Never ship railway guns by sea; they only move along their own rail network. Single player.");
         var coverage = Math.Clamp(Config.Bind("Rebase", "Coverage", 100,
             "Fly a wing reaching less than this much (%) of its mission region to a usable airbase with room that reaches more (wings attached to an army: the game does it); 0: off."), 0, 100);
+        var organize = Config.Bind("Organize", "Organize", true,
+            "Ctrl+Alt+G with divisions selected: split them into armies of the game's army size (neighbours together), each under the best idle general, in the army group most of them came from or a new one under the best idle field marshal.");
 
         LoadSending();
         if (coverage > 0) LoadRebase(coverage);
         if (fieldMarshal) LoadFieldMarshal();
+        if (organize) LoadOrganize();
         if (!Multiplayer) LoadRailwayGuns(frontPenalty, noSea); // changes the game
     }
 }

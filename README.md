@@ -81,6 +81,7 @@ Front line micro a player does by hand, with the battle plan UI's own commands (
 - **Railway gun positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. The penalty and sea transfer are settings.
 - **Airbase capacity:** with air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
 - **Auto rebase:** a wing whose airbase reaches less than a share of its mission region (setting, 100% by default; 0 turns it off) flies to a usable airbase with room that reaches more, keeping its mission. Wings attached to an army are left to the game, which already does this.
+- **Army organizer:** select divisions (drag a box, or click armies' and field marshals' cards) and press **Ctrl+Alt+G**. They are split into armies of at most the game's army size for a general (24 in vanilla), divisions standing near each other together; a whole army of at least half that size stays as it is. Each new army gets the best idle general, and all of them join the army group most of the divisions came from, or a new army group under the best idle field marshal. Armies without an idle general are left without one. The army list's own commands (multiplayer works). Setting: on/off.
 
 ### ChecksumPatcher
 Keeps achievements available when mods change the checksum (Ironman already works with mods). Patched in memory only.
