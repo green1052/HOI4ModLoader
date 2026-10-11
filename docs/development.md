@@ -95,6 +95,8 @@ If a pattern stops matching after a game update, the loader leaves the vanilla f
 - `hoi4.exe` carries its own allocation functions (`malloc`, `calloc`, `realloc`, `free`, `_msize`; static CRT). Before the game's CRT starts, the loader redirects them to a few lines of native code in `version.dll` (`bootstrap\allocator.c`).
 - Memory allocated before the switch is freed back to the CRT heap, so mixing is safe.
 - The process-wide redirect (ucrtbase) is off (`MIMALLOC_DISABLE_REDIRECT=1`): it doesn't reach the game itself and would only change other DLLs.
+- Off by default (`[Performance] MimallocAllocator`; the old `Mimalloc` key, on by default, is pruned from existing configs like any setting the loader no longer binds). It measured no faster, and it exposes the game's use-after-free bugs: the Windows heap leaves a freed block's contents alone, mimalloc writes its free-list pointer over the first qword (a vtable).
+- Known case: ActivateDecision (`Allocator.ActivateDecisionSig`) runs a targeted decision's effect, which can free the decision instance, then calls its vtable. With mimalloc on the loader hooks it and wraps it in `hm_defer(1)` / `hm_defer(0)`: that thread's frees are queued and done when the call returns (nesting counts; the queue is capped, past that frees happen at once).
 
 ## Multiplayer detection
 A session whose server is a `CNetworkServer` (host) or `CProxyServer` (client) is multiplayer. Joining a lobby unloads `AffectsGameState` plugins; returning to single player loads them again.

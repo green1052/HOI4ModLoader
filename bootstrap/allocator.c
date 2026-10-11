@@ -28,10 +28,47 @@ __declspec(dllexport) void* hm_malloc(size_t size) { return mi_malloc(size); }
 
 __declspec(dllexport) void* hm_calloc(size_t count, size_t size) { return mi_calloc(count, size); }
 
-__declspec(dllexport) void hm_free(void* p) {
-    if (!p) return;
+static void release(void* p) {
     if (mi_is_in_heap_region(p)) mi_free(p);
     else HeapFree(*g_crtHeap, 0, p);
+}
+
+// Deferred frees: the game reads some objects right after freeing them (the Windows heap leaves a freed block's contents
+// alone, mimalloc writes its free list into it). While a thread is inside hm_defer(1) .. hm_defer(0), its frees are queued
+// and done at the outermost hm_defer(0). The queue lives on the process heap, capped: past the cap frees happen at once.
+#define DEFER_CAP (1 << 20)
+static __declspec(thread) int t_deferDepth;
+static __declspec(thread) void** t_deferred;
+static __declspec(thread) size_t t_deferredCount, t_deferredCapacity;
+
+static int queue(void* p) {
+    if (t_deferredCount == t_deferredCapacity) {
+        if (t_deferredCapacity >= DEFER_CAP) return 0;
+        size_t capacity = t_deferredCapacity ? t_deferredCapacity * 2 : 256;
+        void** grown = t_deferred ? HeapReAlloc(GetProcessHeap(), 0, t_deferred, capacity * sizeof(void*))
+                                  : HeapAlloc(GetProcessHeap(), 0, capacity * sizeof(void*));
+        if (!grown) return 0;
+        t_deferred = grown;
+        t_deferredCapacity = capacity;
+    }
+    t_deferred[t_deferredCount++] = p;
+    return 1;
+}
+
+__declspec(dllexport) void hm_defer(int on) {
+    if (on) {
+        t_deferDepth++;
+        return;
+    }
+    if (t_deferDepth == 0 || --t_deferDepth > 0) return;
+    for (size_t i = 0; i < t_deferredCount; i++) release(t_deferred[i]);
+    t_deferredCount = 0;
+}
+
+__declspec(dllexport) void hm_free(void* p) {
+    if (!p) return;
+    if (t_deferDepth > 0 && queue(p)) return;
+    release(p);
 }
 
 __declspec(dllexport) size_t hm_msize(void* p) {

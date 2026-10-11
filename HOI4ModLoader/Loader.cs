@@ -44,7 +44,9 @@ public static class Loader
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
                 "Reload all plugins when a DLL in HOI4ModLoader\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
-            if (config.Bind("Performance", "Mimalloc", true, "Use mimalloc for the game's memory allocations instead of the Windows heap (takes effect at the next start)."))
+            // Was "Mimalloc", on by default: renamed so the old entry is pruned below and existing installs go back to the Windows heap.
+            if (config.Bind("Performance", "MimallocAllocator", false,
+                "Use mimalloc for the game's memory allocations instead of the Windows heap (takes effect at the next start). Measured no faster, and it can turn latent use-after-free bugs in the game into crashes."))
             {
                 Patches.Owner = "HOI4ModLoader"; // never reverted: mimalloc's blocks can't go back to the Windows heap
                 try
@@ -100,6 +102,13 @@ public static class Loader
                 Reload();
             });
             var crashTest = config.Bind("Debug", "CrashTest", 0, CrashTestDescription);
+            // Every setting is bound by now: drop the ones the loader no longer has (e.g. the old [Performance] Mimalloc).
+            try
+            {
+                var removed = config.RemoveUnbound("");
+                if (removed.Count > 0) Log.Info($"removed settings it no longer has: {string.Join(", ", removed)}");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"config cleanup: {e.Message}"); }
             if (crashTest is 1 or 2)
             {
                 config.Set("Debug", "CrashTest", 0, CrashTestDescription); // once: the next start runs normally
