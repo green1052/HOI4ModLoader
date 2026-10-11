@@ -42,6 +42,99 @@ public unsafe partial class AiAssist
             try { Rescore(closure, province); } // no closure: once per candidate beach
             catch (Exception e) { Failed(e); }
         });
+        _supportValid = Patches.Hook<ObjectiveFn>(Sig.Find(Signatures.InvasionSupportValid), objective =>
+        {
+            var valid = _supportValid!.OriginalFunction(objective);
+            if (valid == 0 || !SheepMod.Active) return valid;
+            try { TrackRoute(objective); }
+            catch (Exception e) { Failed(e); }
+            return valid;
+        });
+    }
+
+    // ---- Invasion escort: fighters (and naval bombers) over the sea regions an AI landing has to sail through ----
+    //
+    // Vanilla already does the naval side: a landing only sails once its country (with allies) dominates every strategic sea region
+    // on its route (COrder::CanExecute 0x14103CA80 -> 0x140EA1250 -> 0x141003F50, DOMINANCE_CONTROLLED_THRESHOLD_RATIO; the AI's
+    // launch reads it cached at COrder+0x11A, written by 0x14102BB10), and the naval AI's CInvasionSupportObjective collects those
+    // regions (0x1420141F0) for its fleets, at the priority common/ai_navy/goals gives naval_invasion_support (mod-able).
+    // NAI.PATROL_FLEETS_PER_INVASION_REGION_ON_PATH is read by nothing but its loader. The air AI never looks at the route: a sea
+    // region's fighters follow the enemy planes seen there (NAVAL_FIGHTERS_PER_PLANE). So the route is taken from the support objective.
+
+    // CInvasionSupportObjective: +8 CCountry*, +0x10 CPdxArray<CStrategicRegion*> the route's regions (from the path's sea provinces).
+    private const int CountryOfObjective = 0x08, RegionsOfObjective = 0x10;
+    private const int RouteHours = 72, NavalStrike = 4, EscortPercent = 200, EscortFighters = 100; // planes
+
+    [Function(CallingConventions.Microsoft)] public delegate byte ObjectiveFn(nint objective);
+
+    private IHook<ObjectiveFn>? _supportValid;
+    private static int _escorted;
+    // (tag, objective) -> when last seen alive, its route's region ids. Never dereferenced; stale ones expire.
+    private static readonly ConcurrentDictionary<(int Tag, nint Objective), (int Hour, int[] Regions)> Routes = new();
+
+    /// <summary>Records a live invasion support objective's route (region ids), once an hour. Naval AI worker threads: read only.</summary>
+    private static void TrackRoute(nint objective)
+    {
+        var country = *(nint*)(objective + CountryOfObjective);
+        var tag = country == 0 ? 0 : *(int*)(country + 8);
+        if (tag <= 0 || tag == Game.ControlledTag) return;
+        var hour = Hour;
+        if (Routes.TryGetValue((tag, objective), out var kept))
+        {
+            if (kept.Hour == hour) return;
+        }
+        else
+            foreach (var (key, route) in Routes)
+                if (hour - route.Hour is < 0 or >= RouteHours) Routes.TryRemove(key, out _); // a new objective: drop the dead ones
+        var regions = Native.PdxArray(objective + RegionsOfObjective);
+        var ids = new int[regions.Length];
+        for (var i = 0; i < ids.Length; i++) ids[i] = regions[i] == 0 ? 0 : *(int*)(regions[i] + SuperiorityIdOfRegion);
+        Routes[(tag, objective)] = (hour, ids);
+    }
+
+    /// <summary>
+    /// The sea regions on the routes of the country's planned landings, where the air AI scored them at all: twice the fighters vanilla
+    /// asks for (a hundred at least) and twice the naval bombers (those follow enemy ships). Scores are never raised, as with bombing
+    /// targets: only how many planes a region the allocator already serves wants. Writes only this country's own entries: AI worker threads.
+    /// </summary>
+    private static void EscortInvasions(nint country, nint entries, nint totals)
+    {
+        var tag = *(int*)(country + 8);
+        if (tag <= 0 || tag == Game.ControlledTag) return; // no IsEmpty: it takes every lock
+        var data = *(nint*)entries;
+        var n = *(int*)(entries + 0xC);
+        if (data == 0 || n <= 0) return;
+        Span<byte> done = n <= 4096 ? stackalloc byte[n] : new byte[n]; // a region on two routes is raised once
+        done.Clear();
+        var hour = Hour;
+        long fighters = 0, bombers = 0;
+        foreach (var (key, route) in Routes)
+        {
+            if (key.Tag != tag || hour - route.Hour is < 0 or >= RouteHours) continue;
+            foreach (var id in route.Regions)
+            {
+                var i = id - 1; // entry 0 is region 1
+                if ((uint)i >= (uint)n || done[i] != 0) continue;
+                done[i] = 1;
+                var entry = data + (nint)i * RegionEntrySize;
+                var region = *(nint*)(entry + RegionOfEntry);
+                if (region == 0 || LandRegion(region) || *(long*)(entry + ScoreOfEntry) <= 0) continue;
+                var fighter = (long*)(entry + WishesOfEntry);
+                var raised = Math.Max(*fighter * EscortPercent / 100, EscortFighters * Native.FixedPoint);
+                fighters += raised - *fighter;
+                *fighter = raised;
+                var strike = (long*)(entry + WishesOfEntry + 8 * NavalStrike);
+                bombers += *strike * (EscortPercent - 100) / 100;
+                *strike = *strike * EscortPercent / 100;
+            }
+        }
+        if (fighters == 0 && bombers == 0) return;
+        if (totals != 0)
+        {
+            *(long*)totals += fighters; // the per-mission sums URP already made
+            *(long*)(totals + 8 * NavalStrike) += bombers;
+        }
+        Interlocked.Increment(ref _escorted);
     }
 
     /// <summary>Scales a kept candidate's vanilla score by its beach factor. TBB workers: game state read only, the score under the scorer's lock.</summary>

@@ -8,13 +8,15 @@ namespace AiAssist;
 /// - Hold the line: at war, every front province keeps a defender (front requests, regrouping and army balancing can't
 ///   take it), holes are refilled from nearby (key ground first), reserves stand a province behind, freshly arrived
 ///   divisions stay a week, worn-out divisions rest behind the line and divisions in a closing salient pull out (both go
-///   back once rested), and no "attack on" starts while the threatened line is thinly manned.
+///   back once rested), and no "attack on" starts while the threatened line is thinly manned. New divisions go to the grad's or the line's
+///   holes, then the most thinly held front, first.
 /// - Beach defence: landings are walled in and attacked at once.
 /// - Breakthrough axis: local attacks (and close air support) keep to the AI's own armoured spearhead while it attacks, moving on
 ///   with it, else to the theatre's thinnest enemy sector for a day; off the axis only pinning attacks on enemy stacks next to it.
 /// - Defensive postures: facing a much stronger enemy, a country gives up exposed ground for its grad (a minimum cut through its
 ///   provinces: rivers, rough ground, forts, few attack directions), holds it, and counterattacks only fought-out spearheads.
-/// - Strategic invasions: naval invasions pick thinly held, valuable beaches and wait (a week at most) while their beach is crowded.
+/// - Strategic invasions: naval invasions pick thinly held, valuable beaches and wait (a week at most) while their beach is crowded;
+///   fighters and naval bombers cover the sea regions on a planned landing's route.
 /// - Strategic paradrops: paratroopers of an army on the axis drop onto empty, valuable enemy ground behind the line near it.
 /// - Attack targets: local attacks pick pocket-closing, then valuable, then front-shortening targets instead of at random
 ///   (Sheep's pocket test in script is never read); next to a pocket of our own, the target that opens a corridor to it
@@ -41,7 +43,8 @@ public unsafe partial class AiAssist : Plugin
             "At war, the AI keeps a division in every province of a front that borders the enemy; its regrouping can't take a province's last defender, the divisions walling in a pocket, "
             + "a reserve or a division that arrived this week. Free divisions walk back into empty line provinces (ports, victory points, river banks, cities and mountains first), "
             + "a country with divisions to spare keeps reserves a province behind its line, and one short of divisions for its line doesn't start attacks. "
-            + "Worn-out divisions in contact rest behind the line where another of ours holds their province, and divisions in a salient whose way back is closing pull out; both go back to a front once rested.");
+            + "Worn-out divisions in contact rest behind the line where another of ours holds their province, and divisions in a salient whose way back is closing pull out; both go back to a front once rested. "
+            + "Newly deployed divisions go where they are needed most first: the grad's holes (DefensivePostures), else empty line provinces, then the most thinly held front.");
         _beachDefense = Config.Bind("AI", "BeachDefense", true,
             "Naval landings are answered at once: free divisions next to the beachhead wall it in and attack into it; vanilla leaves it alone until the front collapses.");
         _axis = Config.Bind("AI", "BreakthroughAxis", true,
@@ -71,7 +74,8 @@ public unsafe partial class AiAssist : Plugin
             "Supply (% of what the attacking province needs) it must get, or another province of ours next to the target must have to spare, for a local attack."), 1, 200);
         _strategicInvasions = Config.Bind("AI", "StrategicInvasions", true,
             "The AI picks the beach for a naval invasion by what is there: thinly held coast near victory points, capitals, supply hubs, airfields and resources first, "
-            + "beaches with enemy divisions nearby, land forts or coastal bunkers last. A planned landing waits (a week at most) while the enemy divisions around its beach outnumber half the landing.");
+            + "beaches with enemy divisions nearby, land forts or coastal bunkers last. A planned landing waits (a week at most) while the enemy divisions around its beach outnumber half the landing. "
+            + "The sea regions on a planned landing's route get twice the fighters the air AI wants there (100 at least) and twice the naval bombers.");
         _paradrops = Config.Bind("AI", "StrategicParadrops", true,
             "The AI uses its paratroopers (needs BreakthroughAxis): up to four paradrop-capable divisions of an army on its breakthrough axis fly from the nearest airbase that can carry them "
             + "onto an empty enemy province behind the line near the axis (victory points, supply hubs, airfields, pockets first). They jump only when vanilla allows the drop "
@@ -93,9 +97,12 @@ public unsafe partial class AiAssist : Plugin
             _gap.Clear();
             _posted.Clear();
             _resting.Clear();
+            _fresh.Clear();
+            Known.Clear();
             Axes.Clear();
             AxisArmies.Clear();
             Beaches.Clear();
+            Routes.Clear();
             Holds.Clear();
             ClearParadrops();
             _line.Clear();
@@ -112,7 +119,7 @@ public unsafe partial class AiAssist : Plugin
         MainThread.Every(TimeSpan.FromSeconds(1), _game.Check); // AI threads read these caches: reset them soon after a load
         if (_attackTargets || _armorTerrain || _axis || _supplyAware || _postures) LoadPockets();
         if (refit) LoadRefit();
-        if (_airRetreat || _bombingTargets) LoadRegionPriorities();
+        if (_airRetreat || _bombingTargets || _strategicInvasions) LoadRegionPriorities();
         if (productionLines) LoadProductionLines(stickyDays);
         if (_axis) LoadCas();
         if (_holdLine || _axis) LoadFronts();
@@ -141,6 +148,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _held, "held {0} AI attack(s) or landing(s) (thin line or crowded beach)");
         Add(ref _landingsHeld, "{0} of those at a crowded beach");
         Add(ref _rescored, "re-scored {0} invasion beach candidate(s)");
+        Add(ref _escorted, "put fighters over {0} AI invasion route(s)");
         Add(ref _steered, "skipped {0} local attack target(s) for better ones");
         Add(ref _unsupplied, "skipped {0} local attack target(s) the attackers couldn't be supplied in");
         Add(ref _taken, "sent {0} division(s) into empty enemy provinces");
@@ -155,6 +163,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _escaped, "pulled {0} division(s) out of closing salients");
         Add(ref _defended, "answered {0} landing(s)");
         Add(ref _stationed, "left {0} fresh arrival(s) in place");
+        Add(ref _deployed, "sent {0} new division(s) where they were needed");
         Add(ref _cas, "focused {0} CAS pass(es) on the axis");
         Add(ref _spearheads, "put {0} breakthrough axis/axes on the AI's armoured spearhead");
         Add(ref _paradropped, "launched {0} AI paradrop(s)");

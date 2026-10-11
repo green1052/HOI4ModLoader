@@ -125,6 +125,13 @@ public static class Signatures
     /// </summary>
     [Signature] public const string InvasionTargetCandidate = "48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC A0 00 00 00 48 8B F2 4C 8B F9 48 8B 01 44 0F B6 00 90 45 84 C0 0F 85";
 
+    /// <summary>
+    /// CInvasionSupportObjective (naval AI goal) vtable slot 1, IsValid(objective) -> bool: one of its invasion orders (+0x38, 24 B refs, count +0x44)
+    /// still exists and no region of its route (+0x10, CPdxArray&lt;CStrategicRegion*&gt;, filled at creation by 0x1420141F0 from the order's
+    /// naval path) is closed to it; +8 CCountry*. The naval goal trackers ask every live objective each update, on the country's AI worker thread.
+    /// </summary>
+    [Signature] public const string InvasionSupportValid = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 20 33 F6 48 8B F9 8B DE 39 59 44 7E ? 48 63 C3 48 8D 14 40 48 8B 47 38 48 8D 0C D0 E8 ? ? ? ? 48 85 C0 75 ? FF C3 3B 5F 44 7C ? 32 C0 48 8B 5C 24 30 48 8B 74 24 38 48 8B 7C 24 40 48 83 C4 20 41 5E C3 83 FB FF 74 ? 39 77 1C 7E ? 4C 8B F6 66 66 0F 1F 84 00 00 00 00 00 48 8B 47 10 48 8B 4F 08";
+
     /// <summary>The building database's coastal_bunker CBuildingType* (db) (thread-safe magic-static key; the null type when undefined).</summary>
     [Signature] public const string CoastalBunkerType = "40 53 48 83 EC 30 48 8B D9 8B 15 ? ? ? ? 65 48 8B 04 25 58 00 00 00 B9 64 08 00 00 48 8B 04 D0 8B 04 01 39 05 ? ? ? ? 7F ? 4C 8D 43 58 48 8D 4B 40 48 8D 15 ? ? ? ? 48 83 C4 30 5B E9 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 83 3D ? ? ? ? FF 75 ? 48 8D 05 ? ? ? ? 48 89 44 24 20 48 C7 44 24 28 0E 00 00 00";
 

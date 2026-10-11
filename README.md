@@ -101,6 +101,8 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 - **Bombing targets:** strategic bombers ask for twice the planes for enemy regions next to the land front and half for ones far behind it, which also rank lower; vanilla ignores how far a region is from the front.
 - **Production lines:** a small factory cut to equipment whose lines run at 35 %+ efficiency is held for a while (setting: how many days), the factories coming off the smallest increases elsewhere; vanilla drains the last lines whatever their efficiency and restarts the factories at 10 %.
 - **Refit priority:** reinforcements and new equipment go to front-line divisions (in combat or next to the enemy) before rear and garrison ones.
+- **New divisions** (part of Hold the line): newly deployed divisions go where they are needed most first: the grad's holes, else the empty provinces of the threatened line, then the least held province of the most thinly held front, instead of wherever vanilla's theatre share-out sends them. They are left alone while they walk there.
+- **Invasion escort** (part of Strategic invasions): the sea regions on a planned landing's route get twice the fighters the air AI wants there (100 at least) and twice the naval bombers. Vanilla's navy already has to win those regions before a landing sails, and its fleets already head there; its air AI never looks at the route.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, never the checksum, so players without the loader can join the same game.

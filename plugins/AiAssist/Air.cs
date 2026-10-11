@@ -24,7 +24,7 @@ public unsafe partial class AiAssist
     private int _pulled;
     private static bool _airRetreat;
 
-    /// <summary>The region scoring hook, shared by air retreat and bombing targets; each runs only under its own setting.</summary>
+    /// <summary>The region scoring hook, shared by air retreat, bombing targets and invasion escorts; each runs only under its own setting.</summary>
     private void LoadRegionPriorities()
     {
         var at = Sig.FindAll(Signatures.StrategicAir, 2)[0];
@@ -37,6 +37,7 @@ public unsafe partial class AiAssist
             Safely(() =>
             {
                 if (_bombingTargets) BombingTargets(country, entries, totals); // first: air retreat may still lower a lost region
+                if (_strategicInvasions) EscortInvasions(country, entries, totals);
                 if (_airRetreat) AirRetreat(country, entries);
             });
         });

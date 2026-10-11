@@ -36,7 +36,12 @@ public unsafe partial class AiAssist
     // leave them until rested, then the AI puts them on a front again. Never dereferenced unless still one of the tag's units.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> _resting = new();
     private static delegate* unmanaged<nint, nint, nint, byte, byte, nint> _unassign;
-    private int _backfilled, _reserved, _defended, _rested, _escaped;
+    private int _backfilled, _reserved, _defended, _rested, _escaped, _deployed;
+    // New divisions we sent where they were needed, with their tag and since when: the theatre shuffle and army balancing leave
+    // them while they walk (FreshlyArrived keeps them a week once there). Never dereferenced.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> _fresh = new();
+    private static readonly Dictionary<int, HashSet<nint>> Known = []; // tag -> its land divisions at its last backfill pass (main thread)
+    private const int FreshWalkHours = 168;
 
     /// <summary>
     /// A division that took up its post only days ago: the theatre shuffle would march it somewhere else and back
@@ -59,7 +64,8 @@ public unsafe partial class AiAssist
         if (unit == 0) return false;
         var tag = *(int*)(unit + CommanderOfUnit);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
-        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit) || Paratrooper(unit)) return true;
+        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit) || Paratrooper(unit)
+            || _fresh.TryGetValue(unit, out var fresh) && Hour - fresh.Hour is >= 0 and < FreshWalkHours) return true;
         var country = Game.Country(tag);
         var location = *(nint*)(unit + LocationOfUnit);
         if (country == 0 || location == 0) return false;
@@ -130,6 +136,7 @@ public unsafe partial class AiAssist
             var tag = country == 0 ? 0 : *(int*)(country + 8);
             if (tag <= 0 || tag == player) continue;
             PrunePosted(country, tag);
+            var fresh = NewDivisions(country, tag); // every pass: one deployed in peace isn't new once war comes
             var grad = _postures ? Posture(country, tag, hour) : null; // a much stronger enemy: its grad is the line
             var line = grad != null ? Held(grad, tag) : LineOf(tag, hour);
             if (line == null)
@@ -137,6 +144,7 @@ public unsafe partial class AiAssist
                 Unpin(tag); // its front is gone: its reserve stops being one
                 continue;
             }
+            if (fresh.Count > 0) Deploy(country, tag, fresh, grad, line, hour, now);
             var sent = 0;
             var holes = line.Where(p => !_gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) < (grad?.Want.GetValueOrDefault(Game.Id(p), 1) ?? 1))
                 .Select(p => (Province: p, Key: Key(country, tag, p)))
@@ -153,6 +161,67 @@ public unsafe partial class AiAssist
             }
             if (Manned(tag, line)) Reserve(country, tag, line, now);
         }
+    }
+
+    /// <summary>The tag's land divisions that weren't there at its last pass (just deployed, or come from elsewhere); none on its first pass in a game.</summary>
+    // ponytail: by pointer; a new division in a dead one's memory is missed (vanilla places it), read a creation date if that shows.
+    private static List<nint> NewDivisions(nint country, int tag)
+    {
+        var units = new HashSet<nint>();
+        foreach (var unit in Native.PdxArray(country + UnitsOfCountry))
+            if (unit != 0 && *(int*)(unit + KindOfUnit) == 0) units.Add(unit);
+        var fresh = Known.TryGetValue(tag, out var old) ? units.Where(u => !old.Contains(u)).ToList() : [];
+        Known[tag] = units;
+        foreach (var (unit, since) in _fresh)
+            if (since.Tag == tag && Hour - since.Hour is < 0 or >= FreshWalkHours) _fresh.TryRemove(unit, out _);
+        return fresh;
+    }
+
+    /// <summary>
+    /// New divisions go where the country needs them most, not where vanilla's theatre share-out points: its grad's holes (on one), else
+    /// the empty provinces of its threatened line (key ground first), then the least held provinces of its most thinly held front until
+    /// that front is manned. Off their orders and pinned while they walk; whatever is left over is vanilla's.
+    /// </summary>
+    // ponytail: first come, first sent, no distance; new divisions mostly stand together at the deployment province.
+    private void Deploy(nint country, int tag, List<nint> fresh, Grad? grad, HashSet<nint> line, int hour, long now)
+    {
+        var free = new Queue<nint>(fresh.Where(u => Movable(u, tag)));
+        var holes = line.Where(p => !_gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) < (grad?.Want.GetValueOrDefault(Game.Id(p), 1) ?? 1))
+            .OrderByDescending(p => Key(country, tag, p));
+        foreach (var hole in holes)
+        {
+            if (free.Count == 0) return;
+            var unit = free.Dequeue();
+            if (grad != null ? Garrison(unit, Game.Id(hole), tag, now) : Dispatch(unit, Game.Id(hole), tag, hour, now)) Interlocked.Increment(ref _deployed);
+        }
+        if (grad != null || free.Count == 0) return; // on a grad, the old line's fronts are given up
+        Dictionary<nint, int>? thinnest = null;
+        foreach (var e in _line)
+        {
+            if (e.Value.Tag != tag || hour - e.Value.Hour is < 0 or >= LineFreshHours) continue;
+            var held = e.Value.Provinces.Where(p => *(int*)(p + ControllerOfProvince) == tag).ToDictionary(p => p, p => Standing(country, tag, p));
+            if (held.Count > 0 && (thinnest == null || held.Values.Sum() * thinnest.Count < thinnest.Values.Sum() * held.Count)) thinnest = held;
+        }
+        if (thinnest == null) return;
+        var divisions = thinnest.Values.Sum();
+        while (free.Count > 0 && thinnest.Count * 6 > divisions * 5) // ~1.2 divisions per threatened province, as Manned
+        {
+            var target = thinnest.MinBy(p => p.Value).Key;
+            if (!Dispatch(free.Dequeue(), Game.Id(target), tag, hour, now)) continue;
+            thinnest[target]++;
+            divisions++;
+            Interlocked.Increment(ref _deployed);
+        }
+    }
+
+    /// <summary>Off its orders (else its front walks it back) and to the province, pinned while it walks there (<see cref="Pinned"/>). Main thread.</summary>
+    private static bool Dispatch(nint unit, int province, int tag, int hour, long now)
+    {
+        var group = *(nint*)(unit + GroupOfUnit);
+        if (group != 0) Unassign(unit, group);
+        if (!Send(unit, province, now, GapMs)) return false;
+        _fresh[unit] = (tag, hour);
+        return true;
     }
 
     /// <summary>Drops the bookings whose time is up: a sent division is free again, a hole may be refilled. Main thread.</summary>
