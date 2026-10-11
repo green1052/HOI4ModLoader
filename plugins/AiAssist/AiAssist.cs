@@ -395,6 +395,7 @@ public unsafe class AiAssist : Plugin
         if (*(ushort*)(site + 5) != 0xC084) throw new InvalidOperationException("micro attack candidate check: no `test al,al` after the call");
         // `call CantMoveInto; test al,al` (7 bytes: the hook's jump takes more than the call's 5) becomes a call of the filter
         // and the same test, for the `jnz skip` right after. rsp is 16-aligned at the call and its home space reserved.
+        Patches.Warmup(ThunkOf(nameof(PocketFilter))); // its first call comes from an AI thread: compile it here first
         Patches.Asm(site, 7, "use64", $"mov rax, 0x{(nint)(delegate* unmanaged<nint, nint, nint, byte>)&PocketFilter:X}", "call rax", "test al, al");
     }
 
@@ -403,6 +404,10 @@ public unsafe class AiAssist : Plugin
     /// enemy divisions, every target that wouldn't is skipped too; the game's random pick then takes a pocket-closing one.
     /// Vanilla's own rejections stay. AI threads: read only.
     /// </summary>
+    /// <summary>An UnmanagedCallersOnly thunk's metadata, for <see cref="Patches.Warmup"/>.</summary>
+    private static System.Reflection.MethodInfo ThunkOf(string name) =>
+        typeof(AiAssist).GetMethod(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
     [UnmanagedCallersOnly]
     private static byte PocketFilter(nint us, nint from, nint to)
     {
@@ -834,6 +839,7 @@ public unsafe class AiAssist : Plugin
         cave[18] = 0x48; cave[19] = 0xB8; cave[28] = 0xFF; cave[29] = 0xE0;
         BitConverter.GetBytes(at + 18).CopyTo(cave, 20);
         _collectTactical = Patches.Function<TacticalFn>(Patches.Cave(cave));
+        Patches.Warmup(ThunkOf(nameof(CollectTactical))); // its first call comes from an AI thread: compile it here first
         Patches.Asm(at, 18,
             "use64",
             $"mov r11, 0x{_tacticalStack:X}",

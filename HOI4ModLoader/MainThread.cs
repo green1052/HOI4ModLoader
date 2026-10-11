@@ -26,6 +26,7 @@ public static class MainThread
     {
         Patches.RequireOwner();
         if (_hook == null) Install();
+        System.Runtime.CompilerServices.RuntimeHelpers.PrepareDelegate(action); // first tick lands on the game's main thread: compile it here (Patches.Hook says why)
         var timer = new Timer(action, (long)interval.TotalMilliseconds);
         Timers.Add(timer);
         Patches.Record(() => Timers.Remove(timer));
@@ -44,6 +45,7 @@ public static class MainThread
                 if (Environment.CurrentManagedThreadId == Id) Log.Guard("timers", Tick); // never PeekMessage twice: it removes a message
                 return result;
             });
+            System.Runtime.CompilerServices.RuntimeHelpers.PrepareDelegate((Action)Tick); // same as the timers: compiled before the game can call it
         }
         finally
         {
