@@ -44,7 +44,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | ChecksumPatcher | Keeps achievements and ironman with mods | ✅ |
 | NoTelemetry | Blocks gameplay telemetry | ✅ |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
-| PlanTools | Batch stance and battle-plan controls for all your armies at once | ✅ |
+| PlanTools | Batch stance and battle-plan controls, and batch retreat, for all your armies at once | ✅ |
 | WarStats | A war ledger: casualties, war score, sea-region naval strength and equipment stockpile trends of every war, in one window | ✅ |
 | SupplyOverlay | Where a starving division's supply comes from, and your trade routes, drawn on any map mode | ✅ |
 
@@ -101,7 +101,7 @@ Keeps achievements and ironman available when the checksum changes. Patched in m
 Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports are untouched.
 
 ### PlanTools
-Hotkeys for all your armies and army groups at once, each posting the same command the battle-plan window's button posts: Ctrl+Alt+1/2/3 sets every stance (careful, balanced, rush), Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them. Each key is a setting.
+Hotkeys for all your armies and army groups at once, each posting the same command the battle-plan window's button posts: Ctrl+Alt+1/2/3 sets every stance (careful, balanced, rush), Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them, and Ctrl+Alt+R pulls every one of your divisions that is fighting back to a neighbouring province you control — the same move order the game's own retreat button makes. Each key is a setting.
 
 ### WarStats
 A button under the topbar's flag opens a war ledger: every war with the casualties both sides have taken and the war score, biggest wars first, each sea region where our fleets meet an enemy's with both sides' spotted strength, plus each produced equipment's stockpile as a 30-day trend line. Read-only, updated every second.

@@ -1,9 +1,11 @@
 ﻿l_english:
  com.green1052.plantools.name:0 "Plan Tools"
- com.green1052.plantools.desc:0 "Batch controls for your armies: Ctrl+Alt+1/2/3 sets every stance at once, Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them."
+ com.green1052.plantools.desc:0 "Batch controls for your armies: Ctrl+Alt+1/2/3 sets every stance at once, Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them, Ctrl+Alt+R pulls every fighting division back."
  com.green1052.plantools.Stance:0 "Stance keys"
  com.green1052.plantools.Stance.desc:0 "Ctrl+Alt+1/2/3 sets the stance (careful, balanced, rush) of every army and army group at once."
  com.green1052.plantools.Execute:0 "Activate key"
  com.green1052.plantools.Execute.desc:0 "Ctrl+Alt+E activates every battle plan at once."
  com.green1052.plantools.Halt:0 "Halt key"
  com.green1052.plantools.Halt.desc:0 "Ctrl+Alt+H halts every battle plan at once."
+ com.green1052.plantools.Retreat:0 "Retreat key"
+ com.green1052.plantools.Retreat.desc:0 "Ctrl+Alt+R pulls every fighting division of yours back to a neighbouring province you control."

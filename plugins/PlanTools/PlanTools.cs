@@ -11,12 +11,18 @@ public static class Signatures
 
     /// <summary>The plan's play button: (group CRefObj*, int orderId 0 = the whole group, char execute, char alsoArmies).</summary>
     [VTable] public const string ExecutePlan = "COrderExecuteCommand";
+
+    /// <summary>CMoveCommand ctor (mem[0x88], CArmy* unit, int province, bool clearQueue, int moveType, bool setFinalDestination,
+    /// ...) — as FrontLine posts it; the game turns a move order from combat into a retreat.</summary>
+    [Signature] public const string MoveCommand =
+        "48 89 4C 24 ? 53 48 83 EC 60 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10 C7 43 14 00 00 FF FF 66 89 4B 18 48 89 4B 1C 48 8D 05 ? ? ? ? 48 89 03 48 8D 4B 28";
 }
 
 /// <summary>
 /// Batch controls for the player's armies: Ctrl+Alt+1/2/3 sets every group's stance at once (careful, balanced, rush),
-/// Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them. Each key posts the same command the battle-plan
-/// window's own button posts for that group, so multiplayer lockstep holds and other players need nothing.
+/// Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them, Ctrl+Alt+R pulls every fighting division back.
+/// Each key posts the same command the battle-plan window's own button posts for that group, so multiplayer lockstep
+/// holds and other players need nothing.
 /// </summary>
 [Plugin("com.green1052.plantools", "Plan Tools", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class PlanTools : Plugin
@@ -28,11 +34,15 @@ public unsafe partial class PlanTools : Plugin
     private const int OrdersOfGroup = 0x98;       // first of the group's three COrder* arrays (+0x98/+0xB0/+0xC8, stride 0x18)
     private const int ExecutingOfOrder = 0x248;   // byte: the order is running
     private const int CommandSize = 0x38, GroupOfCommand = 0x28;
+    private const int UnitsOfCountry = 0x290, KindOfUnit = 8, CommanderTag = 0x1D8; // FrontLine's unit layouts
+    private const int LocationOfUnit = 0x1F0, CombatsOfUnit = 0x1A8, Retreating = 0x24C;
+    private const int ControllerOfProvince = 0x188, IdOfProvince = 0xA4, MoveSize = 0x88;
 
     private static readonly string[] Stances = ["careful", "balanced", "rush"];
-    private static readonly int[] Keys = ['1', '2', '3', 'E', 'H']; // with Ctrl+Alt held
+    private static readonly int[] Keys = ['1', '2', '3', 'E', 'H', 'R']; // with Ctrl+Alt held
     private readonly bool[] _down = new bool[Keys.Length];
-    private bool _stance = true, _execute = true, _halt = true;
+    private bool _stance = true, _execute = true, _halt = true, _retreat = true;
+    private delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
 
     public override void Load()
     {
@@ -40,6 +50,9 @@ public unsafe partial class PlanTools : Plugin
             "Ctrl+Alt+1/2/3 sets the stance of all your armies and army groups at once: careful, balanced, rush.");
         _execute = Config.Bind("Keys", "Execute", true, "Ctrl+Alt+E activates every battle plan at once.");
         _halt = Config.Bind("Keys", "Halt", true, "Ctrl+Alt+H halts every battle plan at once.");
+        _retreat = Config.Bind("Keys", "Retreat", true,
+            "Ctrl+Alt+R pulls every one of your divisions that is fighting back to a neighbouring province you control.");
+        _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(Signatures.MoveCommand);
         MainThread.Every(TimeSpan.FromMilliseconds(30), Poll);
     }
 
@@ -60,6 +73,33 @@ public unsafe partial class PlanTools : Plugin
         if (hit <= 2 && _stance) SetStance(tag, hit);
         else if (hit == 3 && _execute) Execute(tag, true);
         else if (hit == 4 && _halt) Execute(tag, false);
+        else if (hit == 5 && _retreat) Retreat(tag);
+    }
+
+    /// <summary>Every fighting division of <paramref name="tag"/> moves to a neighbouring province we control — a move
+    /// order out of combat is the retreat the game's own button orders. Divisions with nowhere to go stay.</summary>
+    private void Retreat(int tag)
+    {
+        var country = Game.Country(tag);
+        if (country == 0) return;
+        var moved = 0;
+        foreach (var unit in Native.PdxArray(country + UnitsOfCountry))
+        {
+            if (*(int*)(unit + KindOfUnit) != 0 || *(int*)(unit + CommanderTag) != tag) continue;
+            if (*(int*)(unit + CombatsOfUnit + 0xC) == 0 || *(byte*)(unit + Retreating) != 0) continue; // only the fighting
+            var from = *(nint*)(unit + LocationOfUnit);
+            if (from == 0) continue;
+            foreach (var id in Game.Neighbours(from))
+            {
+                var to = Game.Province(id);
+                if (to == 0 || *(int*)(to + ControllerOfProvince) != tag) continue; // ponytail: our own ground only; allied ground when asked for
+                var cmd = Allocator.AllocZeroed(MoveSize);
+                _move(cmd, unit, id, 1, 2, 0, 0, 0, 0, 0); // as the AI moves units
+                if (Commands.TryPost(cmd)) moved++;
+                break;
+            }
+        }
+        Log.Info($"retreat: {moved} division(s) pulled out of combat");
     }
 
     private void SetStance(int tag, int stance)
