@@ -5,8 +5,6 @@ namespace FrontLine;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
-    /// <summary>COrderAssignCommand ctor (mem[0x50], CPdxArray&lt;CArmy*&gt;* units, COrdersGroup* group, int orderId, bool): onto one of the group's (or its parent's) orders.</summary>
-    [Signature] public const string AssignCommand = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 4C 24 ? 56 57 41 54 41 56 41 57 48 83 EC 30 41 8B D9 49 8B E8 4C 8B FA 4C 8B F1 0F B6 BC 24 80 00 00 00 C6 41 08 00";
 
     [VTable] public const string LandCombat = "CLandCombat";
 }
@@ -53,7 +51,6 @@ public unsafe partial class FrontLine : Plugin
     private static readonly int[] PlanKeys = ['E', 'H']; // with Ctrl+Alt held: activate, halt
     private readonly bool[] _down = new bool[PlanKeys.Length];
 
-    private delegate* unmanaged<nint, nint, nint, int, byte, nint> _assign;
 
     /// <summary>
     /// What a division we moved does for us. Rest: rests (rotation, escape, plugging) and goes back once rested. Operation:
@@ -117,7 +114,7 @@ public unsafe partial class FrontLine : Plugin
         var micro = _rotation || _plugging || _escape || _attack || _fireBrigade || _depth || _shuffle;
         if (!micro && !operations) return;
 
-        _assign = (delegate* unmanaged<nint, nint, nint, int, byte, nint>)Sig.Find(Signatures.AssignCommand);
+        _ = Sig.Find(Commands.AssignSig);
         // The core's game functions: a broken pattern fails the load, not a turn.
         _ = Sig.Find(Commands.UnassignSig) + Sig.Find(Game.IsAtWarWithSig) + Sig.Find(Game.SameOrAlliedSig) + Sig.Find(Province.FortLevelSig)
             + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig) + Sig.VTable(Signatures.LandCombat);
@@ -503,11 +500,5 @@ public unsafe partial class FrontLine : Plugin
         return war;
     }
 
-    /// <summary>COrderAssignCommand from the game's own constructor (a refused one is freed whole by its destructor: Commands.Free).</summary>
-    private bool Assign(nint unit, nint group, int order)
-    {
-        var cmd = Allocator.AllocZeroed(0x50);
-        Native.WithPdxArray([unit], units => _assign(cmd, units, group, order, 0));
-        return Commands.TryPost(cmd);
-    }
+    private static bool Assign(nint unit, nint group, int order) => Commands.Assign(unit, group, order);
 }

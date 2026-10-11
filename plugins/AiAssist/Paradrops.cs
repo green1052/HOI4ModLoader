@@ -14,9 +14,12 @@ public unsafe partial class AiAssist
     private const int SourceCommandSize = 0x50;
     private const int MaxParatroopers = 4, ParadropMaxDefenders = 0, NearbyDefendersMax = 4, PocketBonus = 15, SourceSearchDepth = 12;
     private const int FindOrderHours = 3, GiveUpHours = 14 * 24, LaunchHours = 48, RetryHours = 24, CooldownHours = 7 * 24;
+    private const int DropHours = 2, PlanHours = 12; // drops in progress advance every two game hours; new ones are planned every twelve
 
     private static bool _paradrops;
     private static int _paradropped, _activeDrops; // _activeDrops: Drops.Count for AI threads (ConcurrentDictionary.IsEmpty takes every lock)
+    private static int _noParatroopers, _noAirbase, _notReady, _noTarget; // why the planner didn't drop, for the log (Sheep Mod's AI builds no paratroopers or transports)
+    private int _dropAt = Never, _planAt = Never;
     private static nint _deleteVTable, _assignVTable, _unassignVTable;
     private static delegate* unmanaged<nint, nint, int, int, nint, nint> _paradropSource; // (mem, group, source province, order id 0, CPdxArray<CArmy*>*)
     private static delegate* unmanaged<nint, nint, byte> _isParadropSource;               // (province, group)
@@ -47,7 +50,7 @@ public unsafe partial class AiAssist
         _assignVTable = Sig.VTable(Signatures.AssignOrderCommand);
         _unassignVTable = Sig.VTable(Signatures.UnassignOrderCommand);
         _ = Sig.VTable(Signatures.ParadropTargetCommand); // Commands.New looks it up by name: fail at load, not mid-drop
-        MainThread.Every(TimeSpan.FromSeconds(30), PlanParadrops);
+        MainThread.Every(TimeSpan.FromSeconds(1), PlanParadrops);
     }
 
     private static void ClearParadrops()
@@ -81,13 +84,17 @@ public unsafe partial class AiAssist
         return kept > 0;
     }
 
-    /// <summary>Every half minute: each AI country runs at most one paradrop at a time, from an army on its breakthrough axis.</summary>
+    /// <summary>
+    /// Every two game hours: each AI country runs at most one paradrop at a time, from an army on its breakthrough axis; new ones are
+    /// planned every twelve game hours.
+    /// </summary>
     private void PlanParadrops()
     {
-        if (!Game.HasStarted || !SheepMod.Active) return; // menus, lobby, loading: no AI commands (and Sheep Mod is asked once a game runs)
+        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _dropAt, DropHours)) return; // menus, lobby, loading: no AI commands (and Sheep Mod is asked once a game runs)
         _game.Check(); // CRef ids of an old game must not resolve into this one
         var hour = Game.Hour;
         var player = Game.ControlledTag;
+        var plan = Due(ref _planAt, PlanHours);
         try
         {
             foreach (var country in Game.Countries)
@@ -99,7 +106,7 @@ public unsafe partial class AiAssist
                     if (!AdvanceDrop(country, tag, drop, hour)) EndDrop(tag, drop, hour);
                     continue;
                 }
-                if (NextParadrop.TryGetValue(tag, out var next) && hour - next < 0 || Grads.ContainsKey(tag)) continue; // on its grad: no new drops behind the enemy
+                if (!plan || NextParadrop.TryGetValue(tag, out var next) && hour - next < 0 || Grads.ContainsKey(tag)) continue; // on its grad: no new drops behind the enemy
                 NextParadrop[tag] = hour + RetryHours;
                 StartDrop(country, tag, hour);
             }
@@ -134,7 +141,11 @@ public unsafe partial class AiAssist
         {
             if (axis.Tag != tag || hour - axis.Hour is < 0 or >= AxisHours) continue;
             if (!AxisArmies.TryGetValue(general, out var armies) || armies.Tag != tag) continue;
-            if (BestTarget(country, tag, axis.Core, 0) == 0) continue; // nothing worth a drop behind this axis today
+            if (BestTarget(country, tag, axis.Core, 0) == 0)
+            {
+                Interlocked.Increment(ref _noTarget); // nothing worth a drop behind this axis today
+                continue;
+            }
             nint group = 0;
             List<nint> units = [];
             foreach (var reference in armies.Armies)
@@ -146,15 +157,24 @@ public unsafe partial class AiAssist
                     if (UnitOf(member) is var unit && unit != 0 && CanDrop(unit) && Spare(unit, tag)) ready.Add(unit);
                 if (ready.Count > units.Count) (group, units) = (g, ready);
             }
-            if (units.Count == 0) continue;
+            if (units.Count == 0)
+            {
+                Interlocked.Increment(ref _noParatroopers);
+                continue;
+            }
             if (units.Count > MaxParatroopers) units.RemoveRange(MaxParatroopers, units.Count - MaxParatroopers);
             var source = Airbase(tag, group, [.. axis.Line.Where(axis.Core.Contains)]); // the line around the axis: its targets must be in range
-            if (source == 0) continue;
+            if (source == 0)
+            {
+                Interlocked.Increment(ref _noAirbase); // no airbase in reach with enough transport planes
+                continue;
+            }
             var cmd = Allocator.AllocZeroed(SourceCommandSize);
             Native.WithPdxArray(units.ToArray(), list => _paradropSource(cmd, group, source, 0, list));
             if (!Commands.CanExecute(cmd)) // the allow_paratroopers rule is off (a new order checks only the rule and the group)
             {
                 Commands.Free(cmd); // the deleting destructor: frees its unit array too
+                Interlocked.Increment(ref _notReady);
                 NextParadrop[tag] = hour + CooldownHours;
                 return;
             }
@@ -206,7 +226,8 @@ public unsafe partial class AiAssist
         if (executing) return true; // vanilla launches on its next hourly update
         // Vanilla's check counts only the paratroopers standing at the source: with nobody there it passes, and nobody jumps.
         if (!AtSource(order, drop.Source, tag)) return true;
-        if (_orderReady(order, 0) != 0 && PostOrderCommand(Commands.ExecuteOrder, drop.Group, drop.Order, 1)) // prepared, planes, route air superiority
+        if (_orderReady(order, 0) == 0) Interlocked.Increment(ref _notReady); // not prepared, too few planes, or no air superiority on the route
+        else if (PostOrderCommand(Commands.ExecuteOrder, drop.Group, drop.Order, 1))
         {
             drop.Launched = hour;
             Interlocked.Increment(ref _paradropped);

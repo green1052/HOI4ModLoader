@@ -129,6 +129,22 @@ public static unsafe class Commands
         return TryPost(cmd, force);
     }
 
+    /// <summary>COrderAssignCommand ctor (mem[0x50], CPdxArray&lt;CArmy*&gt;* units, COrdersGroup* group, int orderId, bool): onto one of the group's (or its parent's) orders.</summary>
+    [Signature] public const string AssignSig = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 4C 24 ? 56 57 41 54 41 56 41 57 48 83 EC 30 41 8B D9 49 8B E8 4C 8B FA 4C 8B F1 0F B6 BC 24 80 00 00 00 C6 41 08 00";
+
+    private const int AssignSize = 0x50;
+    private static delegate* unmanaged<nint, nint, nint, int, byte, nint> _assign;
+
+    /// <summary>Puts <paramref name="unit"/> on order <paramref name="orderId"/> of its army <paramref name="group"/>, as the battle plan UI does.</summary>
+    public static bool Assign(nint unit, nint group, int orderId, bool force = false)
+    {
+        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment
+        if (_assign == null) _assign = (delegate* unmanaged<nint, nint, nint, int, byte, nint>)Sig.Find(AssignSig);
+        var cmd = Allocator.AllocZeroed(AssignSize);
+        Native.WithPdxArray([unit], units => _assign(cmd, units, group, orderId, 0)); // a refused one is freed whole by its destructor
+        return TryPost(cmd, force);
+    }
+
     /// <summary>The battle plan's play button: (group CRef, order id 0 = the whole group, execute, also its armies).</summary>
     [VTable] public const string ExecuteOrder = "COrderExecuteCommand";
 

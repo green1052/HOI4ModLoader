@@ -20,7 +20,7 @@ public unsafe partial class AiAssist
     private int _raised;
     private static int _stationed;
     private static bool _holdLine, _axis, _beachDefense;
-    private const int AxisHours = 24, ThinSectorWeight = 8;
+    private const int AxisHours = 24, ThinSectorWeight = 8, SectorHours = 72, SalientHead = -1; // a thin sector is held 3 days unless taken
     // CAIFront+0x218: its CAIForceConcentration (the game's armoured push), embedded. +0 divisions it was given (0: none), +0x14 its units,
     // +0x20 its army, +0x48 target (optional, set flag +0x78) with its CPdxArray<CProvince*> path at +0x60 (path[0] ours .. path[n-1] the target), +0x84 attack on.
     private const int ConcentrationOfFront = 0x218, UnitsOfConcentration = 0x14, ArmyOfConcentration = 0x20, PathOfConcentration = 0x60, HasTarget = 0x78, AttackOn = 0x84;
@@ -28,8 +28,9 @@ public unsafe partial class AiAssist
     private static int _spearheads;
 
     // Keyed by raw CAIGeneral pointers, which a freed and reallocated general can reuse: entries carry the tag they were made for.
-    // Head: the spearhead's province the axis is anchored on, 0 for a thin-sector axis.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, int Head, HashSet<int> Core, HashSet<int> Line)> Axes = new(); // general -> its breakthrough axis, for a day
+    // Hour: last refreshed (hourly while the theatre has a line); Since: when its anchor was picked; Anchor: the province it is on.
+    // Head: the spearhead's province, SalientHead for a salient's neck, 0 for a thin sector.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, int Head, HashSet<int> Core, HashSet<int> Line, int Since, int Anchor)> Axes = new(); // general -> its breakthrough axis
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, long[] Armies)> AxisArmies = new(); // general -> its armies at war (CRef ids), for paradrops
 
     private void LoadFronts()
@@ -93,6 +94,9 @@ public unsafe partial class AiAssist
         var hour = Game.Hour;
         (int Tag, nint Province, int Weight, HashSet<int> Line)? spot = null; // the thinnest enemy sector on the theatre's line, for the axis
         List<long>? armies = null; // CRef ids of the theatre's armies at war, for paradrops
+        nint theatre = 0; // the theatre's country (at war)
+        HashSet<nint>? enemyLine = null; // enemy provinces on the theatre's line: the salients' necks are among them
+        List<(nint Front, HashSet<nint> Threatened)>? atWar = null; // for railway guns
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
@@ -123,6 +127,12 @@ public unsafe partial class AiAssist
                 if (Province.Divisions(theirs) > 0) threatened.Add(ours);
             }
             var hostile = enemyHeld.ContainsValue(true);
+            if (hostile)
+            {
+                theatre = country;
+                if (_encircle) foreach (var (p, held) in enemyHeld) if (held) (enemyLine ??= []).Add(p);
+                if (_railGuns && threatened.Count > 0) (atWar ??= []).Add((front, threatened));
+            }
             if (_paradrops && hostile)
                 foreach (var army in Native.PdxArray(front + ArmiesOfAiFront))
                     if (army != 0) (armies ??= []).Add(new OrdersGroup(army).Ref);
@@ -152,24 +162,63 @@ public unsafe partial class AiAssist
             *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
             Interlocked.Increment(ref _raised);
         }
-        // The game's own spearhead attacks across this line: the axis is where its path crosses it, and moves on with its head (the path
-        // is fixed: no zig-zag). A path past a neutral or allied province may miss the line: then the thin sector, or the whole line would stand still.
-        if (spot is { } line && Spearhead(general) is var head and not 0 && Rings(head) is var core && core.Overlaps(line.Line))
-        {
-            if (!(Axes.TryGetValue(general, out var current) && current.Tag == line.Tag && current.Head == head && hour - current.Hour is >= 0 and < AxisHours))
-            {
-                Axes[general] = (hour, line.Tag, head, core, line.Line);
-                Interlocked.Increment(ref _spearheads);
-            }
-        }
-        else if (spot is { } best && best.Weight <= ThinSectorWeight // no thin sector anywhere: no axis today
-            && !(Axes.TryGetValue(general, out var axis) && axis.Tag == best.Tag && hour - axis.Hour is >= 0 and < AxisHours)) // held a day: divisions don't zig-zag
-            Axes[general] = (hour, best.Tag, 0, Rings(Game.Id(best.Province)), best.Line);
+        if (_axis && spot is { } line && theatre != 0) Anchor(general, theatre, line.Tag, line.Province, line.Weight, line.Line, enemyLine, hour);
+        if (_railGuns) PublishGunArmies(general, AxisFrontArmies(general, atWar, hour), hour);
         foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) Axes.TryRemove(g, out _); // generals come and go all game
         if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
         foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) AxisArmies.TryRemove(g, out _);
         // Fronts come and go all game: drop the stale lines (matched by value, so one refreshed meanwhile stays).
         foreach (var entry in _line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) _line.TryRemove(entry);
+    }
+
+    /// <summary>
+    /// The theatre's axis for this hour, re-published with the current line: an enemy salient's neck (cut off from both flanks,
+    /// kept until the pocket closes or a week passes), else the game's own spearhead while it attacks across the line (moving on
+    /// with its head; a path past a neutral or allied province may miss the line), else the thinnest enemy sector, held three
+    /// days and moved only when taken (on to its thinnest enemy neighbour): offensive divisions don't swap far-apart sectors.
+    /// AI thread of the general; published records are never changed.
+    /// </summary>
+    private static void Anchor(nint general, nint country, int tag, nint thinnest, int weight, HashSet<int> line, HashSet<nint>? enemyLine, int hour)
+    {
+        var mine = Axes.TryGetValue(general, out var current) && current.Tag == tag && hour - current.Hour is >= 0 and < AxisHours; // this theatre's, refreshed today
+        if (_encircle && enemyLine != null && Salient(general, country, tag, enemyLine, hour) is { } salient)
+        {
+            var same = mine && current.Head == SalientHead && current.Core == salient.Core;
+            Axes[general] = (hour, tag, SalientHead, salient.Core, line, same ? current.Since : hour, salient.Neck[0]);
+            return;
+        }
+        if (Spearhead(general) is var head and not 0)
+        {
+            var same = mine && current.Head == head;
+            var core = same ? current.Core : Rings(head);
+            if (core.Overlaps(line))
+            {
+                if (!same) Interlocked.Increment(ref _spearheads);
+                Axes[general] = (hour, tag, head, core, line, same ? current.Since : hour, head);
+                return;
+            }
+        }
+        var sticky = mine && current.Head == 0 && hour - current.Since is >= 0 and < SectorHours;
+        var (anchor, since) = sticky ? (current.Anchor, current.Since) : (0, hour);
+        if (sticky && Game.Province(anchor) is var at && at != 0 && !Province.Enemy(country, tag, at))
+            (anchor, since) = (Forward(country, tag, at), hour); // taken: the push goes on from there
+        if (anchor == 0)
+        {
+            if (weight > ThinSectorWeight) return; // no thin sector anywhere: no new axis (the last one runs out)
+            (anchor, since) = (Game.Id(thinnest), hour);
+        }
+        var kept = mine && current.Head == 0 && current.Anchor == anchor;
+        Axes[general] = (hour, tag, 0, kept ? current.Core : Rings(anchor), line, since, anchor);
+    }
+
+    /// <summary>The easiest enemy province to take next to <paramref name="taken"/> (a sector we just took), 0 if none.</summary>
+    private static int Forward(nint country, int tag, nint taken)
+    {
+        var (best, weight) = (0, int.MaxValue);
+        foreach (var id in Game.Neighbours(taken))
+            if (Game.Province(id) is var p && p != 0 && Province.Enemy(country, tag, p) && Province.AttackWeight(p, taken) is var w && w < weight)
+                (best, weight) = (id, w);
+        return best;
     }
 
     /// <summary>

@@ -81,15 +81,50 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// Why a local attack from <paramref name="from"/> on <paramref name="to"/> is off whatever else it could take (0: it isn't):
-    /// on its grad only fought-out spearheads, pockets and the way to its own (Steered); not into terrain that cripples the armor
+    /// on its grad only fought-out spearheads, pockets and the way to its own (Steered); from a thinly manned front only pockets
+    /// and the way to its own (Steered); not into terrain that cripples the armor
     /// there (Steered); not where supply can't follow, unless it closes a pocket or opens the way to ours (Unsupplied).
     /// </summary>
     private static int RuledOut(nint me, int tag, nint from, nint to)
     {
         if (Grads.ContainsKey(tag) && !Exhausted(to) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
+        if (_holdLine && OnThinLine(tag, from) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
         if (_armorTerrain && BadForArmor(tag, from, to)) return Steered;
         if (_supplyAware && Province.Starved(me, tag, from, to, _supplyShare) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Unsupplied;
         return 0;
+    }
+
+    // tag -> (game hour, world, our provinces on fronts too thinly manned to attack from). Published whole, never changed.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Hour, int World, HashSet<nint> Provinces)> ThinLines = new();
+
+    /// <summary>
+    /// <paramref name="from"/> is on one of the tag's fronts (<see cref="_line"/>) that stands under ~1.2 divisions per threatened
+    /// province it holds: attacking from there widens the holes. Rebuilt once per game hour; AI threads, read only.
+    /// </summary>
+    private static bool OnThinLine(int tag, nint from)
+    {
+        var (hour, world) = (Game.Hour, Game.Generation);
+        if (world != _world) return false; // a load the reset hasn't caught up with: _line is the old world's
+        if (!ThinLines.TryGetValue(tag, out var thin) || thin.Hour != hour || thin.World != world)
+        {
+            var country = Game.Country(tag);
+            if (country == 0) return false;
+            var provinces = new HashSet<nint>();
+            foreach (var e in _line)
+            {
+                if (e.Value.Tag != tag || hour - e.Value.Hour is < 0 or >= LineFreshHours) continue;
+                var (held, standing) = (0, 0);
+                foreach (var p in e.Value.Provinces)
+                    if (Province.Controller(p) == tag)
+                    {
+                        held++;
+                        standing += Standing(country, tag, p);
+                    }
+                if (held * 6 > standing * 5) provinces.UnionWith(e.Value.Provinces);
+            }
+            ThinLines[tag] = thin = (hour, world, provinces);
+        }
+        return thin.Provinces.Contains(from);
     }
 
     /// <summary>A neighbour vanilla's candidate loop would weigh at all (before its own CantMoveInto): not behind an impassable
@@ -292,7 +327,7 @@ public unsafe partial class AiAssist
                 var target = Game.Province(id);
                 if (target == 0 || _gap.ContainsKey(id) || Province.Divisions(target) > 0 || !Province.Enemy(country, tag, target)
                     || _supplyAware && Province.Starved(country, tag, here.Key, target, _supplyShare)) continue; // supply must follow it there, as with local attacks
-                if (!Send(fresh[--spare], id, now, SentMs)) continue;
+                if (!Send(fresh[--spare], id, now, SentHours)) continue;
                 Interlocked.Increment(ref _taken);
                 if (++taken == MaxMoves) return;
             }

@@ -6,11 +6,13 @@ namespace AiAssist;
 /// An add-on for Sheep Mod (the "Discord mod") that fixes vanilla AI logic its scripts can't reach, without bonuses.
 /// Only works where Sheep Mod is in the game; single player (it changes how AI countries play).
 /// - Hold the line: at war, every front province keeps a defender (front requests, regrouping and army balancing can't
-///   take it), holes are refilled from nearby (key ground first), reserves stand a province behind, freshly arrived
-///   divisions stay a week, worn-out divisions rest behind the line and divisions in a closing salient pull out (both go
-///   back once rested), and no "attack on" starts while the threatened line is thinly manned. New divisions go to the grad's or the line's
-///   holes, then the most thinly held front, first.
-/// - Beach defence: landings are walled in and attacked at once.
+///   take it), holes are refilled from nearby (key ground first, the same front's divisions first), reserves stand a province
+///   behind and counterattack break-ins (fire brigade), key line provinces get a second line, freshly arrived divisions stay a
+///   week, divisions worn by fighting rest behind the line and divisions in a closing salient pull out (both go back on their own
+///   order once rested), and no "attack on" starts, and running front offensives stop, while the threatened line is thinly
+///   manned (unless the AI outguns the enemy there two to one). New divisions go to the grad's or the line's holes, then the most
+///   thinly held front, first. Its passes run on game time.
+/// - Beach defence: landings (ground taken from the sea in the last ten days) are walled in and attacked at once.
 /// - Breakthrough axis: local attacks (and close air support) keep to the AI's own armoured spearhead while it attacks, moving on
 ///   with it, else to the theatre's thinnest enemy sector for a day; off the axis only pinning attacks on enemy stacks next to it.
 /// - Defensive postures: facing a much stronger enemy, a country gives up exposed ground for its grad (a minimum cut through its
@@ -28,6 +30,9 @@ namespace AiAssist;
 /// - Production lines: small factory cuts on efficiently running production lines are held for a while (vanilla restarts the
 ///   freed factories elsewhere at 10 % efficiency).
 /// - Refit priority: front-line divisions get reinforcements and upgrades first (until they are 75 % full).
+/// - Encirclement: enemy salients are cut at their neck from both flanks instead of pushed head-on.
+/// - Railway guns: the armies on the breakthrough axis get the railway guns first and keep them.
+/// - Supply hubs: a new hub where AI divisions starve with none near (vanilla only upgrades and links hubs).
 /// </summary>
 [Plugin("com.green1052.aiassist", "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
@@ -42,14 +47,18 @@ public unsafe partial class AiAssist : Plugin
         _holdLine = Config.Bind("AI", "HoldTheLine", true,
             "At war, the AI keeps a division in every province of a front that borders the enemy; its regrouping can't take the last defender of a province facing enemy divisions, the divisions walling in a pocket, "
             + "a reserve or a division that arrived this week. Free divisions walk back into empty line provinces (ports, victory points, river banks, cities and mountains first), "
-            + "a country with divisions to spare keeps reserves a province behind its line, and one short of divisions for its line doesn't start attacks. "
-            + "Worn-out divisions in contact rest behind the line, and divisions in a salient whose way back is closing pull out, where another of ours holds their province; both go back to a front once rested. "
+            + "the same front's divisions first (one from another front is held there). A country with divisions to spare keeps reserves a province behind its line and a second division behind key line provinces; "
+            + "ready reserves counterattack break-ins near them (enemy troops inside, ground lost in the last two days, a landing) and go back to their post. "
+            + "One short of divisions for its line doesn't start attacks and stops the running offensives of its thinly held fronts, unless it outguns the enemy there two to one. "
+            + "Divisions worn out by fighting rest behind the line (a quarter of those around at most), and divisions in a salient whose way back is closing under an enemy at least as strong pull out, where another of ours holds their province; "
+            + "neither where the AI outguns the enemy two to one. Rested divisions, and reserves the line moved away from, go back on their own order. "
             + "Newly deployed divisions go where they are needed most first: the grad's holes (DefensivePostures), else empty line provinces, then the most thinly held front.");
         _beachDefense = Config.Bind("AI", "BeachDefense", true,
-            "Naval landings are answered at once: free divisions near the beachhead wall it in and attack into it; vanilla leaves it alone until the front collapses.");
+            "Naval landings are answered at once: free divisions near the beachhead (ground the enemy took from the sea in the last ten days, or a small enemy pocket on the coast) wall it in and attack into it; "
+            + "vanilla leaves it alone until the front collapses.");
         _axis = Config.Bind("AI", "BreakthroughAxis", true,
             "The AI's local attacks keep to a breakthrough axis: while the AI's own armoured spearhead (the game's force concentration) attacks, where its path crosses the enemy line, moving forward with it; "
-            + "otherwise its front's thinnest enemy sector (few divisions, no forts, open terrain), held for a day. Off the axis, only attacks that pin enemy divisions next to it (they can't shift into the breakthrough while under attack). "
+            + "otherwise its front's thinnest enemy sector (few divisions, no forts, open terrain), held three days and moved on only once taken. Off the axis, only attacks that pin enemy divisions next to it (they can't shift into the breakthrough while under attack). "
             + "Its close air support backs battles on the axis first.");
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
@@ -79,13 +88,22 @@ public unsafe partial class AiAssist : Plugin
         _paradrops = Config.Bind("AI", "StrategicParadrops", true,
             "The AI uses its paratroopers (needs BreakthroughAxis): up to four paradrop-capable divisions of an army of the theatre its breakthrough axis is in fly from the airbase nearest the axis that can carry them "
             + "onto an empty enemy province behind the line near the axis (victory points, supply hubs, airfields, pockets first). They jump only when vanilla allows the drop "
-            + "(prepared, enough transport planes, air superiority on the route). Vanilla's AI never paradrops.") && _axis;
+            + "(prepared, enough transport planes, air superiority on the route). Vanilla's AI never paradrops. Sheep Mod's AI builds no paratroopers or transport planes, so drops are rare; "
+            + "the log counts which check stopped them.") && _axis;
         _postures = Config.Bind("AI", "DefensivePostures", true,
-            "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.3x while losing line provinces or short of divisions) gives up exposed ground and holds its grad: "
+            "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.3x while it lost line provinces in the last week or is short of divisions) gives up exposed ground and holds its grad: "
             + "the most defensible short line between that enemy and its capital (rivers, mountains, marsh, forests, hills, cities and forts in front, few directions to be attacked from), redrawn weekly, "
             + "or one line back once the enemy breaks in. Its divisions walk there and stay (victory point cities get one more), it starts no offensives or paradrops (landings still go), and it attacks only "
-            + "fought-out enemy stacks next to the line, from two sides, while single divisions pin the enemy stacks that could come to their aid; worn-out attackers break off. At even strength (after two weeks at least) "
-            + "its divisions go back to the AI's fronts. Needs HoldTheLine.") && _holdLine;
+            + "fought-out enemy stacks next to the line, with two fresh divisions or more (reserves behind the grad too), while single divisions pin the enemy stacks that could come to their aid; worn-out attackers break off. "
+            + "Once every enemy it fell back from stays under 80 % of its power for a week (a month after falling back at the earliest), its divisions go back on their orders, and for a month only twice its strength "
+            + "puts it back on a grad. Out of contact, the posture stays. Needs HoldTheLine.") && _holdLine;
+        var encircle = Config.Bind("AI", "Encirclement", true,
+            "The breakthrough axis goes for enemy salients first: where enemy ground bulges into the AI's line through a neck of one or two provinces, and taking the neck cuts off 3+ enemy divisions "
+            + "for less than it costs, the local attacks and close air support of both flanks go for the neck instead of pushing the salient head-on; kept until the pocket closes, a week at most. Needs BreakthroughAxis.") && _axis;
+        var railGuns = Config.Bind("AI", "RailwayGuns", true,
+            "The AI's railway guns go to the armies on its breakthrough axis first and stay there: those armies are served first and other armies can't take their guns. Needs BreakthroughAxis.") && _axis;
+        var supplyHubs = Config.Bind("AI", "SupplyHubs", true,
+            "Where an AI country's divisions are low on supply with no supply hub within 3 provinces, it builds one (railway-connected provinces first); checked weekly, two a month at most. Vanilla's AI only upgrades and links the hubs it has.");
 
         _log = Log;
         ResolveShared();
@@ -96,6 +114,9 @@ public unsafe partial class AiAssist : Plugin
             _sent.Clear();
             _gap.Clear();
             _posted.Clear();
+            _home.Clear();
+            _dominant.Clear();
+            _combat.Clear();
             _resting.Clear();
             _fresh.Clear();
             Known.Clear();
@@ -112,12 +133,17 @@ public unsafe partial class AiAssist : Plugin
             Grads.Clear();
             Stances.Clear();
             Attackers.Clear();
+            Salients.Clear();
+            ThinLines.Clear();
+            HubPlans.Clear();
+            ClearRailGuns();
             _capitals = (0, []);
             _provinceCount = -1;
+            (_controllers, _changed, _landed, _scanned) = ([], [], [], Never);
             _world = Game.Generation; // AI threads skip what TrackFronts recorded before this
         });
         MainThread.Every(TimeSpan.FromSeconds(1), _game.Check); // AI threads read these caches: reset them soon after a load
-        if (_attackTargets || _armorTerrain || _axis || _supplyAware || _postures) LoadPockets();
+        if (_attackTargets || _armorTerrain || _axis || _supplyAware || _postures || _holdLine) LoadPockets(); // the thin-line steer lives in PocketFilter
         if (refit) LoadRefit();
         if (_airRetreat || _bombingTargets || _strategicInvasions) LoadRegionPriorities();
         if (productionLines) LoadProductionLines(stickyDays);
@@ -127,12 +153,16 @@ public unsafe partial class AiAssist : Plugin
         if (_holdLine)
         {
             _ = Sig.Find(Commands.UnassignSig);
-            MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
+            _ = Sig.Find(Commands.AssignSig);
+            MainThread.Every(TimeSpan.FromSeconds(1), Backfill); // the passes poll each second and run on game time (Due)
         }
         if (_strategicInvasions) LoadInvasions();
         if (_paradrops) LoadParadrops();
-        if (_holdLine || _attackTargets) MainThread.Every(TimeSpan.FromSeconds(5), Micro);
-        if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(30), DefendBeachheads);
+        if (encircle) LoadEncircle();
+        if (railGuns) LoadRailGuns();
+        if (supplyHubs) LoadSupplyHubs();
+        if (_holdLine || _attackTargets) MainThread.Every(TimeSpan.FromSeconds(1), Micro);
+        if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(1), DefendBeachheads);
         MainThread.Every(TimeSpan.FromMinutes(1), LogStats);
     }
 
@@ -159,6 +189,10 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _raised, "raised {0} front request(s) to cover the line");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
         Add(ref _reserved, "posted {0} reserve(s)");
+        Add(ref _depth, "posted {0} second-line division(s) behind key line provinces");
+        Add(ref _returned, "put {0} division(s) back on their own order");
+        Add(ref _stopped, "stopped {0} running offensive(s) on thinly manned fronts");
+        Add(ref _fireBrigade, "sent {0} reserve(s) against break-ins");
         Add(ref _rested, "rested {0} worn-out division(s)");
         Add(ref _escaped, "pulled {0} division(s) out of closing salients");
         Add(ref _defended, "answered {0} landing(s)");
@@ -167,11 +201,19 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _cas, "focused {0} CAS pass(es) on the axis");
         Add(ref _spearheads, "put {0} breakthrough axis/axes on the AI's armoured spearhead");
         Add(ref _paradropped, "launched {0} AI paradrop(s)");
+        Add(ref _noParatroopers, "paradrops: {0} axis check(s) found no ready paratroopers");
+        Add(ref _noAirbase, "paradrops: {0} found no source airbase with transport planes");
+        Add(ref _noTarget, "paradrops: {0} found no target");
+        Add(ref _notReady, "paradrops: {0} not ready (not allowed, not prepared, too few planes or no air superiority)");
         Add(ref _fellBack, "{0} AI country/countries fell back to a grad");
         Add(ref _garrisoned, "garrisoned {0} division(s) on grads");
         Add(ref _countered, "counterattacked fought-out spearheads with {0} division(s)");
         Add(ref _pinning, "pinned {0} enemy stack(s) next to counterattacks");
         Add(ref _brokeOff, "broke off {0} worn-out counter or pinning attack(s)");
+        Add(ref _salients, "put {0} breakthrough axis/axes on the neck of an enemy salient");
+        Add(ref _closed, "closed {0} salient pocket(s)");
+        Add(ref _gunned, "gave railway guns to {0} new set(s) of axis armies");
+        Add(ref _hubs, "queued {0} supply hub(s) where AI divisions starve");
         if (done.Count > 0) Log.Info($"last minute: {string.Join(", ", done)}");
     }
 
