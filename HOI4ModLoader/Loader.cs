@@ -99,6 +99,13 @@ public static class Loader
                 _reloadAt = long.MaxValue;
                 Reload();
             });
+            var crashTest = config.Bind("Debug", "CrashTest", 0, CrashTestDescription);
+            if (crashTest is 1 or 2)
+            {
+                config.Set("Debug", "CrashTest", 0, CrashTestDescription); // once: the next start runs normally
+                var at = Environment.TickCount64 + 30_000;
+                MainThread.Every(TimeSpan.FromSeconds(1), () => { if (Environment.TickCount64 >= at) CrashTest(crashTest); });
+            }
         }
         catch (Exception e)
         {
@@ -108,6 +115,15 @@ public static class Loader
         {
             Patches.Owner = null;
         }
+    }
+
+    private const string CrashTestDescription =
+        "Crash the game on purpose 30 seconds after start, once (resets to 0), to check HOI4ModLoader\\crash.log: 1 = a native fault in a timer, 2 = a wild memory write in managed code.";
+
+    private static unsafe void CrashTest(int kind)
+    {
+        if (kind == 1) ((delegate* unmanaged<void>)0x10)(); // executes address 0x10: a native access violation
+        *(int*)unchecked((nint)0x7FFF_FFFF_0000) = 0;       // a wild write in managed code: .NET's fatal error
     }
 
     // Reloads once the plugin DLLs changed and then stayed the same for a tick (a build may still be copying them).

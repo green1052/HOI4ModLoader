@@ -74,11 +74,18 @@ public static unsafe partial class Patches
         var ex = Expression.Parameter(typeof(Exception), "e");
         // ReSharper disable once AccessToModifiedClosure
         Expression<Func<T>> original = () => hook!.OriginalFunction; // reads `hook` when called, i.e. after it's assigned below
-        var guarded = Expression.Lambda<T>(Expression.TryCatch(
-            Expression.Invoke(Expression.Constant(detour), argValues),
-            Expression.Catch(ex, Expression.Block(
-                Expression.Invoke(Expression.Constant(onError), ex),
-                Expression.Invoke(original.Body, argValues)))), args).Compile();
+        var crumb = Expression.Variable(typeof(nint), "crumb");
+        var label = Breadcrumb.Label($"{owner} hook {Breadcrumb.Where(at)}");
+        // The crash handler reads the breadcrumb: a native fault in the detour or in the original it calls names this hook.
+        var guarded = Expression.Lambda<T>(Expression.Block([crumb],
+            Expression.Assign(crumb, Expression.Call(typeof(Breadcrumb).GetMethod(nameof(Breadcrumb.Enter))!, Expression.Constant(label))),
+            Expression.TryFinally(
+                Expression.TryCatch(
+                    Expression.Invoke(Expression.Constant(detour), argValues),
+                    Expression.Catch(ex, Expression.Block(
+                        Expression.Invoke(Expression.Constant(onError), ex),
+                        Expression.Invoke(original.Body, argValues)))),
+                Expression.Call(typeof(Breadcrumb).GetMethod(nameof(Breadcrumb.Leave))!, crumb))), args).Compile();
 
         hook = Hooks.CreateHook(guarded, at);
         Restorable(at, () => hook.Activate(), hook.Disable, hook);

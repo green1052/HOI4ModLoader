@@ -14,6 +14,11 @@ namespace AiAssist;
 ///   worn its divisions are (Sheep can only switch whole countries to careful on rifle counts). An "attack on" for an army
 ///   whose divisions are worn out is dropped; the AI asks again every hour, so the attack starts once they recover. It never
 ///   stops a running attack, and invasions and paradrops are left alone.
+/// - Supply-aware attacks: local attacks skip targets whose supply the attackers can't follow (supply only flows through our
+///   side's provinces; the attack's province is short and none next to the target has spare), unless the target closes a pocket.
+/// - Refit priority: the daily stockpile distribution ranks divisions only by template and theatre priority, so a garrison
+///   division and a front-line division get new equipment alike. AI divisions in combat or next to enemy ground now come
+///   first (until they are 75 % full), for reinforcements and upgrades alike.
 /// - Pocket closing: the AI's local attacks pick a random target among those that pass their checks (Sheep's pocket test
 ///   in script is never read). Where a target would cut off enemy divisions, only such targets stay in the pick.
 /// </summary>
@@ -25,6 +30,8 @@ public unsafe partial class AiAssist : Plugin
 
     public override void Load()
     {
+        var refit = Config.Bind("AI", "RefitPriority", true,
+            "Reinforcements and new equipment go to the AI's front-line divisions (in combat or next to enemy-held ground) before its rear and garrison divisions.");
         var production = Config.Bind("AI", "Production", true,
             "The AI moves factories from equipment it has plenty of to equipment it is short of, instead of stockpiling surpluses.");
         _surplusPercent = Math.Max(0, Config.Bind("AI", "SurplusPercent", 50, "Equipment more than this much (%) above what its army needs counts as surplus."));
@@ -58,6 +65,10 @@ public unsafe partial class AiAssist : Plugin
             "The AI's close air support backs its breakthrough axis first: battles on the axis get the planes before ones elsewhere in the region.");
         _entrenchment = Config.Bind("AI", "Entrenchment", true,
             "The AI's local attacks count the defenders' dig-in: a province held by entrenched divisions is a worse target than its garrison numbers alone say.");
+        _supplyAware = Config.Bind("AI", "SupplyAwareAttacks", true,
+            "The AI's local attacks skip provinces its divisions couldn't be supplied in once taken: supply only flows through provinces of ours or our allies, and the attack's own province gets too little while no other of ours next to the target has some to spare. Pocket-closing targets are still taken.");
+        _supplyShare = Math.Clamp(Config.Bind("AI", "SupplyAwareMinPercent", 25,
+            "Supply (% of what the attacking province needs) it must get, or another province of ours next to the target must have to spare, for a local attack."), 1, 200);
         _stationing = Config.Bind("AI", "Stationing", true,
             "A division the theatre shuffle just walked to a new front stays there for a week; vanilla re-shuffles freshly arrived divisions back and forth.");
         _defensePriority = Config.Bind("AI", "DefensePriority", true,
@@ -89,13 +100,15 @@ public unsafe partial class AiAssist : Plugin
             BaseThreat.Clear();
             TraitNames.Clear();
             _line.Clear();
+            FrontCache.Clear();
             _capitals = (0, []);
             _beachheads = [];
             _provinceCount = -1;
         });
         MainThread.Every(TimeSpan.FromSeconds(1), _game.Check); // AI threads read these caches: reset them soon after a load
         if (readiness) LoadReadiness();
-        if (_pocketClosing || _frontShortening || _armorTerrain || _roles || _targetValue || _axis) LoadPockets();
+        if (_pocketClosing || _frontShortening || _armorTerrain || _roles || _targetValue || _axis || _supplyAware) LoadPockets();
+        if (refit) LoadRefit();
         if (_airRetreat || _airbaseEvac) LoadAirRetreat();
         if (_casConcentration) LoadCas();
         if (leaders) LoadLeaders();
@@ -127,6 +140,8 @@ public unsafe partial class AiAssist : Plugin
         }
         Add(ref _held, "held {0} AI attack(s) until the army recovers");
         Add(ref _steered, "skipped {0} local attack target(s) for better ones");
+        Add(ref _unsupplied, "skipped {0} local attack target(s) the attackers couldn't be supplied in");
+        Add(ref _refitted, "put {0} front-line division-day(s) first for equipment");
         Add(ref _pulled, "lowered {0} lost air region(s)");
         Add(ref _concentrated, "rescaled {0} front request(s)");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");

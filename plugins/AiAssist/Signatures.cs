@@ -103,6 +103,16 @@ public static class Signatures
     [Signature] public const string NavyEngagement = "48 89 5C 24 20 48 89 4C 24 08 55 56 57 48 83 EC 30 41 8B F0 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10";
 
     /// <summary>
+    /// CArmyReinforcementRequests vtable slot 1 (requests, long* score, CEquipmentType* archetype) -> score*: how much a division
+    /// is owed this archetype, (4e7*(template prio+1) + 1e8*theatre group prio) * (1 - have/need). The daily stockpile
+    /// distribution fills divisions highest score first. requests+0x20 = CArmy. Game simulation thread.
+    /// </summary>
+    [Signature] public const string ReinforceScore = "48 89 5C 24 10 55 56 57 41 56 41 57 48 83 EC 30 33 DB 4D 8B F0 4C 8B FA 48 8B E9 39 59 34 74";
+
+    /// <summary>CArmyUpgradesRequests vtable slot 1 (requests, long* score, archetype) -> score*: the same for newer-equipment upgrades (0: nothing to upgrade).</summary>
+    [Signature] public const string UpgradeScore = "48 89 5C 24 08 48 89 6C 24 10 56 48 83 EC 20 48 8B F2 48 8B E9 48 8D 54 24 48 E8 ? ? ? ? 33 DB 48 39 5C 24 48 75";
+
+    /// <summary>
     /// CAirMission::CollectTacticalTargets(mission, CPdxArray&lt;STacticalTarget&gt;* targets, ...): the battles a close air
     /// support mission sees, in region province-list order — the order the plane budget is spent in. Main thread.
     /// </summary>

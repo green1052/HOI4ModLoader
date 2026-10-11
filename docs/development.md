@@ -87,6 +87,7 @@ If a pattern stops matching after a game update, the loader leaves the vanilla f
 ## Debugging and hot reload
 - Set `WaitForDebugger = True` in `config\HOI4ModLoader.cfg`, start the game and attach a debugger to `hoi4.exe`: it stops before `Load()`.
 - Rebuilding a plugin with the game running reverts every patch and loads the new DLLs. Plugin state (queues and such) resets. `HotReload = False` turns it off.
+- `HOI4ModLoader\crash.log` (kept across starts, deleted at start once past 1 MB): native faults on a thread inside a hook or timer (the label names the hook the thread is under; the faulting `module+offset` says whose code it was, so a hook's label also covers the game original it calls), faults outside every module (hook stubs), and .NET's own fatal errors with the managed stack. `CrashTest = 1` or `2` under `[Debug]` crashes the game on purpose once, to check it.
 
 ## How mimalloc is wired in
 - `hoi4.exe` carries its own allocation functions (`malloc`, `calloc`, `realloc`, `free`, `_msize`; static CRT). Before the game's CRT starts, the loader redirects them to a few lines of native code in `version.dll` (`bootstrap\allocator.c`).

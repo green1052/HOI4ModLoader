@@ -26,7 +26,8 @@ public static class MainThread
     {
         Patches.RequireOwner();
         if (_hook == null) Install();
-        var timer = new Timer(action, (long)interval.TotalMilliseconds);
+        var timer = new Timer(action, (long)interval.TotalMilliseconds,
+            Breadcrumb.Label($"{Patches.Owner} timer {action.Method.DeclaringType?.FullName}.{action.Method.Name}"));
         Timers.Add(timer);
         Patches.Record(() => Timers.Remove(timer));
     }
@@ -58,6 +59,7 @@ public static class MainThread
         {
             if (now < timer.Next || !Timers.Contains(timer)) continue;
             timer.Next = now + timer.IntervalMs;
+            var crumb = Breadcrumb.Enter(timer.Label);
             try { timer.Action(); }
             catch (Exception e)
             {
@@ -65,13 +67,15 @@ public static class MainThread
                 timer.Failed = true; // once: a timer runs several times a second
                 Log.Error(e.ToString());
             }
+            finally { Breadcrumb.Leave(crumb); }
         }
     }
 
-    private sealed class Timer(Action action, long intervalMs)
+    private sealed class Timer(Action action, long intervalMs, nint label)
     {
         public Action Action { get; } = action;
         public long IntervalMs { get; } = intervalMs;
+        public nint Label { get; } = label;
         public long Next;
         public bool Failed;
     }

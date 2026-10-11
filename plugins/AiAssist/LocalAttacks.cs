@@ -12,6 +12,7 @@ public unsafe partial class AiAssist
     private const int FlagsOfStatic = 0xD2, BlockedOfStateCategory = 0x15C, Impassable = 4; // what vanilla's candidate loop skips
 
     private static delegate* unmanaged<nint, nint, nint, byte> _cantMove;
+    private static nint _pocketCrumb;
     private static int _steered;
 
     private void LoadPockets()
@@ -26,6 +27,7 @@ public unsafe partial class AiAssist
         if (*(ushort*)(site + 5) != 0xC084) throw new InvalidOperationException("micro attack candidate check: no `test al,al` after the call");
         // `call CantMoveInto; test al,al` (7 bytes: the hook's jump takes more than the call's 5) becomes a call of the filter
         // and the same test, for the `jnz skip` right after. rsp is 16-aligned at the call and its home space reserved.
+        _pocketCrumb = Breadcrumb.Label($"{Info.Id} pocket filter (asm hook {Breadcrumb.Where(site)})"); // before the hook goes live
         Patches.Asm(site, 7, "use64", $"mov rax, 0x{(nint)(delegate* unmanaged<nint, nint, nint, byte>)&PocketFilter:X}", "call rax", "test al, al");
     }
 
@@ -37,6 +39,7 @@ public unsafe partial class AiAssist
     [UnmanagedCallersOnly]
     private static byte PocketFilter(nint us, nint from, nint to)
     {
+        var crumb = Breadcrumb.Enter(_pocketCrumb);
         try
         {
             if (_cantMove(us, from, to) != 0) return 1;
@@ -48,12 +51,18 @@ public unsafe partial class AiAssist
                 Interlocked.Increment(ref _steered);
                 return 1;
             }
+            if (_supplyAware && Starved(me, tag, from, to) && Pocket(me, tag, to) == 0)
+            {
+                Interlocked.Increment(ref _unsupplied);
+                return 1;
+            }
             if (!(_pocketClosing || _frontShortening || _targetValue || _axis)) return 0;
             var (pocket, shortest, valuable) = (0, int.MaxValue, 0.0);
             foreach (var id in Game.Neighbours(from))
             {
                 var c = Game.Province(id);
-                if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)) continue;
+                if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)
+                    || _supplyAware && Starved(me, tag, from, c) && Pocket(me, tag, c) == 0) continue;
                 if (Divisions(from) < Divisions(c) * (_fortLevel(c) / 2 + 1)) continue; // fails vanilla's strength test anyway
                 if (_pocketClosing) pocket = Math.Max(pocket, Pocket(me, tag, c));
                 if (_frontShortening) shortest = Math.Min(shortest, FrontChange(me, tag, c));
@@ -71,6 +80,7 @@ public unsafe partial class AiAssist
             Failed(e);
             return _cantMove(us, from, to);
         }
+        finally { Breadcrumb.Leave(crumb); }
     }
 
     /// <summary>A neighbour vanilla's candidate loop would weigh at all (before its own CantMoveInto): not behind an impassable
@@ -266,5 +276,44 @@ public unsafe partial class AiAssist
             if (country != 0) states.Add(*(int*)(country + CapitalOfCountry));
         _capitals = (Environment.TickCount64 + CapitalsCacheMs, states);
         return states;
+    }
+
+    // ---- Supply-aware attacks: no local attacks the attackers' supply can't follow ----
+
+    // CSupplySystem (gamestate+0x3D8): per-province records by id at +0x138 (0xD8 bytes, count at +0x144).
+    // Record +0 _TotalNeed (left after local nodes), +8 supply flowing in (all entries); zeroed and rebuilt each UpdateSupply.
+    private const int SupplyOfGameState = 0x3D8, FlowOfSupply = 0x138, FlowSize = 0xD8;
+    private const int NeedOfFlow = 0, SuppliedOfFlow = 8;
+
+    private static bool _supplyAware;
+    private static int _supplyShare, _unsupplied;
+
+    /// <summary>
+    /// Supply only flows through our side's provinces, so once <paramref name="to"/> is taken its supply comes over its land
+    /// neighbours held by us or allies. Starved: <paramref name="from"/> gets less than SupplyAwareMinPercent % of what it
+    /// needs and no other friendly neighbour of the target has that much spare (flow in minus its own need).
+    /// AI threads, read only: the game rebuilds the flow on the main thread each hour, before the AI pass.
+    /// </summary>
+    private static bool Starved(nint me, int tag, nint from, nint to)
+    {
+        var state = Game.State;
+        var supply = state == 0 ? 0 : *(nint*)(state + SupplyOfGameState);
+        if (supply == 0) return false;
+        var flows = *(nint*)(supply + FlowOfSupply);
+        var count = *(int*)(supply + FlowOfSupply + 0xC);
+        var fromId = Game.Id(from);
+        if (flows == 0 || (uint)fromId >= (uint)count) return false;
+        var at = flows + (nint)FlowSize * fromId;
+        var need = *(long*)(at + NeedOfFlow); // the attackers and whatever else draws supply there
+        var wanted = need * _supplyShare / 100;
+        if (need <= 0 || *(long*)(at + SuppliedOfFlow) >= wanted) return false;
+        foreach (var id in Game.Neighbours(to))
+        {
+            var n = Game.Province(id);
+            if (n == 0 || n == from || (uint)id >= (uint)count || *(int*)(n + ControllerOfProvince) <= 0 || !Friendly(me, tag, n)) continue; // sea: controller 0
+            var flow = flows + (nint)FlowSize * id;
+            if (*(long*)(flow + SuppliedOfFlow) - *(long*)(flow + NeedOfFlow) >= wanted) return false;
+        }
+        return true;
     }
 }
