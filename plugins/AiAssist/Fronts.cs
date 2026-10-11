@@ -21,12 +21,20 @@ public unsafe partial class AiAssist
     private static int _stationed;
     private static bool _holdLine, _axis, _beachDefense;
     private const int AxisRetryHours = 24, ThinSectorWeight = 8;
+    // CAIFront+0x218: its CAIForceConcentration (the game's armoured push), embedded. +0 divisions it was given (0: none), +0x14 its units,
+    // +0x20 its army, +0x48 target (optional, set flag +0x78) with its CPdxArray<CProvince*> path at +0x60 (path[0] ours .. path[n-1] the target), +0x84 attack on.
+    private const int ConcentrationOfFront = 0x218, UnitsOfConcentration = 0x14, ArmyOfConcentration = 0x20, PathOfConcentration = 0x60, HasTarget = 0x78, AttackOn = 0x84;
+    private const int ArmiesOfAiFront = 0x60; // CAIFront: CPdxArray<COrdersGroup*>
+    private static int _spearheads;
 
     // Keyed by raw CAIGeneral pointers, which a freed and reallocated general can reuse: entries carry the tag they were made for.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, HashSet<int> Core, HashSet<int> Line)> Axes = new(); // general -> its breakthrough axis, for a day
+    // Head: the spearhead's province the axis is anchored on, 0 for a thin-sector axis.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, int Head, HashSet<int> Core, HashSet<int> Line)> Axes = new(); // general -> its breakthrough axis, for a day
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, long[] Armies)> AxisArmies = new(); // general -> its armies at war (CRef ids), for paradrops
 
     private void LoadFronts()
     {
+        if (_axis) _ = Sig.Find(Signatures.ConcentrationActive) + Sig.Find(Signatures.ConcentrationPath) + Sig.Find(Signatures.ConcentrationAttacking); // the force concentration offsets are still where they were
         _unitRequests = Patches.Hook<GeneralRetFn>(Sig.Find(Signatures.UpdateFrontUnitRequests), general =>
         {
             var result = _unitRequests!.OriginalFunction(general);
@@ -84,6 +92,7 @@ public unsafe partial class AiAssist
     {
         var hour = Hour;
         (int Tag, nint Province, int Weight, HashSet<int> Line)? spot = null; // the thinnest enemy sector on the theatre's line, for the axis
+        List<long>? armies = null; // CRef ids of the theatre's armies at war, for paradrops
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
             var country = *(nint*)(front + CountryOfFront);
@@ -114,6 +123,9 @@ public unsafe partial class AiAssist
                 if (Divisions(theirs) > 0) threatened.Add(ours);
             }
             var hostile = enemyHeld.ContainsValue(true);
+            if (_paradrops && hostile)
+                foreach (var army in Native.PdxArray(front + ArmiesOfAiFront))
+                    if (army != 0) (armies ??= []).Add(*(long*)(army + RefOfGroup));
             // The attack gate and the backfill read this; a front with no threat left drops out at once.
             if (threatened.Count > 0) _line[front] = (hour, tag, threatened);
             else _line.TryRemove(front, out _);
@@ -131,7 +143,7 @@ public unsafe partial class AiAssist
             }
             // Hold the line: at war, every province of ours on the line keeps a defender, whatever else (a supply crisis,
             // another front) the game weighs; it would ship them off and leave the line empty while fighting.
-            if (!_holdLine || !hostile || *(int*)(front + AreaDefense) != 0 || *(nint*)(front + InvasionTarget) != 0
+            if (!_holdLine || !hostile || Grads.ContainsKey(tag) || *(int*)(front + AreaDefense) != 0 // on a grad, it gets the divisions, not the old border || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
             if (*(int*)(front + MinWanted) >= contact.Count) continue;
             *(int*)(front + MinWanted) = contact.Count;
@@ -139,10 +151,45 @@ public unsafe partial class AiAssist
             *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
             Interlocked.Increment(ref _raised);
         }
-        if (spot is { } best && best.Weight <= ThinSectorWeight // no thin sector anywhere: no axis today
+        // The game's own spearhead attacks across this line: the axis is where its path crosses it, and moves on with its head (the path
+        // is fixed: no zig-zag). A path past a neutral or allied province may miss the line: then the thin sector, or the whole line would stand still.
+        if (spot is { } line && Spearhead(general) is var head and not 0 && Rings(head) is var core && core.Overlaps(line.Line))
+        {
+            if (!(Axes.TryGetValue(general, out var current) && current.Tag == line.Tag && current.Head == head && hour - current.Hour is >= 0 and < AxisRetryHours))
+            {
+                Axes[general] = (hour, line.Tag, head, core, line.Line);
+                Interlocked.Increment(ref _spearheads);
+            }
+        }
+        else if (spot is { } best && best.Weight <= ThinSectorWeight // no thin sector anywhere: no axis today
             && !(Axes.TryGetValue(general, out var axis) && axis.Tag == best.Tag && hour - axis.Hour is >= 0 and < AxisRetryHours)) // held a day: divisions don't zig-zag
-            Axes[general] = (hour, best.Tag, Rings(Game.Id(best.Province)), best.Line);
+            Axes[general] = (hour, best.Tag, 0, Rings(Game.Id(best.Province)), best.Line);
         foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisRetryHours) Axes.TryRemove(g, out _); // generals come and go all game
+        if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
+        foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisRetryHours) AxisArmies.TryRemove(g, out _);
+    }
+
+    /// <summary>
+    /// The theatre's armoured spearhead while it attacks: the first enemy province on its force concentration's path, 0 if none.
+    /// The game's own liveness test first: a front that lost its concentration keeps a stale path and attack flag. Read only, on
+    /// the general's own AI thread, the only one that rebuilds and frees the path. Invasion fronts: the landing has its own target.
+    /// The flag is the concentration wanting the attack on; the attack gate may still hold it (as with a thin-sector axis).
+    /// </summary>
+    // ponytail: first attacking concentration of the theatre only; pick by path progress if two attack at once and it matters.
+    private static int Spearhead(nint general)
+    {
+        foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
+        {
+            if (front == 0) continue;
+            var fc = front + ConcentrationOfFront;
+            var country = *(nint*)(front + CountryOfFront);
+            if (country == 0 || *(int*)fc <= 0 || *(int*)(fc + UnitsOfConcentration) == 0 || *(nint*)(fc + ArmyOfConcentration) == 0
+                || *(byte*)(fc + HasTarget) == 0 || *(byte*)(fc + AttackOn) == 0 || *(nint*)(fc + PathOfConcentration) == 0 || *(nint*)(front + InvasionTarget) != 0) continue;
+            var tag = *(int*)(country + 8);
+            foreach (var p in Native.PdxArray(fc + PathOfConcentration)) // path[0] ours (the source), path[n - 1] the target
+                if (p != 0 && Enemy(country, tag, p)) return Game.Id(p);
+        }
+        return 0;
     }
 
     /// <summary>How hard the enemy province is to take from ours: its divisions and forts, more for harsh terrain or a river in front of it.</summary>
@@ -173,16 +220,21 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// Whether a local attack from <paramref name="from"/> may go to <paramref name="to"/>: off a theatre's line that has
-    /// an axis today, anything; on it, only targets on the axis (the theatre's other sectors hold while it pushes).
+    /// an axis today, anything; on it, only targets on the axis (the theatre's other sectors hold while it pushes), and
+    /// pinning attacks on enemy stacks next to the axis, which could shift into the breakthrough (a division under attack
+    /// only moves to retreat), where the attack passes vanilla's strength test.
     /// </summary>
     private static bool OnAxis(int tag, nint from, nint to)
     {
         var hour = Hour;
         foreach (var axis in Axes.Values)
             if (axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisRetryHours && axis.Line.Contains(Game.Id(from)))
-                return axis.Core.Contains(Game.Id(to));
+                return axis.Core.Contains(Game.Id(to)) || Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(axis.Core.Contains);
         return true;
     }
+
+    /// <summary>Our stack in <paramref name="from"/> passes vanilla's strength test for a local attack on <paramref name="to"/> (divisions, forts).</summary>
+    private static bool Strong(nint from, nint to) => Divisions(from) >= Divisions(to) * (_fortLevel(to) / 2 + 1);
 
     /// <summary>Whether the province is on one of the tag's breakthrough axes of the last two days (CAS backs it).</summary>
     private static bool OnAnyAxis(int tag, int province)

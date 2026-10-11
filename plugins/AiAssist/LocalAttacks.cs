@@ -21,9 +21,6 @@ public unsafe partial class AiAssist
         var cantMove = Sig.Find(Signatures.CantMoveInto);
         if (site + 5 + *(int*)(site + 1) != cantMove) throw new InvalidOperationException("micro attack candidate check: the call moved");
         _cantMove = (delegate* unmanaged<nint, nint, nint, byte>)cantMove;
-        var river = Sig.Find(Signatures.RiverPenalty);
-        _riverSmall = river + 14 + *(int*)(river + 10); // mov rdx,[rip+disp] (7 bytes at +7)
-        _riverLarge = river + 22 + *(int*)(river + 18); // cmovnz rdx,[rip+disp] (8 bytes at +14)
         if (*(ushort*)(site + 5) != 0xC084) throw new InvalidOperationException("micro attack candidate check: no `test al,al` after the call");
         // `call CantMoveInto; test al,al` (7 bytes: the hook's jump takes more than the call's 5) becomes a call of the filter
         // and the same test, for the `jnz skip` right after. rsp is 16-aligned at the call and its home space reserved.
@@ -47,6 +44,11 @@ public unsafe partial class AiAssist
             var tag = *(int*)us;
             var me = Game.Country(tag);
             if (me == 0 || !SheepMod.Active) return 0;
+            if (Grads.ContainsKey(tag) && !Exhausted(to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0)
+            {
+                Interlocked.Increment(ref _steered);
+                return 1; // on its grad: local attacks only into fought-out spearheads, pockets and the way to its own
+            }
             if (_armorTerrain && BadForArmor(tag, from, to))
             {
                 Interlocked.Increment(ref _steered);
@@ -64,7 +66,7 @@ public unsafe partial class AiAssist
                 var c = Game.Province(id);
                 if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)
                     || _supplyAware && Starved(me, tag, from, c) && Pocket(me, tag, c) == 0 && Relief(me, tag, c) == 0) continue;
-                if (Divisions(from) < Divisions(c) * (_fortLevel(c) / 2 + 1)) continue; // fails vanilla's strength test anyway
+                if (!Strong(from, c)) continue; // fails vanilla's strength test anyway
                 pocket = Math.Max(pocket, Pocket(me, tag, c));
                 relief = Math.Max(relief, Relief(me, tag, c));
                 shortest = Math.Min(shortest, FrontChange(me, tag, c));

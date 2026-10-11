@@ -10,7 +10,12 @@ namespace AiAssist;
 ///   divisions stay a week, worn-out divisions rest behind the line and divisions in a closing salient pull out (both go
 ///   back once rested), and no "attack on" starts while the threatened line is thinly manned.
 /// - Beach defence: landings are walled in and attacked at once.
-/// - Breakthrough axis: local attacks (and close air support) keep to the theatre's thinnest enemy sector for a day.
+/// - Breakthrough axis: local attacks (and close air support) keep to the AI's own armoured spearhead while it attacks, moving on
+///   with it, else to the theatre's thinnest enemy sector for a day; off the axis only pinning attacks on enemy stacks next to it.
+/// - Defensive postures: facing a much stronger enemy, a country gives up exposed ground for its grad (a minimum cut through its
+///   provinces: rivers, rough ground, forts, few attack directions), holds it, and counterattacks only fought-out spearheads.
+/// - Strategic invasions: naval invasions pick thinly held, valuable beaches and wait (a week at most) while their beach is crowded.
+/// - Strategic paradrops: paratroopers of an army on the axis drop onto empty, valuable enemy ground behind the line near it.
 /// - Attack targets: local attacks pick pocket-closing, then valuable, then front-shortening targets instead of at random
 ///   (Sheep's pocket test in script is never read); next to a pocket of our own, the target that opens a corridor to it
 ///   comes first (and breakouts from inside); fresh divisions take empty enemy provinces next to the line.
@@ -40,7 +45,9 @@ public unsafe partial class AiAssist : Plugin
         _beachDefense = Config.Bind("AI", "BeachDefense", true,
             "Naval landings are answered at once: free divisions next to the beachhead wall it in and attack into it; vanilla leaves it alone until the front collapses.");
         _axis = Config.Bind("AI", "BreakthroughAxis", true,
-            "The AI's local attacks keep to a breakthrough axis: its front's thinnest enemy sector (few divisions, no forts, open terrain), held for a day. Its close air support backs battles on the axis first.");
+            "The AI's local attacks keep to a breakthrough axis: while the AI's own armoured spearhead (the game's force concentration) attacks, where its path crosses the enemy line, moving forward with it; "
+            + "otherwise its front's thinnest enemy sector (few divisions, no forts, open terrain), held for a day. Off the axis, only attacks that pin enemy divisions next to it (they can't shift into the breakthrough while under attack). "
+            + "Its close air support backs battles on the axis first.");
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
             + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "
@@ -62,6 +69,19 @@ public unsafe partial class AiAssist : Plugin
             "The AI's local attacks skip provinces its divisions couldn't be supplied in once taken: supply only flows through provinces of ours or our allies, and the attack's own province gets too little while no other of ours next to the target has some to spare. Pocket-closing targets and the corridor to a pocket of ours are still taken.");
         _supplyShare = Math.Clamp(Config.Bind("AI", "SupplyAwareMinPercent", 25,
             "Supply (% of what the attacking province needs) it must get, or another province of ours next to the target must have to spare, for a local attack."), 1, 200);
+        _strategicInvasions = Config.Bind("AI", "StrategicInvasions", true,
+            "The AI picks the beach for a naval invasion by what is there: thinly held coast near victory points, capitals, supply hubs, airfields and resources first, "
+            + "beaches with enemy divisions nearby, land forts or coastal bunkers last. A planned landing waits (a week at most) while the enemy divisions around its beach outnumber half the landing.");
+        _paradrops = Config.Bind("AI", "StrategicParadrops", true,
+            "The AI uses its paratroopers (needs BreakthroughAxis): up to four paradrop-capable divisions of an army on its breakthrough axis fly from the nearest airbase that can carry them "
+            + "onto an empty enemy province behind the line near the axis (victory points, supply hubs, airfields, pockets first). They jump only when vanilla allows the drop "
+            + "(prepared, enough transport planes, air superiority on the route). Vanilla's AI never paradrops.") && _axis;
+        _postures = Config.Bind("AI", "DefensivePostures", true,
+            "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.3x while losing line provinces or short of divisions) gives up exposed ground and holds its grad: "
+            + "the most defensible short line between that enemy and its capital (rivers, mountains, marsh, forests, hills, cities and forts in front, few directions to be attacked from), redrawn weekly, "
+            + "or one line back once the enemy breaks in. Its divisions walk there and stay (victory point cities get one more), it starts no offensives or paradrops (landings still go), and it attacks only "
+            + "fought-out enemy stacks next to the line, from two sides, while single divisions pin the enemy stacks that could come to their aid; worn-out attackers break off. At even strength (after two weeks at least) "
+            + "its divisions go back to the AI's fronts. Needs HoldTheLine.") && _holdLine;
 
         _log = Log;
         ResolveShared();
@@ -74,27 +94,36 @@ public unsafe partial class AiAssist : Plugin
             _posted.Clear();
             _resting.Clear();
             Axes.Clear();
+            AxisArmies.Clear();
+            Beaches.Clear();
+            Holds.Clear();
+            ClearParadrops();
             _line.Clear();
             FrontCache.Clear();
             Encircled.Clear();
             HoldSince.Clear();
+            Grads.Clear();
+            Stances.Clear();
+            Attackers.Clear();
             _capitals = (0, []);
             _beachheads = [];
             _provinceCount = -1;
         });
         MainThread.Every(TimeSpan.FromSeconds(1), _game.Check); // AI threads read these caches: reset them soon after a load
-        if (_attackTargets || _armorTerrain || _axis || _supplyAware) LoadPockets();
+        if (_attackTargets || _armorTerrain || _axis || _supplyAware || _postures) LoadPockets();
         if (refit) LoadRefit();
         if (_airRetreat || _bombingTargets) LoadRegionPriorities();
         if (productionLines) LoadProductionLines(stickyDays);
         if (_axis) LoadCas();
         if (_holdLine || _axis) LoadFronts();
+        if (_holdLine || _strategicInvasions || _paradrops) LoadPostAICommand(); // one hook; each part runs under its own setting
         if (_holdLine)
         {
-            LoadAttackGate();
             _unassign = (delegate* unmanaged<nint, nint, nint, byte, byte, nint>)Sig.Find(Signatures.UnassignCommand);
             MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
         }
+        if (_strategicInvasions) LoadInvasions();
+        if (_paradrops) LoadParadrops();
         if (_holdLine || _attackTargets) MainThread.Every(TimeSpan.FromSeconds(5), Micro);
         if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(30), DefendBeachheads);
         MainThread.Every(TimeSpan.FromMinutes(1), LogStats);
@@ -109,7 +138,9 @@ public unsafe partial class AiAssist : Plugin
             var n = Interlocked.Exchange(ref counter, 0);
             if (n > 0) done.Add(string.Format(what, n));
         }
-        Add(ref _held, "held {0} AI attack(s) while the line is thin");
+        Add(ref _held, "held {0} AI attack(s) or landing(s) (thin line or crowded beach)");
+        Add(ref _landingsHeld, "{0} of those at a crowded beach");
+        Add(ref _rescored, "re-scored {0} invasion beach candidate(s)");
         Add(ref _steered, "skipped {0} local attack target(s) for better ones");
         Add(ref _unsupplied, "skipped {0} local attack target(s) the attackers couldn't be supplied in");
         Add(ref _taken, "sent {0} division(s) into empty enemy provinces");
@@ -125,6 +156,13 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _defended, "answered {0} landing(s)");
         Add(ref _stationed, "left {0} fresh arrival(s) in place");
         Add(ref _cas, "focused {0} CAS pass(es) on the axis");
+        Add(ref _spearheads, "put {0} breakthrough axis/axes on the AI's armoured spearhead");
+        Add(ref _paradropped, "launched {0} AI paradrop(s)");
+        Add(ref _fellBack, "{0} AI country/countries fell back to a grad");
+        Add(ref _garrisoned, "garrisoned {0} division(s) on grads");
+        Add(ref _countered, "counterattacked fought-out spearheads with {0} division(s)");
+        Add(ref _pinning, "pinned {0} enemy stack(s) next to counterattacks");
+        Add(ref _brokeOff, "broke off {0} worn-out counter or pinning attack(s)");
         if (done.Count > 0) Log.Info($"last minute: {string.Join(", ", done)}");
     }
 
@@ -148,6 +186,9 @@ public unsafe partial class AiAssist : Plugin
         var getter = at + 5 + *(int*)(at + 1);
         _buildingDb = getter + 18 + *(int*)(getter + 14);
         _navalBaseSlot = *(int*)(at + 8); // `mov rcx,[rax+3B8h]`: the naval base type, as the game reads it
+        var river = Sig.Find(Signatures.RiverPenalty);
+        _riverSmall = river + 14 + *(int*)(river + 10); // mov rdx,[rip+disp] (7 bytes at +7)
+        _riverLarge = river + 22 + *(int*)(river + 18); // cmovnz rdx,[rip+disp] (8 bytes at +14)
     }
 
     private static int Hour => *(int*)(Game.State + HourOfGameState);

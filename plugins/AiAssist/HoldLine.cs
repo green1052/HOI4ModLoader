@@ -59,7 +59,7 @@ public unsafe partial class AiAssist
         if (unit == 0) return false;
         var tag = *(int*)(unit + CommanderOfUnit);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
-        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit)) return true;
+        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit) || Paratrooper(unit)) return true;
         var country = Game.Country(tag);
         var location = *(nint*)(unit + LocationOfUnit);
         if (country == 0 || location == 0) return false;
@@ -130,22 +130,24 @@ public unsafe partial class AiAssist
             var tag = country == 0 ? 0 : *(int*)(country + 8);
             if (tag <= 0 || tag == player) continue;
             PrunePosted(country, tag);
-            var line = LineOf(tag, hour);
+            var grad = _postures ? Posture(country, tag, hour) : null; // a much stronger enemy: its grad is the line
+            var line = grad != null ? Held(grad, tag) : LineOf(tag, hour);
             if (line == null)
             {
                 Unpin(tag); // its front is gone: its reserve stops being one
                 continue;
             }
             var sent = 0;
-            var holes = line.Where(p => !_gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) == 0)
+            var holes = line.Where(p => !_gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) < (grad?.Want.GetValueOrDefault(Game.Id(p), 1) ?? 1))
                 .Select(p => (Province: p, Key: Key(country, tag, p)))
                 .OrderByDescending(h => h.Key);
             foreach (var (province, key) in holes)
             {
-                if (sent == MaxBackfills) break;
-                var important = key >= KeyHole; // a port, a city on a river: worth walking further for
+                if (sent == (grad != null ? MaxGradMoves : MaxBackfills)) break;
+                var important = grad != null || key >= KeyHole; // a port, a city on a river, the grad: worth walking further for
                 var helper = Helper(tag, province, line, important ? KeyBackfillRadius : BackfillRadius);
-                if (helper == 0 || !Send(helper, Game.Id(province), now, important ? KeyGapMs : GapMs)) continue; // nothing free nearby: the attack gate keeps the front still instead
+                if (helper == 0 || !(grad != null ? Garrison(helper, Game.Id(province), tag, now)
+                        : Send(helper, Game.Id(province), now, important ? KeyGapMs : GapMs))) continue; // nothing free nearby: the attack gate keeps the front still instead
                 sent++;
                 Interlocked.Increment(ref _backfilled);
             }
@@ -269,7 +271,7 @@ public unsafe partial class AiAssist
     {
         if (*(int*)(unit + KindOfUnit) != 0 || *(int*)(unit + CommanderOfUnit) != tag || *(int*)(unit + OwnerOfUnit) != tag) return false;
         if (*(int*)(unit + CombatsOfUnit) != 0 || *(byte*)(unit + Retreating) != 0 || *(nint*)(unit + Busy) != 0) return false;
-        return !_sent.ContainsKey(unit) && !_resting.ContainsKey(unit);
+        return !_sent.ContainsKey(unit) && !_resting.ContainsKey(unit) && !Paratrooper(unit);
     }
 
     /// <summary>A movable division that stands idle, rested enough to go somewhere.</summary>
@@ -301,7 +303,8 @@ public unsafe partial class AiAssist
                 Release(tag, units, hour);
                 PullBack(country, tag, units, now, hour);
             }
-            if (_attackTargets) TakeEmpty(country, tag, units, now);
+            if (Grads.TryGetValue(tag, out var grad)) CounterAttack(country, tag, grad, units, now); // on its grad: no piecemeal taking back of given-up ground
+            else if (_attackTargets) TakeEmpty(country, tag, units, now);
         }
     }
 
@@ -338,6 +341,7 @@ public unsafe partial class AiAssist
             if (!left.TryGetValue(location, out var here)) here = left[location] = Standing(country, tag, location);
             if (here < 2) continue; // alone there: it holds on
             if (!narrow.TryGetValue(location, out var closing)) closing = narrow[location] = Narrow(country, tag, location);
+            if (closing && Grads.TryGetValue(tag, out var grad) && grad.Fortresses.Contains(Game.Id(location))) closing = false; // a fortress city on the grad holds to the last
             var worn = Percent(unit, OrgRatioSlot) < WornOrg || Percent(unit, StrengthRatioSlot) < WornStrength;
             if (!closing && !(worn && (resting + 1) * 100 <= land * MaxRestingPercent && EnemyDivisionsNext(country, tag, location))) continue;
             var rest = RestProvince(country, tag, location);
@@ -424,38 +428,60 @@ public unsafe partial class AiAssist
     [Function(CallingConventions.Microsoft)] public delegate byte PostFn(nint cmd, nint tag);
 
     private IHook<PostFn>? _post;
-    private delegate* unmanaged<nint, int, nint> _findOrder;
-    private nint _executeVTable;
-    private int _held;
+    private static delegate* unmanaged<nint, int, nint> _findOrder;
+    private static nint _executeVTable;
+    private static int _held;
 
-    private void LoadAttackGate()
+    /// <summary>
+    /// The one PostAICommand hook (every AI command): AI order commands that would undo a paradrop of ours (StrategicParadrops),
+    /// then the launch gate: invasions by their beach (StrategicInvasions), other attacks by the line (HoldTheLine).
+    /// </summary>
+    private void LoadPostAICommand()
     {
         _findOrder = (delegate* unmanaged<nint, int, nint>)Sig.Find(Signatures.FindOrder);
         _executeVTable = Sig.VTable(Signatures.ExecuteCommand);
         _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAICommand), (cmd, tag) =>
         {
-            if (*(nint*)cmd != _executeVTable || *(byte*)(cmd + ExecuteOn) == 0 || *(int*)tag == Game.ControlledTag || !SheepMod.Active || Ready(cmd, tag))
-                return _post!.OriginalFunction(cmd, tag);
+            if (*(int*)tag == Game.ControlledTag || !SheepMod.Active) return _post!.OriginalFunction(cmd, tag);
+            bool keep;
+            try
+            {
+                keep = !_paradrops || KeepsParadrops(cmd);
+                if (keep && *(nint*)cmd == _executeVTable && *(byte*)(cmd + ExecuteOn) != 0 && !Ready(cmd, tag))
+                {
+                    keep = false;
+                    Interlocked.Increment(ref _held);
+                }
+            }
+            catch (Exception e)
+            {
+                Failed(e);
+                keep = true;
+            }
+            if (keep) return _post!.OriginalFunction(cmd, tag);
             ((delegate* unmanaged<nint, int, void>)(*(nint**)cmd)[0])(cmd, 1); // deleted, as the game does with an invalid command
-            Interlocked.Increment(ref _held);
             return 0;
         });
     }
 
-    /// <summary>Whether an "attack on" may go ahead: it runs already, it is an invasion or paradrop, or the line is manned. Read only: AI threads.</summary>
-    private bool Ready(nint cmd, nint tag)
+    /// <summary>
+    /// Whether an "attack on" may go ahead: it runs already, a paradrop, an invasion whose beach isn't crowded (StrategicInvasions),
+    /// or the country holds no grad (DefensivePostures) and its threatened line is manned (HoldTheLine). Read only: AI threads.
+    /// </summary>
+    private static bool Ready(nint cmd, nint tag)
     {
         var reference = (int*)(cmd + GroupOfCommand);
         if (reference[0] == 0 && reference[1] == 0) return true;
         var group = _resolve((nint)reference);
         if (group == 0) return true;
         var id = *(int*)(cmd + OrderOfCommand);
-        if (id != 0)
-        {
-            var order = _findOrder(group, id);
-            if (order == 0 || *(byte*)(order + Executing) != 0 || *(int*)(order + TypeOfOrder) is Invasion or Paradrop) return true; // running, or at sea
-        }
-        return Manned(*(int*)tag, LineOf(*(int*)tag, Hour)); // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
+        // CAIOperation::UpdateExecution launches an invasion for the whole group: order id 0 (`xor r8d,r8d` at 0x141A4D9C2).
+        var order = id != 0 ? _findOrder(group, id) : Unlaunched(group);
+        if (id != 0 && (order == 0 || *(byte*)(order + Executing) != 0)) return true; // running
+        if (order != 0 && *(int*)(order + TypeOfOrder) is Invasion or Paradrop) // at sea: the home line has no say
+            return *(int*)(order + TypeOfOrder) != Invasion || !_strategicInvasions || BeachClear(group, order, *(int*)tag);
+        if (Grads.ContainsKey(*(int*)tag)) return false; // on its grad (DefensivePostures): no offensives until strong enough again; landings and paradrops are judged above
+        return !_holdLine || Manned(*(int*)tag, LineOf(*(int*)tag, Hour)); // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
     }
 
     // ---- Beach defence: landings are walled in and attacked at once, not after the front collapses ----
@@ -481,7 +507,8 @@ public unsafe partial class AiAssist
         {
             var tag = country == 0 ? 0 : *(int*)(country + 8);
             if (tag <= 0 || tag == player) continue;
-            var line = LineOf(tag, hour) ?? []; // an island or a quiet country being invaded has no land line yet
+            // An island or a quiet country being invaded has no land line yet; a grad's holders stay on the grad.
+            var line = (Grads.TryGetValue(tag, out var grad) ? Held(grad, tag) : LineOf(tag, hour)) ?? [];
             var sent = 0;
             foreach (var beachhead in _beachheads)
             {
