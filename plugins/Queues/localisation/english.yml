@@ -1,6 +1,3 @@
-﻿l_english:
+l_english:
  com.green1052.queues.desc:0 "Shift+click techs, focuses and intelligence agency upgrades to queue them; they start when a slot is free. Advisors, ideas, laws and decisions are taken when you have the political power."
- com.green1052.queues.Research:0 "Research queue"
- com.green1052.queues.Focus:0 "National focus queue"
- com.green1052.queues.Agency:0 "Intelligence agency queue"
  com.green1052.queues.PoliticalPower:0 "Political power queue"

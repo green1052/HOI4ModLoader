@@ -1,5 +1,0 @@
-﻿l_english:
- com.green1052.airwingfieldmarshal.desc:0 "Air wings can be attached to field marshals (in multiplayer: spread over his armies), and attached air wings give close air support to every battle in their mission regions."
- com.green1052.airwingfieldmarshal.FieldMarshal:0 "Field marshal attachment"
- com.green1052.airwingfieldmarshal.SpreadOverArmies:0 "Multiplayer: spread over armies"
- com.green1052.airwingfieldmarshal.WholeMissionArea:0 "CAS in the whole mission area"

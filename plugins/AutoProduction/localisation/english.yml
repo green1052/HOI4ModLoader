@@ -1,7 +1,0 @@
-﻿l_english:
- com.green1052.autoproduction.desc:0 "Moves military factories from lines whose equipment has a big surplus to lines whose equipment is short, one at a time."
- com.green1052.autoproduction.SurplusPercent:0 "Surplus (% of need)"
- com.green1052.autoproduction.MinSurplus:0 "Minimum surplus (units)"
- com.green1052.autoproduction.MinFactories:0 "Minimum factories per line"
- com.green1052.autoproduction.MovesPerTurn:0 "Factories moved at a time"
- com.green1052.autoproduction.CoverDays:0 "Cover days"

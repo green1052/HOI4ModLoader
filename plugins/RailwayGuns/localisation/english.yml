@@ -1,6 +1,0 @@
-﻿l_english:
- com.green1052.railwayguns.desc:0 "Railway guns can be assigned to field marshals (in multiplayer: spread over his armies), stay just behind the front line and never cross the sea."
- com.green1052.railwayguns.FieldMarshal:0 "Field marshal assignment"
- com.green1052.railwayguns.SpreadOverArmies:0 "Multiplayer: spread over armies"
- com.green1052.railwayguns.FrontPenalty:0 "Front line penalty"
- com.green1052.railwayguns.NoSeaTransfer:0 "No sea transfer"

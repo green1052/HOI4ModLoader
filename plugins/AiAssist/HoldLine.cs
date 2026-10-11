@@ -6,17 +6,20 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Hold the line: pinned defenders, holes refilled, attacks wait on a thinly manned line ----
+    // ---- Hold the line: pinned defenders, holes refilled, reserves, rotation and escape; attacks wait on a thinly manned line ----
 
+    private const int KindOfUnit = 8, GroupOfUnit = 0xC0, CombatsOfUnit = 0x1B4, UnitsOfCountry = 0x290;
     private const int LocationOfUnit = 0x1F0, OwnerOfUnit = 0x1E0, Path = 0x200, Retreating = 0x24C, Busy = 0x2F8;
     private const int ArrivalOfUnit = 0x160, FreshHours = 168;
-    private const int LineFreshHours = 3, MaxBackfills = 2, BackfillRadius = 10, MinBackfillOrg = 60; // Concentrate refreshes the line hourly
+    private const int LineFreshHours = 3, MaxBackfills = 2, BackfillRadius = 10, MinBackfillOrg = 60; // TrackFronts refreshes the line hourly
     private const long SentMs = 120_000, GapMs = 600_000; // a helper walks without new orders; a hole isn't refilled at once
     private const int KeyBackfillRadius = 20, KeyHole = 60;
     private const long KeyGapMs = 120_000;
     private const int ReserveMax = 6, ReservePerLine = 4, ReserveMoves = 2, ReserveRadius = 6;
     private const int BeachheadMax = 8, BeachheadRadius = 6, MaxLandingSends = 6;
     private const long LandingMs = 300_000, LandingScanMs = 30_000;
+    private const int WornOrg = 30, WornStrength = 50, RestedOrg = 90, RestedStrength = 80, MaxRestingPercent = 25; // %
+    private const int MaxMoves = 2, RestDepth = 2, MaxRestSearch = 6, MaxNeckSearch = 8, MaxRestHours = 168;
 
     [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
     private IHook<CollectFn>? _collect;
@@ -29,7 +32,11 @@ public unsafe partial class AiAssist
     private long _beachScanned;
     private static int _provinceCount = -1; // probe result: the game has no province enumeration
     private PerGame _game = null!;
-    private int _backfilled, _reserved, _defended;
+    // Divisions we took off their front to rest or escape, with their tag and since when: the theatre shuffle and army balancing
+    // leave them until rested, then the AI puts them on a front again. Never dereferenced unless still one of the tag's units.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> _resting = new();
+    private static delegate* unmanaged<nint, nint, nint, byte, byte, nint> _unassign;
+    private int _backfilled, _reserved, _defended, _rested, _escaped;
 
     /// <summary>
     /// A division that took up its post only days ago: the theatre shuffle would march it somewhere else and back
@@ -44,7 +51,7 @@ public unsafe partial class AiAssist
         return true;
     }
 
-    /// <summary>The AI's regrouping can't take this division: it stands on a reserve post, or (hold the line) it is the last one
+    /// <summary>The AI's regrouping can't take this division: it stands on a reserve post or rests, or it is the last one
     /// of its country in a province enemy divisions can walk into, or it stands on the wall of a pocket (an enemy province
     /// with divisions whose neighbours are all ours).</summary>
     private static bool Pinned(nint unit)
@@ -52,8 +59,7 @@ public unsafe partial class AiAssist
         if (unit == 0) return false;
         var tag = *(int*)(unit + CommanderOfUnit);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
-        if (_reserve && _posted.ContainsKey(unit)) return true;
-        if (!_holdLine) return false;
+        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit)) return true;
         var country = Game.Country(tag);
         var location = *(nint*)(unit + LocationOfUnit);
         if (country == 0 || location == 0) return false;
@@ -116,39 +122,42 @@ public unsafe partial class AiAssist
     {
         if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
         var now = Environment.TickCount64;
-        foreach (var (unit, until) in _sent.ToArray()) if (now >= until) _sent.Remove(unit);
-        foreach (var (province, until) in _gap.ToArray()) if (now >= until) _gap.Remove(province);
+        Expire(now);
         var hour = Hour;
         var player = Game.ControlledTag;
         foreach (var country in Game.Countries)
         {
             var tag = country == 0 ? 0 : *(int*)(country + 8);
             if (tag <= 0 || tag == player) continue;
-            if (_reserve) PrunePosted(country, tag);
+            PrunePosted(country, tag);
             var line = LineOf(tag, hour);
             if (line == null)
             {
-                if (_reserve) Unpin(tag); // its front is gone: its reserve stops being one
+                Unpin(tag); // its front is gone: its reserve stops being one
                 continue;
             }
-            if (_holdLine)
+            var sent = 0;
+            var holes = line.Where(p => !_gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) == 0)
+                .Select(p => (Province: p, Key: Key(country, tag, p)))
+                .OrderByDescending(h => h.Key);
+            foreach (var (province, key) in holes)
             {
-                var sent = 0;
-                var holes = line.Where(p => !_gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) == 0)
-                    .Select(p => (Province: p, Key: _defensePriority ? Key(country, tag, p) : 0))
-                    .OrderByDescending(h => h.Key);
-                foreach (var (province, key) in holes)
-                {
-                    if (sent == MaxBackfills) break;
-                    var important = key >= KeyHole; // a port, a city on a river: worth walking further for
-                    var helper = Helper(tag, province, line, important ? KeyBackfillRadius : BackfillRadius);
-                    if (helper == 0 || !Send(helper, Game.Id(province), now, important ? KeyGapMs : GapMs)) continue; // nothing free nearby: the attack gate keeps the front still instead
-                    sent++;
-                    Interlocked.Increment(ref _backfilled);
-                }
+                if (sent == MaxBackfills) break;
+                var important = key >= KeyHole; // a port, a city on a river: worth walking further for
+                var helper = Helper(tag, province, line, important ? KeyBackfillRadius : BackfillRadius);
+                if (helper == 0 || !Send(helper, Game.Id(province), now, important ? KeyGapMs : GapMs)) continue; // nothing free nearby: the attack gate keeps the front still instead
+                sent++;
+                Interlocked.Increment(ref _backfilled);
             }
-            if (_reserve && Manned(tag, line)) Reserve(country, tag, line, now);
+            if (Manned(tag, line)) Reserve(country, tag, line, now);
         }
+    }
+
+    /// <summary>Drops the bookings whose time is up: a sent division is free again, a hole may be refilled. Main thread.</summary>
+    private static void Expire(long now)
+    {
+        foreach (var (unit, until) in _sent.ToArray()) if (now >= until) _sent.Remove(unit);
+        foreach (var (province, until) in _gap.ToArray()) if (now >= until) _gap.Remove(province);
     }
 
     /// <summary>Moves a helper to the province and books it: the helper is left alone while it walks, the hole isn't refilled meanwhile.</summary>
@@ -180,7 +189,7 @@ public unsafe partial class AiAssist
             posts[post] = Game.Neighbours(post).Count(n => Game.Province(n) is var q && q != 0 && line.Contains(q));
         var want = Math.Min(ReserveMax, line.Count / ReservePerLine);
         var sent = 0;
-        foreach (var (post, covers) in posts.OrderByDescending(p => p.Value).ThenByDescending(p => _defensePriority ? Key(country, tag, p.Key) : 0).Take(want))
+        foreach (var (post, covers) in posts.OrderByDescending(p => p.Value).ThenByDescending(p => Key(country, tag, p.Key)).Take(want))
         {
             if (sent == ReserveMoves || covers == 0) break;
             var id = Game.Id(post);
@@ -255,13 +264,198 @@ public unsafe partial class AiAssist
         return 0;
     }
 
-    /// <summary>A land division of the tag that can move now: rested, idle, and not one we sent already.</summary>
-    private static bool Spare(nint unit, int tag)
+    /// <summary>A land division of the tag (not lent) that can take orders now: not fighting, retreating or embarked, not one we sent or rest.</summary>
+    private static bool Movable(nint unit, int tag)
     {
         if (*(int*)(unit + KindOfUnit) != 0 || *(int*)(unit + CommanderOfUnit) != tag || *(int*)(unit + OwnerOfUnit) != tag) return false;
         if (*(int*)(unit + CombatsOfUnit) != 0 || *(byte*)(unit + Retreating) != 0 || *(nint*)(unit + Busy) != 0) return false;
-        if (*(int*)(unit + Path + 0xC) != 0 || _sent.ContainsKey(unit)) return false;
-        return Ratio(unit, OrgRatioSlot) >= (long)MinBackfillOrg * Native.FixedPoint / 100;
+        return !_sent.ContainsKey(unit) && !_resting.ContainsKey(unit);
+    }
+
+    /// <summary>A movable division that stands idle, rested enough to go somewhere.</summary>
+    private static bool Spare(nint unit, int tag) => Movable(unit, tag) && *(int*)(unit + Path + 0xC) == 0 && Percent(unit, OrgRatioSlot) >= MinBackfillOrg;
+
+    /// <summary>A CArmy ratio slot in % of full.</summary>
+    private static long Percent(nint unit, int slot) => Ratio(unit, slot) * 100 / Native.FixedPoint;
+
+    // ---- Rotation and escape: AI divisions come off their front to rest, or before a salient is cut off ----
+
+    /// <summary>
+    /// Every five seconds, per AI country: rested divisions go back to the AI, worn-out ones and ones in a closing salient
+    /// come off the line (hold the line), fresh ones take empty enemy provinces (attack targets).
+    /// </summary>
+    private void Micro()
+    {
+        if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
+        var now = Environment.TickCount64;
+        Expire(now);
+        var hour = Hour;
+        var player = Game.ControlledTag;
+        foreach (var country in Game.Countries)
+        {
+            var tag = country == 0 ? 0 : *(int*)(country + 8);
+            if (tag <= 0 || tag == player) continue;
+            var units = Native.PdxArray(country + UnitsOfCountry).ToArray();
+            if (_holdLine)
+            {
+                Release(tag, units, hour);
+                PullBack(country, tag, units, now, hour);
+            }
+            if (_attackTargets) TakeEmpty(country, tag, units, now);
+        }
+    }
+
+    /// <summary>
+    /// The tag's resting divisions that rested (or rested a week: short of equipment, they won't get better) go back to the
+    /// AI, whose theatre shuffle puts them on a front again; gone ones are dropped.
+    /// </summary>
+    private static void Release(int tag, nint[] units, int hour)
+    {
+        foreach (var (unit, rest) in _resting)
+            if (rest.Tag == tag && (Array.IndexOf(units, unit) < 0 || *(int*)(unit + Path + 0xC) == 0
+                    && (Percent(unit, OrgRatioSlot) >= RestedOrg && Percent(unit, StrengthRatioSlot) >= RestedStrength || hour - rest.Hour is < 0 or >= MaxRestHours)))
+                _resting.TryRemove(unit, out _);
+    }
+
+    /// <summary>
+    /// Divisions in a salient whose way back is closing, and worn-out ones next to enemy divisions (while few enough of the
+    /// country rest), come off their front to a province a few steps back, where another of ours stays in theirs.
+    /// </summary>
+    private void PullBack(nint country, int tag, nint[] units, long now, int hour)
+    {
+        var land = 0;
+        foreach (var unit in units) if (*(int*)(unit + KindOfUnit) == 0) land++;
+        var resting = _resting.Values.Count(r => r.Tag == tag);
+        var moves = 0;
+        var narrow = new Dictionary<nint, bool>(); // province -> its way back is closing
+        var left = new Dictionary<nint, int>();    // province -> divisions still holding it
+        foreach (var unit in units)
+        {
+            if (moves == MaxMoves) return;
+            if (!Movable(unit, tag)) continue;
+            var location = *(nint*)(unit + LocationOfUnit);
+            if (location == 0) continue;
+            if (!left.TryGetValue(location, out var here)) here = left[location] = Standing(country, tag, location);
+            if (here < 2) continue; // alone there: it holds on
+            if (!narrow.TryGetValue(location, out var closing)) closing = narrow[location] = Narrow(country, tag, location);
+            var worn = Percent(unit, OrgRatioSlot) < WornOrg || Percent(unit, StrengthRatioSlot) < WornStrength;
+            if (!closing && !(worn && (resting + 1) * 100 <= land * MaxRestingPercent && EnemyDivisionsNext(country, tag, location))) continue;
+            var rest = RestProvince(country, tag, location);
+            if (rest < 0) continue; // nowhere safe nearby: it stays
+            var group = *(nint*)(unit + GroupOfUnit);
+            if (group != 0) Unassign(unit, group); // on its front, the AI would walk it straight back
+            if (!Commands.Move(unit, rest, true)) continue;
+            _sent[unit] = now + SentMs;
+            _resting[unit] = (tag, hour);
+            left[location] = here - 1;
+            resting++;
+            moves++;
+            if (closing) Interlocked.Increment(ref _escaped);
+            else Interlocked.Increment(ref _rested);
+        }
+    }
+
+    /// <summary>
+    /// Going back from <paramref name="from"/> over our provinces, one ring (provinces at the same distance) is a single
+    /// province next to enemy divisions before reaching provinces away from the enemy: the neck of a closing pocket.
+    /// </summary>
+    // ponytail: rings, not a max-flow of disjoint paths; a wide salient with a one-province gap elsewhere is missed.
+    private static bool Narrow(nint me, int tag, nint from)
+    {
+        if (!NextToEnemy(me, tag, from)) return false;
+        var seen = new HashSet<int> { Game.Id(from) };
+        var ring = new List<nint> { from };
+        for (var depth = 1; depth <= MaxNeckSearch; depth++)
+        {
+            var next = new List<nint>();
+            foreach (var province in ring)
+            foreach (var id in Game.Neighbours(province))
+                if (seen.Add(id) && Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) == tag) next.Add(p);
+            if (next.Count == 0) return false;                               // cut off already, or an island: nowhere to go
+            if (next.Any(p => !NextToEnemy(me, tag, p))) return false;       // safe ground within reach
+            if (next.Count == 1) return EnemyDivisionsNext(me, tag, next[0]); // the only way back, enemy troops next to it (a coastal strip isn't a pocket)
+            ring = next;
+        }
+        return false;
+    }
+
+    /// <summary>A province of ours at least RestDepth steps back through our provinces, with no enemy-held neighbour; -1 if none nearby.</summary>
+    // ponytail: looks at who holds provinces, not at enemy units inside ours (paratroopers, a breakthrough in progress).
+    private static int RestProvince(nint me, int tag, nint from)
+    {
+        var seen = new HashSet<int> { Game.Id(from) };
+        var frontier = new List<nint> { from };
+        for (var depth = 1; depth <= MaxRestSearch && frontier.Count > 0; depth++)
+        {
+            var next = new List<nint>();
+            foreach (var province in frontier)
+            foreach (var id in Game.Neighbours(province))
+            {
+                if (!seen.Add(id)) continue;
+                var p = Game.Province(id);
+                if (p == 0 || *(int*)(p + ControllerOfProvince) != tag) continue;
+                if (depth >= RestDepth && !NextToEnemy(me, tag, p)) return id;
+                next.Add(p);
+            }
+            frontier = next;
+        }
+        return -1;
+    }
+
+    private static bool NextToEnemy(nint me, int tag, nint province) =>
+        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Enemy(me, tag, p));
+
+    private static bool EnemyDivisionsNext(nint me, int tag, nint province) =>
+        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Divisions(p) > 0 && Enemy(me, tag, p));
+
+    /// <summary>Off every order, staying in its army: COrderUnassignCommand, as the battle plan UI sends it.</summary>
+    private static void Unassign(nint unit, nint group)
+    {
+        var cmd = Allocator.AllocZeroed(0x50);
+        _unassign(cmd, unit, group, 0, 1); // stays in the army; off its army group's fronts too
+        Commands.TryPost(cmd, true);
+    }
+
+    // ---- The attack gate: an "attack on" is dropped while the country's threatened line is thinly manned; the AI asks again every hour ----
+
+    private const int GroupOfCommand = 0x28, OrderOfCommand = 0x30, ExecuteOn = 0x34;   // COrderExecuteCommand
+    private const int TypeOfOrder = 0x30, Executing = 0x248, Invasion = 3, Paradrop = 4; // COrder
+
+    [Function(CallingConventions.Microsoft)] public delegate byte PostFn(nint cmd, nint tag);
+
+    private IHook<PostFn>? _post;
+    private delegate* unmanaged<nint, int, nint> _findOrder;
+    private nint _executeVTable;
+    private int _held;
+
+    private void LoadAttackGate()
+    {
+        _findOrder = (delegate* unmanaged<nint, int, nint>)Sig.Find(Signatures.FindOrder);
+        _executeVTable = Sig.VTable(Signatures.ExecuteCommand);
+        _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAICommand), (cmd, tag) =>
+        {
+            if (*(nint*)cmd != _executeVTable || *(byte*)(cmd + ExecuteOn) == 0 || *(int*)tag == Game.ControlledTag || !SheepMod.Active || Ready(cmd, tag))
+                return _post!.OriginalFunction(cmd, tag);
+            ((delegate* unmanaged<nint, int, void>)(*(nint**)cmd)[0])(cmd, 1); // deleted, as the game does with an invalid command
+            Interlocked.Increment(ref _held);
+            return 0;
+        });
+    }
+
+    /// <summary>Whether an "attack on" may go ahead: it runs already, it is an invasion or paradrop, or the line is manned. Read only: AI threads.</summary>
+    private bool Ready(nint cmd, nint tag)
+    {
+        var reference = (int*)(cmd + GroupOfCommand);
+        if (reference[0] == 0 && reference[1] == 0) return true;
+        var group = _resolve((nint)reference);
+        if (group == 0) return true;
+        var id = *(int*)(cmd + OrderOfCommand);
+        if (id != 0)
+        {
+            var order = _findOrder(group, id);
+            if (order == 0 || *(byte*)(order + Executing) != 0 || *(int*)(order + TypeOfOrder) is Invasion or Paradrop) return true; // running, or at sea
+        }
+        return Manned(*(int*)tag, LineOf(*(int*)tag, Hour)); // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
     }
 
     // ---- Beach defence: landings are walled in and attacked at once, not after the front collapses ----
@@ -274,6 +468,7 @@ public unsafe partial class AiAssist
     {
         if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
         var now = Environment.TickCount64;
+        Expire(now);
         if (now - _beachScanned >= LandingScanMs)
         {
             _beachheads = Landings();

@@ -1,0 +1,11 @@
+﻿l_korean:
+ com.green1052.armysupport.name:0 "육군 지원"
+ com.green1052.armysupport.desc:0 "공군과 열차포를 원수에게 배속할 수 있고(멀티: 야전군들에 나눠 배속), 열차포는 전선 바로 뒤에 머물며 바다를 건너지 않습니다. 공항을 Shift+우클릭하면 들어가는 공군만 보내고, 공군을 자동으로 재배치합니다."
+ com.green1052.armysupport.FieldMarshal:0 "원수 배속"
+ com.green1052.armysupport.FieldMarshal.desc:0 "공군이나 열차포를 선택한 채 원수 카드를 우클릭하면, 싱글 플레이에서는 원수에게 배속하고(게임 규칙이 바뀝니다) 멀티플레이에서는 그 원수의 야전군들에 나눠 배속합니다."
+ com.green1052.armysupport.FrontPenalty:0 "열차포: 최전선 감점"
+ com.green1052.armysupport.FrontPenalty.desc:0 "열차포 배치 때 최전선(적 점령지나 적 부대 옆) 프로빈스에서 깎는 점수입니다. 0이면 끕니다. 전투 근처 바닐라 보너스는 100~200 정도입니다. 싱글 플레이 전용."
+ com.green1052.armysupport.NoSeaTransfer:0 "열차포: 바다 수송 금지"
+ com.green1052.armysupport.NoSeaTransfer.desc:0 "열차포를 바다로 수송하지 않고 자기 철도망 안에서만 움직입니다. 싱글 플레이 전용."
+ com.green1052.armysupport.Coverage:0 "자동 재배치 기준 범위(%)"
+ com.green1052.armysupport.Coverage.desc:0 "공항에서 임무 지역이 이 비율보다 적게 닿는 공군을, 수용량이 남는 공항 중 더 많이 닿는 곳으로 옮깁니다. 임무는 그대로 이어집니다. 야전군에 배속된 공군은 게임이 직접 옮깁니다. 0이면 끕니다."

@@ -43,7 +43,8 @@ public static class Signatures
 /// Auto construction targets. In the construction tab, Shift+click a building to raise its target by 1 (Ctrl+Shift: 5),
 /// Ctrl+click to lower it; the target shows on the button (a text box the GuiPatch above adds). While a building's count (built
 /// plus queued) is under its target, more is queued with the construction tab's own command (so multiplayer stays in
-/// sync), in the best state first: core states, then higher infrastructure, then more free building slots.
+/// sync), in the best state first: core states, then higher infrastructure (lower when the building is infrastructure),
+/// then more free building slots. Auto supply (AutoSupply.cs) and auto production (AutoProduction.cs) come with it.
 /// </summary>
 [Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class AutoConstruction : Plugin
@@ -59,6 +60,7 @@ public unsafe partial class AutoConstruction : Plugin
     private const int Location = 56, Building = 60, Levels = 72, Insertion = 76; // CAddConstructionCommand
     private const byte AtEnd = 1;
     private const long PendingMs = 30_000;
+    private const int BigStep = 5;                               // Ctrl+Shift+click
     private const string TargetBox = "hoimod_auto";
 
     [Function(CallingConventions.Microsoft)] public delegate nint ClickFn(nint item);
@@ -72,22 +74,21 @@ public unsafe partial class AutoConstruction : Plugin
     private delegate* unmanaged<nint, int> _freeSharedSlots;
     private delegate* unmanaged<int, nint> _tokenToString;
 
-    private readonly Dictionary<nint, int> _targets = [];                    // CBuildingType* -> wanted count
+    // Wanted count, kept for the session: CBuildingTypes are database objects made once at startup (the database init
+    // sets the global holding them, nothing else does), so a pointer names the same building in every game loaded.
+    private readonly Dictionary<(int Tag, nint Type), int> _targets = [];
     private readonly Dictionary<nint, (int Count, long Until)> _sent = [];   // by type: count expected once the sent commands land
     private readonly HashSet<nint> _failed = [];                             // types whose last try found nowhere to build (logged once)
     private nint _infrastructure;                                               // its CBuildingType*, once seen on a button
     private PerGame _game = null!;
     private bool _reportedBox;
-    private int _bigStep;
-    private bool _coresFirst, _infrastructureFirst;
 
     public override void Load()
     {
-        _bigStep = Math.Max(1, Config.Bind("Targets", "CtrlShiftStep", 5, "How much Ctrl+Shift+click raises a target (Shift+click: 1)."));
-        _coresFirst = Config.Bind("Location", "CoresFirst", true, "Build in core states first.");
-        _infrastructureFirst = Config.Bind("Location", "InfrastructureFirst", true, "Then in states with more infrastructure (faster construction); after that, more free building slots.");
         var supply = Config.Bind("Supply", "AutoSupply", true,
             "Where your divisions are low on supply: upgrade the railway of a saturated hub, connect a cut-off hub, or build a hub where there is none near.");
+        var production = Config.Bind("Production", "AutoProduction", true,
+            "Move military factories from lines whose equipment has a big surplus to lines whose equipment is short, one at a time.");
 
         _find = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
         _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.FreeLevels);
@@ -97,26 +98,28 @@ public unsafe partial class AutoConstruction : Plugin
         _tokenToString = (delegate* unmanaged<int, nint>)Sig.Find(Signatures.TokenToString);
         _game = new PerGame(() =>
         {
-            _targets.Clear();
             _sent.Clear();
             _failed.Clear();
             _supplySent.Clear();
+            _pending.Clear();
+            _day = -1;
         });
 
         _click = Patches.Hook<ClickFn>(Sig.Find(Signatures.BuildingClick), item =>
         {
-            var type = *(nint*)(item + TypeOfItem);
+            var key = (Tag: Game.ControlledTag, Type: *(nint*)(item + TypeOfItem));
+            var type = key.Type;
             _game.Check();
             // A plain click, or Ctrl+click without a target to lower, is the game's.
-            if (type == 0 || !Gui.ShiftHeld && !(Gui.CtrlHeld && _targets.ContainsKey(type))) return _click!.OriginalFunction(item);
-            var country = Game.Country(Game.ControlledTag);
+            if (type == 0 || !Gui.ShiftHeld && !(Gui.CtrlHeld && _targets.ContainsKey(key))) return _click!.OriginalFunction(item);
+            var country = Game.Country(key.Tag);
             if (country == 0) return _click!.OriginalFunction(item);
             var count = Count(country, type);
             // Targets count from what the country has (built and queued): +1 means one more than now.
-            var from = Math.Max(count, _targets.GetValueOrDefault(type, count));
-            var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? _bigStep : 1));
-            if (target <= count && !Gui.ShiftHeld) _targets.Remove(type); // lowered to what's there: off
-            else _targets[type] = target;
+            var from = Math.Max(count, _targets.GetValueOrDefault(key, count));
+            var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? BigStep : 1));
+            if (target <= count && !Gui.ShiftHeld) _targets.Remove(key); // lowered to what's there: off
+            else _targets[key] = target;
             _failed.Remove(type);
             Log.Info($"{Name(type)}: target {target}, now {count} (built and queued)");
             ShowTarget(item);
@@ -133,6 +136,7 @@ public unsafe partial class AutoConstruction : Plugin
 
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);
         if (supply) LoadSupply();
+        if (production) LoadProduction();
     }
 
     private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));
@@ -154,7 +158,7 @@ public unsafe partial class AutoConstruction : Plugin
         }
         if (box == 0) return;
         var country = Game.Country(Game.ControlledTag);
-        var text = _targets.TryGetValue(type, out var target) && country != 0 ? $"+{Math.Max(0, target - Count(country, type))}" : "";
+        var text = _targets.TryGetValue((Game.ControlledTag, type), out var target) && country != 0 ? $"+{Math.Max(0, target - Count(country, type))}" : "";
         if (Native.Utf8(Gui.Text(box)) != text) Gui.SetText(box, text);
     }
 
@@ -165,8 +169,9 @@ public unsafe partial class AutoConstruction : Plugin
         var country = Game.Country(tag);
         if (country == 0) return;
         var now = Environment.TickCount64;
-        foreach (var (type, target) in _targets)
+        foreach (var ((owner, type), target) in _targets)
         {
+            if (owner != tag) continue;
             var count = Count(country, type);
             if (_sent.TryGetValue(type, out var sent) && count < sent.Count && now < sent.Until) continue; // not all in the queue yet
             _sent.Remove(type);
@@ -230,8 +235,9 @@ public unsafe partial class AutoConstruction : Plugin
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
         {
             if (_canBuildInState(country, state, type, 1) == 0) continue;
-            var rank = (_coresFirst && Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0,
-                !_infrastructureFirst || _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure),
+            var infrastructure = _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure);
+            var rank = (Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0,
+                type == _infrastructure ? -infrastructure : infrastructure, // faster construction; infrastructure itself where it's lacking
                 _freeSharedSlots(state), -*(int*)(state + IdOfState));
             if (!perProvince) places.Add((state + BuildingsOfState, *(int*)(state + IdOfState), _freeLevels(state + BuildingsOfState, type), rank));
             else

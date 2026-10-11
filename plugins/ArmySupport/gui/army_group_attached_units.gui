@@ -1,6 +1,6 @@
 
 
-        # AirWingFieldMarshal: attached air wing slots, like leader_groups_portrait_window has.
+        # ArmySupport: attached air wing slots, like leader_groups_portrait_window has.
         # Last in the window so it draws over the card frame (which is taller than an army card's).
         gridBoxType = {
             name = "attached_units"

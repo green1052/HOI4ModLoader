@@ -1,7 +1,0 @@
-﻿l_english:
- com.green1052.airbasecapacity.desc:0 "Shift+right-click an airbase with air wings selected to send only the wings that fit its free capacity."
- com.green1052.airbasecapacity.WithoutShift:0 "Without Shift"
- com.green1052.airbasecapacity.KeepFree:0 "Capacity to keep free"
- com.green1052.airbasecapacity.AutoRebase:0 "Auto rebase"
- com.green1052.airbasecapacity.Coverage:0 "Rebase below coverage (%)"
- com.green1052.airbasecapacity.CasFollowsBattles:0 "CAS follows battles"

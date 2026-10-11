@@ -5,22 +5,17 @@ namespace AiAssist;
 /// <summary>
 /// An add-on for Sheep Mod (the "Discord mod") that fixes vanilla AI logic its scripts can't reach, without bonuses.
 /// Only works where Sheep Mod is in the game; single player (it changes how AI countries play).
-/// - Production: the AI keeps factories on equipment it has plenty of while it is short of other equipment (its need
-///   includes a stock buffer and its factory split is a greedy weighting). Before vanilla applies its factory targets,
-///   half the factories of a big surplus (all of them for equipment nothing in its army uses) go to the equipment it lacks,
-///   by how much production that shortage is worth;
-///   the air and land totals stay as vanilla split them, ships are left alone.
-/// - Offensive readiness: the battle plan AI decides to attack from faction strength and preparation alone, never from how
-///   worn its divisions are (Sheep can only switch whole countries to careful on rifle counts). An "attack on" for an army
-///   whose divisions are worn out is dropped; the AI asks again every hour, so the attack starts once they recover. It never
-///   stops a running attack, and invasions and paradrops are left alone.
-/// - Supply-aware attacks: local attacks skip targets whose supply the attackers can't follow (supply only flows through our
-///   side's provinces; the attack's province is short and none next to the target has spare), unless the target closes a pocket.
-/// - Refit priority: the daily stockpile distribution ranks divisions only by template and theatre priority, so a garrison
-///   division and a front-line division get new equipment alike. AI divisions in combat or next to enemy ground now come
-///   first (until they are 75 % full), for reinforcements and upgrades alike.
-/// - Pocket closing: the AI's local attacks pick a random target among those that pass their checks (Sheep's pocket test
-///   in script is never read). Where a target would cut off enemy divisions, only such targets stay in the pick.
+/// - Hold the line: at war, every front province keeps a defender (front requests, regrouping and army balancing can't
+///   take it), holes are refilled from nearby (key ground first), reserves stand a province behind, freshly arrived
+///   divisions stay a week, worn-out divisions rest behind the line and divisions in a closing salient pull out (both go
+///   back once rested), and no "attack on" starts while the threatened line is thinly manned.
+/// - Beach defence: landings are walled in and attacked at once.
+/// - Breakthrough axis: local attacks (and close air support) keep to the theatre's thinnest enemy sector for a day.
+/// - Attack targets: local attacks pick pocket-closing, then valuable, then front-shortening targets instead of at random
+///   (Sheep's pocket test in script is never read); fresh divisions take empty enemy provinces next to the line.
+/// - Armor terrain, supply-aware attacks: local attacks skip targets that cripple armor or that supply can't follow.
+/// - Air retreat: regions the AI is losing the air war in get fewer planes.
+/// - Refit priority: front-line divisions get reinforcements and upgrades first (until they are 75 % full).
 /// </summary>
 [Plugin("com.green1052.aiassist", "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
@@ -32,57 +27,26 @@ public unsafe partial class AiAssist : Plugin
     {
         var refit = Config.Bind("AI", "RefitPriority", true,
             "Reinforcements and new equipment go to the AI's front-line divisions (in combat or next to enemy-held ground) before its rear and garrison divisions.");
-        var production = Config.Bind("AI", "Production", true,
-            "The AI moves factories from equipment it has plenty of to equipment it is short of, instead of stockpiling surpluses.");
-        _surplusPercent = Math.Max(0, Config.Bind("AI", "SurplusPercent", 50, "Equipment more than this much (%) above what its army needs counts as surplus."));
-        var readiness = Config.Bind("AI", "OffensiveReadiness", true,
-            "The AI holds an attack while the army's divisions are worn out (average organisation or strength below the settings below); it starts once they recover.");
-        _minOrg = Math.Clamp(Config.Bind("AI", "MinOrganisation", 50, "Average organisation (%) an army needs to start an attack."), 0, 100) * Native.FixedPoint / 100;
-        _minStrength = Math.Clamp(Config.Bind("AI", "MinStrength", 60, "Average strength (%: equipment and manpower) an army needs to start an attack."), 0, 100) * Native.FixedPoint / 100;
-        _minSupply = Math.Clamp(Config.Bind("AI", "MinSupply", 0, "Average supply (%) an army needs to start an attack (0: not checked; colonial fronts are always short)."), 0, 100) * Native.FixedPoint / 100;
-        _pocketClosing = Config.Bind("AI", "PocketClosing", true,
-            "The AI's local attacks go for provinces that cut off enemy divisions first, when there are any.");
-        _frontShortening = Config.Bind("AI", "FrontShortening", true,
-            "Otherwise the AI's local attacks prefer provinces whose capture shortens the front over ones that lengthen it.");
+        _holdLine = Config.Bind("AI", "HoldTheLine", true,
+            "At war, the AI keeps a division in every province of a front that borders the enemy; its regrouping can't take a province's last defender, the divisions walling in a pocket, "
+            + "a reserve or a division that arrived this week. Free divisions walk back into empty line provinces (ports, victory points, river banks, cities and mountains first), "
+            + "a country with divisions to spare keeps reserves a province behind its line, and one short of divisions for its line doesn't start attacks. "
+            + "Worn-out divisions in contact rest behind the line where another of ours holds their province, and divisions in a salient whose way back is closing pull out; both go back to a front once rested.");
+        _beachDefense = Config.Bind("AI", "BeachDefense", true,
+            "Naval landings are answered at once: free divisions next to the beachhead wall it in and attack into it; vanilla leaves it alone until the front collapses.");
+        _axis = Config.Bind("AI", "BreakthroughAxis", true,
+            "The AI's local attacks keep to a breakthrough axis: its front's thinnest enemy sector (few divisions, no forts, open terrain), held for a day. Its close air support backs battles on the axis first.");
+        _attackTargets = Config.Bind("AI", "AttackTargets", true,
+            "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
+            + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Fresh divisions also take empty enemy provinces next to the line, where another of ours stays.");
         _armorTerrain = Config.Bind("AI", "ArmorTerrain", true,
             "Armored and motorized divisions don't make local attacks into terrain that cripples them (forest, hills, marsh...) or across a river into mountains, marsh, jungle or cities.");
-        _roles = Config.Bind("AI", "Roles", false,
-            "Line infantry holds the line: provinces with only infantry make local attacks only into empty provinces or pockets; armored and breakthrough divisions do the pushing (not for armies with no such divisions).");
-        _holdLine = Config.Bind("AI", "HoldTheLine", true,
-            "At war, the AI keeps a division in every province of a front that borders the enemy (enemy divisions or not); it no longer ships them all off (supply crisis, another front) and leaves the line empty while fighting. "
-            + "Its regrouping can't take a province's last defender or the divisions walling in a pocket, free divisions walk back into empty line provinces, and a country short of divisions for its line doesn't start attacks (advancing would widen it and get the spearhead cut off).");
-        _concentration = Config.Bind("AI", "Concentration", true,
-            "The AI keeps only a thin screen on fronts with no enemy at war (neutral or friendly borders) and sends the rest to fronts facing more enemy divisions than they hold; borders of a country in a warring country's faction keep their garrison, and fronts at war are never thinned.");
-        _targetValue = Config.Bind("AI", "TargetValue", true,
-            "The AI's local attacks go for valuable provinces first: victory points, capitals, supply hubs, airfields, resources, empty or worn-out defences (after pockets, before front shortening).");
-        var leaders = Config.Bind("AI", "Leaders", true,
-            "The AI gives its best field marshals and generals to its biggest, fighting, attacking fronts first, and counts the traits it ignores: infantry traits for infantry armies, offensive or defensive doctrine for attacking or holding fronts, bad status.");
         _airRetreat = Config.Bind("AI", "AirRetreat", true,
             "The AI pulls its planes out of regions where it is losing the air war badly (low air superiority, heavy losses, few kills) and uses them where it can win.");
-        _airbaseEvac = Config.Bind("AI", "AirbaseEvacuation", true,
-            "The AI's planes leave airbases the enemy is about to overrun instead of sitting there until the base falls.");
-        _casConcentration = Config.Bind("AI", "CasConcentration", true,
-            "The AI's close air support backs its breakthrough axis first: battles on the axis get the planes before ones elsewhere in the region.");
-        _entrenchment = Config.Bind("AI", "Entrenchment", true,
-            "The AI's local attacks count the defenders' dig-in: a province held by entrenched divisions is a worse target than its garrison numbers alone say.");
         _supplyAware = Config.Bind("AI", "SupplyAwareAttacks", true,
             "The AI's local attacks skip provinces its divisions couldn't be supplied in once taken: supply only flows through provinces of ours or our allies, and the attack's own province gets too little while no other of ours next to the target has some to spare. Pocket-closing targets are still taken.");
         _supplyShare = Math.Clamp(Config.Bind("AI", "SupplyAwareMinPercent", 25,
             "Supply (% of what the attacking province needs) it must get, or another province of ours next to the target must have to spare, for a local attack."), 1, 200);
-        _stationing = Config.Bind("AI", "Stationing", true,
-            "A division the theatre shuffle just walked to a new front stays there for a week; vanilla re-shuffles freshly arrived divisions back and forth.");
-        _defensePriority = Config.Bind("AI", "DefensePriority", true,
-            "Holes are refilled where holding counts: ports, victory points, river banks, cities and mountains first.");
-        _axis = Config.Bind("AI", "BreakthroughAxis", true,
-            "The AI's local attacks keep to a breakthrough axis: its front's thinnest enemy sector (few divisions, no forts, open terrain), held for a day.");
-        _reserve = Config.Bind("AI", "Reserves", true,
-            "A country with divisions to spare keeps reserve posts a province behind its line, covering the most front.");
-        _beachDefense = Config.Bind("AI", "BeachDefense", true,
-            "Naval landings are answered at once: free divisions next to the beachhead wall it in and attack into it; vanilla leaves it alone until the front collapses.");
-        _navalSortie = Config.Bind("AI", "NavalSortie", true,
-            "AI task forces pick their fights by the strength they see: clearly stronger than the enemy in their region they press, half as strong they slip away, and pairs of ships only shadow.");
-        _navalEscort = Config.Bind("AI", "NavalEscort", true,
-            "While a country is losing convoys fast, its naval fuel budget for convoy defence is doubled for that pass of the task force allocator.");
 
         _log = Log;
         ResolveShared();
@@ -93,12 +57,8 @@ public unsafe partial class AiAssist : Plugin
             _sent.Clear();
             _gap.Clear();
             _posted.Clear();
+            _resting.Clear();
             Axes.Clear();
-            Factors.Clear();
-            LastBattle.Clear();
-            Breakthroughs.Clear();
-            BaseThreat.Clear();
-            TraitNames.Clear();
             _line.Clear();
             FrontCache.Clear();
             _capitals = (0, []);
@@ -106,27 +66,20 @@ public unsafe partial class AiAssist : Plugin
             _provinceCount = -1;
         });
         MainThread.Every(TimeSpan.FromSeconds(1), _game.Check); // AI threads read these caches: reset them soon after a load
-        if (readiness) LoadReadiness();
-        if (_pocketClosing || _frontShortening || _armorTerrain || _roles || _targetValue || _axis || _supplyAware) LoadPockets();
+        if (_attackTargets || _armorTerrain || _axis || _supplyAware) LoadPockets();
         if (refit) LoadRefit();
-        if (_airRetreat || _airbaseEvac) LoadAirRetreat();
-        if (_casConcentration) LoadCas();
-        if (leaders) LoadLeaders();
-        if (_concentration || _holdLine || _reserve || _axis || _stationing) LoadConcentration();
-        if (_navalSortie || _navalEscort) LoadNavy();
-        if (_holdLine || _reserve) MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
+        if (_airRetreat) LoadAirRetreat();
+        if (_axis) LoadCas();
+        if (_holdLine || _axis) LoadFronts();
+        if (_holdLine)
+        {
+            LoadAttackGate();
+            _unassign = (delegate* unmanaged<nint, nint, nint, byte, byte, nint>)Sig.Find(Signatures.UnassignCommand);
+            MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
+        }
+        if (_holdLine || _attackTargets) MainThread.Every(TimeSpan.FromSeconds(5), Micro);
         if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(30), DefendBeachheads);
         MainThread.Every(TimeSpan.FromMinutes(1), LogStats);
-        if (!production) return;
-        _balance = (delegate* unmanaged<nint, long*, nint, long*>)Sig.Find(Signatures.GetBalance);
-        _need = (delegate* unmanaged<nint, long*, nint, nint, long*>)Sig.Find(Signatures.GetNeed);
-        _isAir = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.IsAir);
-        _isNaval = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.IsNaval);
-        _applyTargets = Patches.Hook<ApplyTargetsFn>(Sig.Find(Signatures.ApplyFactoryTargets), (minister, lines, byArchetype, byRole) =>
-        {
-            Safely(() => Rebalance(minister, lines - MilitaryLines));
-            _applyTargets!.OriginalFunction(minister, lines, byArchetype, byRole);
-        });
     }
 
     /// <summary>What the AI hooks changed in the last minute, for the log (they run too often to log one by one).</summary>
@@ -138,19 +91,19 @@ public unsafe partial class AiAssist : Plugin
             var n = Interlocked.Exchange(ref counter, 0);
             if (n > 0) done.Add(string.Format(what, n));
         }
-        Add(ref _held, "held {0} AI attack(s) until the army recovers");
+        Add(ref _held, "held {0} AI attack(s) while the line is thin");
         Add(ref _steered, "skipped {0} local attack target(s) for better ones");
         Add(ref _unsupplied, "skipped {0} local attack target(s) the attackers couldn't be supplied in");
+        Add(ref _taken, "sent {0} division(s) into empty enemy provinces");
         Add(ref _refitted, "put {0} front-line division-day(s) first for equipment");
         Add(ref _pulled, "lowered {0} lost air region(s)");
-        Add(ref _concentrated, "rescaled {0} front request(s)");
+        Add(ref _raised, "raised {0} front request(s) to cover the line");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
         Add(ref _reserved, "posted {0} reserve(s)");
+        Add(ref _rested, "rested {0} worn-out division(s)");
+        Add(ref _escaped, "pulled {0} division(s) out of closing salients");
         Add(ref _defended, "answered {0} landing(s)");
-        Add(ref _sortied, "chose {0} engagement level(s)");
-        Add(ref _escorted, "escorted {0} convoy run(s)");
         Add(ref _stationed, "left {0} fresh arrival(s) in place");
-        Add(ref _evacuated, "emptied {0} threatened airbase(s)");
         Add(ref _cas, "focused {0} CAS pass(es) on the axis");
         if (done.Count > 0) Log.Info($"last minute: {string.Join(", ", done)}");
     }
@@ -187,6 +140,8 @@ public unsafe partial class AiAssist : Plugin
         return info == 0 ? 0 : *(nint*)(info + TerrainOfStatic);
     }
 
+    private const int StrengthRatioSlot = 34, OrgRatioSlot = 39; // CArmy vtable: (unit, long* out) -> out
+
     /// <summary>A CArmy ratio (organisation or strength slot), 1e5 = full.</summary>
     private static long Ratio(nint unit, int slot)
     {
@@ -219,13 +174,6 @@ public unsafe partial class AiAssist : Plugin
     {
         var controller = *(int*)(province + ControllerOfProvince);
         return controller == tag || Allied(me, controller);
-    }
-
-    /// <summary>The country's faction, or 0 when it is in none (CIsInFactionWith compares these pointers).</summary>
-    private static nint FactionOf(nint country)
-    {
-        var member = country == 0 ? 0 : *(nint*)(country + FactionMemberOfCountry);
-        return member == 0 ? 0 : *(nint*)(member + FactionOfMember);
     }
 
     /// <summary>Runs a hook's own logic where Sheep Mod is in the game; an exception is logged (the first only) and the game goes on.</summary>

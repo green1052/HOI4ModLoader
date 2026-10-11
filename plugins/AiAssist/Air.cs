@@ -12,11 +12,9 @@ public unsafe partial class AiAssist
     private const int SuperiorityRecords = 0xE0, SuperiorityRecordSize = 0xA0, OurSuperiority = 0x00, EnemySuperiority = 0x08;
     private const int CombatData = 0x170, OwnWings = 0x08, OtherWings = 0x20, WingDataSize = 0x98, HourOfWingData = 0x0C, DamageTaken = 0x38;
     private const int SuperiorityIdOfRegion = 0x60, CombatIdOfRegion = 0x58, HourOfGameState = 0x468;
-    private const int ProvinceOfBase = 0x70, BaseEntrySize = 24, FreeOfBase = 8; // CAirBase's cached province; the module's base list entries
     private const int WindowHours = 168, MinLosses = 20;
     private const long MinShare = 35_000, PullOutShare = 15_000; // our share of the region's air superiority
     private const int LossesPerKillPercent = 150;
-    private const int ThreatHours = 1; // a base's verdict holds for one AI pass
 
     [Function(CallingConventions.Microsoft)]
     public delegate void PrioritiesFn(nint aiObj, nint country, nint scratch, nint buffer, nint entries, nint bases, nint totals, nint buffer2);
@@ -24,9 +22,7 @@ public unsafe partial class AiAssist
     private IHook<PrioritiesFn>? _priorities;
     private int _holderOffset, _countOffset, _arrayOffset;
     private int _pulled;
-    private static int _evacuated;
-    private static bool _airRetreat, _airbaseEvac;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int Tag, int Province), (int Hour, bool Threat)> BaseThreat = new(); // enemies of the tag close to the base
+    private static bool _airRetreat;
 
     private void LoadAirRetreat()
     {
@@ -36,58 +32,8 @@ public unsafe partial class AiAssist
         _priorities = Patches.Hook<PrioritiesFn>(Sig.Find(Signatures.UpdateRegionPriorities), (aiObj, country, scratch, buffer, entries, bases, totals, buffer2) =>
         {
             _priorities!.OriginalFunction(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
-            Safely(() =>
-            {
-                if (_airRetreat) AirRetreat(country, entries);
-                if (_airbaseEvac) EvacuateAirbases(country, bases);
-            });
+            Safely(() => AirRetreat(country, entries));
         });
-    }
-
-    /// <summary>
-    /// Airbases about to be overrun stop taking wings: their free capacity goes far negative in the module's base list,
-    /// so vanilla's own picker skips them and rebases the wings sitting there. Read only: AI worker threads.
-    /// </summary>
-    private static void EvacuateAirbases(nint country, nint bases)
-    {
-        var tag = *(int*)(country + 8);
-        if (tag == 0 || tag == Game.ControlledTag) return;
-        var hour = Hour;
-        var data = *(nint*)bases;
-        for (int i = 0, n = *(int*)(bases + 0xC); i < n; i++)
-        {
-            var entry = data + BaseEntrySize * i; // {CAirBase*, free capacity, slot}
-            if (*(int*)(entry + FreeOfBase) <= 0) continue; // full or already emptied
-            var province = *(nint*)(*(nint*)entry + ProvinceOfBase);
-            if (province == 0) continue;
-            var key = (tag, Game.Id(province));
-            if (!BaseThreat.TryGetValue(key, out var cached) || hour - cached.Hour is < 0 or >= ThreatHours)
-                BaseThreat[key] = cached = (hour, Threatened(country, tag, province));
-            if (!cached.Threat) continue;
-            *(int*)(entry + FreeOfBase) = -1_000_000;
-            Interlocked.Increment(ref _evacuated);
-        }
-    }
-
-    /// <summary>Enemy divisions within two provinces: the base's ground is about to fall.</summary>
-    private static bool Threatened(nint me, int tag, nint province)
-    {
-        var seen = new HashSet<int> { Game.Id(province) };
-        var ring = new List<nint> { province };
-        for (var depth = 0; depth < 2; depth++)
-        {
-            var next = new List<nint>();
-            foreach (var p in ring)
-            foreach (var id in Game.Neighbours(p))
-            {
-                var q = Game.Province(id);
-                if (q == 0 || *(int*)(q + ControllerOfProvince) == 0 || !seen.Add(id)) continue; // sea, or walked already
-                if (Divisions(q) > 0 && Enemy(me, tag, q)) return true;
-                next.Add(q);
-            }
-            ring = next;
-        }
-        return false;
     }
 
     /// <summary>Scales down the score of regions where we hold under 35 % of air superiority, lost 20+ planes in a week and 1.5+ per kill; under 15 %: 0.</summary>
@@ -141,7 +87,7 @@ public unsafe partial class AiAssist
         return planes / Native.FixedPoint;
     }
 
-    // ---- CAS concentration: battles on the day's breakthrough axis get the planes first ----
+    // ---- Breakthrough axis, in the air: battles on the day's axis get the close air support first ----
 
     private const int MissionBitsOfAirMission = 0x14, WingOfAirMission = 0x28, PoolOfWing = 0x38, CountryOfPool = 0x20;
     private const int CasMission = 2, TargetSize = 40, ProvinceOfTarget = 0x10; // STacticalTarget: inline, province id within
@@ -149,7 +95,6 @@ public unsafe partial class AiAssist
     [Function(CallingConventions.Microsoft)] public delegate nint TacticalFn(nint mission, nint targets, int chanceBase, int seed, byte includeDivisions, byte firstOnly);
 
     private IHook<TacticalFn>? _tactical;
-    private static bool _casConcentration;
     private static int _cas;
 
     private void LoadCas()

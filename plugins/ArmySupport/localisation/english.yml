@@ -1,0 +1,10 @@
+l_english:
+ com.green1052.armysupport.desc:0 "Air wings and railway guns for field marshals (in multiplayer: spread over his armies), railway guns that stay just behind the front line and off the sea, Shift+right-click an airbase to send only the air wings that fit, and auto rebase."
+ com.green1052.armysupport.FieldMarshal:0 "Field marshals"
+ com.green1052.armysupport.FieldMarshal.desc:0 "Right-click a field marshal's card with air wings or railway guns selected: single player attaches them to him (changes the game), multiplayer spreads them over his armies."
+ com.green1052.armysupport.FrontPenalty:0 "Railway guns: front line penalty"
+ com.green1052.armysupport.FrontPenalty.desc:0 "Score taken off provinces on the front line (next to enemy-controlled provinces or hostile units) for railway guns; 0: off. Vanilla bonuses for being near the fighting are about 100-200. Single player."
+ com.green1052.armysupport.NoSeaTransfer:0 "Railway guns: no sea transfer"
+ com.green1052.armysupport.NoSeaTransfer.desc:0 "Never ship railway guns by sea; they only move along their own rail network. Single player."
+ com.green1052.armysupport.Coverage:0 "Auto rebase below coverage (%)"
+ com.green1052.armysupport.Coverage.desc:0 "Fly a wing reaching less than this much (%) of its mission region to a usable airbase with room that reaches more (wings attached to an army: the game does it); 0: off."

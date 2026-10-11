@@ -31,11 +31,12 @@ public static class Signatures
 
 /// <summary>
 /// Shift+click a resource's icon in the trade view to switch auto trade on or off for it ("Auto" shows under it). While on,
-/// a shortage of that resource is imported with the trade view's own command (so multiplayer stays in sync), from our
-/// subjects first, then our faction, then the country that can sell the most.
+/// a shortage of that resource is imported, and a surplus of at least one import step cut back, with the trade view's own
+/// command (so multiplayer stays in sync): bought from our subjects first, then our faction, then the country that can sell
+/// the most; cut from the other end. Ctrl+Alt+C draws our trade routes (TradeOverlay.cs).
 /// </summary>
 [Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.3")]
-public unsafe class AutoTrade : Plugin
+public unsafe partial class AutoTrade : Plugin
 {
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.
     private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484, TagOfCountry = 8;
@@ -54,39 +55,35 @@ public unsafe class AutoTrade : Plugin
     private delegate* unmanaged<nint, long*, nint, long*, long*, nint, void> _maxExport;
     private delegate* unmanaged<long*, nint, long*, long*, int, void> _amountForFactories;
 
-    private readonly HashSet<nint> _auto = [];                          // resources with auto trade on
-    private readonly Dictionary<nint, (int Balance, long Until)> _sent = []; // by resource: balance when a deal was sent
+    // Kept for the session, by country tag. CStrategicResources are database objects made once at startup (the database
+    // init sets the global holding them, nothing else does), so a pointer names the same resource in every game loaded.
+    private readonly HashSet<(int Tag, nint Resource)> _auto = [];
+    private readonly Dictionary<nint, (int Balance, bool Up, long Until)> _sent = []; // by resource: balance when a deal was changed
     private PerGame _game = null!;
     private int _surplus;
-    private bool _subjectsFirst, _factionFirst;
+    private bool _alliesFirst;
 
     public override void Load()
     {
         _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals."));
-        _subjectsFirst = Config.Bind("Sellers", "SubjectsFirst", true, "Buy from your subjects first.");
-        _factionFirst = Config.Bind("Sellers", "FactionFirst", true, "Then from your faction; after that, whoever can sell the most (trade influence breaks ties).");
+        _alliesFirst = Config.Bind("Sellers", "AlliesFirst", true, "Buy from your subjects first, then your faction, then whoever can sell the most (trade influence breaks ties).");
         var iconClick = Sig.Find(Signatures.ResourceIconClick);
         var update = Sig.Find(Signatures.ResourceItemUpdate);
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
         _maxExport = (delegate* unmanaged<nint, long*, nint, long*, long*, nint, void>)Sig.Find(Signatures.MaxExport);
         _amountForFactories = (delegate* unmanaged<long*, nint, long*, long*, int, void>)Sig.Find(Signatures.AmountForFactories);
-        _game = new PerGame(() =>
-        {
-            _auto.Clear();
-            _sent.Clear();
-        });
+        _game = new PerGame(_sent.Clear);
 
         _iconClick = Patches.Hook<ItemFn>(iconClick, item =>
         {
-            if (!Gui.ShiftHeld)
+            if (!Gui.ShiftHeld || Game.ControlledTag == 0)
             {
                 _iconClick!.OriginalFunction(item);
                 return;
             }
-            _game.Check();
-            var resource = *(nint*)(item + ResourceOfItem);
-            var on = _auto.Add(resource) || !_auto.Remove(resource);
-            Log.Info($"auto trade {(on ? "on" : "off")} for a resource, {_auto.Count} on");
+            var key = (Tag: Game.ControlledTag, Resource: *(nint*)(item + ResourceOfItem));
+            var on = _auto.Add(key) || !_auto.Remove(key);
+            Log.Info($"auto trade {(on ? "on" : "off")} for a resource, {_auto.Count(a => a.Tag == key.Tag)} on");
             _update!.OriginalFunction(item, 0); // redraw now
             Labels(item);
         });
@@ -97,6 +94,7 @@ public unsafe class AutoTrade : Plugin
         });
 
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);
+        LoadOverlay();
     }
 
     /// <summary>"Auto " in front of the column's neededType text (empty but for oil) while auto trade is on; idempotent.</summary>
@@ -104,7 +102,7 @@ public unsafe class AutoTrade : Plugin
     {
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "neededType");
         if (box == 0) return;
-        Gui.SetPrefix(box, Encoding.UTF8.GetBytes(Loc.Get("com.green1052.autotrade.auto", "Auto") + " "), _auto.Contains(*(nint*)(item + ResourceOfItem)));
+        Gui.SetPrefix(box, Encoding.UTF8.GetBytes(Loc.Get("com.green1052.autotrade.auto", "Auto") + " "), _auto.Contains((Game.ControlledTag, *(nint*)(item + ResourceOfItem))));
     }
 
     private void Pump()
@@ -116,26 +114,51 @@ public unsafe class AutoTrade : Plugin
         var resources = *(nint*)(country + ResourcesOfCountry);
         if (resources == 0) return;
         var now = Environment.TickCount64;
-        foreach (var resource in _auto)
+        foreach (var (owner, resource) in _auto)
         {
+            if (owner != tag) continue;
             var balance = _balance(resources, resource);
-            if (_sent.TryGetValue(resource, out var sent) && balance <= sent.Balance && now < sent.Until) continue; // not in yet
+            if (_sent.TryGetValue(resource, out var sent) && now < sent.Until && (sent.Up ? balance <= sent.Balance : balance >= sent.Balance)) continue; // not in yet
             _sent.Remove(resource);
             if (balance < _surplus) Import(tag, resource, _surplus - balance, balance, now);
+            else Reduce(tag, resource, balance - _surplus, balance, now);
         }
     }
 
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>
     private void Import(int tag, nint resource, int needed, int balance, long now)
     {
+        var best = Sellers(tag, resource).Where(s => s.Room >= s.Step).OrderByDescending(s => (s.Relation, s.Room, s.Influence)).FirstOrDefault();
+        if (best.Tag == 0) return; // nobody can sell (or no free civilian factories)
+        var add = Math.Min((needed + best.Step - 1) / best.Step * best.Step, best.Room / best.Step * best.Step);
+        if (Post(tag, resource, best.Tag, best.Existing + add, balance, true, now)) Log.Info($"importing {add} more of a resource (short by {needed})");
+    }
+
+    /// <summary>
+    /// Cuts our imports of <paramref name="resource"/> by whole steps, at most <paramref name="excess"/> units, from the least
+    /// preferred seller (the import order reversed): the same command with a smaller total; 0 cancels the deal.
+    /// </summary>
+    private void Reduce(int tag, nint resource, int excess, int balance, long now)
+    {
+        var deal = Sellers(tag, resource).Where(s => s.Existing > 0 && s.Step <= excess).OrderBy(s => (s.Relation, s.Influence)).FirstOrDefault();
+        if (deal.Tag == 0) return;
+        var cut = Math.Min(deal.Existing, excess / deal.Step * deal.Step);
+        if (Post(tag, resource, deal.Tag, deal.Existing - cut, balance, false, now)) Log.Info($"importing {cut} less of a resource ({excess} over)");
+    }
+
+    /// <summary>
+    /// Every country that can trade <paramref name="resource"/> with us: whole units it could still sell, our existing deal,
+    /// one civilian factory's worth (the slider's step), and its rank (subject 2, faction 1, else 0; then trade influence).
+    /// </summary>
+    private List<(int Tag, int Relation, long Room, long Influence, long Existing, long Step)> Sellers(int tag, nint resource)
+    {
         var ours = *(nint*)(Game.Country(tag) + DiplomacyOfCountry);
         var faction = ours == 0 ? 0 : *(nint*)(ours + Faction);
         var importer = stackalloc long[1];
         *(int*)importer = tag;
         ((int*)importer)[1] = Game.TagIndex(tag);
-
         var exporterIdx = stackalloc long[1];
-        (int Tag, (int Relation, long Room, long Influence) Rank, long Room, long Existing, long Step) best = default;
+        var sellers = new List<(int, int, long, long, long, long)>();
         foreach (var exporter in Game.Countries)
         {
             var exporterTag = exporter == 0 ? 0 : *(int*)(exporter + TagOfCountry);
@@ -146,32 +169,29 @@ public unsafe class AutoTrade : Plugin
 
             long max, existing;
             _maxExport(exporterResources, importer, resource, &max, &existing, 0);
-            var room = (max - existing) / Native.FixedPoint;
-            if (room <= 0) continue;
+            if (max <= 0 && existing <= 0) continue;
             *(int*)exporterIdx = exporterTag;
             ((int*)exporterIdx)[1] = Game.TagIndex(exporterTag);
             long step;
             _amountForFactories(&step, resource, importer, exporterIdx, 1);
-            step = Math.Max(1, step / Native.FixedPoint);
-            if (room < step) continue;
 
             var influences = Native.PdxArray<long>(exporter + Influence);
             var index = ((int*)importer)[1];
-            var influence = index < influences.Length ? influences[index] : 0;
-            // Our subjects first, then our faction (each if so set), then whoever can sell the most; trade influence breaks ties.
-            var relation = _subjectsFirst && *(int*)(diplomacy + Overlord) == tag ? 2
-                : _factionFirst && faction != 0 && *(nint*)(diplomacy + Faction) == faction ? 1 : 0;
-            var rank = (relation, room, influence);
-            if (best.Tag == 0 || rank.CompareTo(best.Rank) > 0) best = (exporterTag, rank, room, existing / Native.FixedPoint, step);
+            var relation = !_alliesFirst ? 0 : *(int*)(diplomacy + Overlord) == tag ? 2 : faction != 0 && *(nint*)(diplomacy + Faction) == faction ? 1 : 0;
+            sellers.Add((exporterTag, relation, (max - existing) / Native.FixedPoint, index < influences.Length ? influences[index] : 0,
+                existing / Native.FixedPoint, Math.Max(1, step / Native.FixedPoint)));
         }
-        if (best.Tag == 0) return; // nobody can sell (or no free civilian factories)
+        return sellers;
+    }
 
-        var add = Math.Min((needed + best.Step - 1) / best.Step * best.Step, best.Room / best.Step * best.Step);
+    /// <summary>Sets our deal with <paramref name="exporter"/> to <paramref name="total"/> units, as the trade view's slider does.</summary>
+    private bool Post(int tag, nint resource, int exporter, long total, int balance, bool up, long now)
+    {
         var cmd = Commands.New(Signatures.TradeCommand, 0x40, tag, resource);
-        *(int*)(cmd + Exporter) = best.Tag;
-        *(int*)(cmd + Amount) = (int)(best.Existing + add);
-        if (!Commands.TryPost(cmd)) return;
-        _sent[resource] = (balance, now + PendingMs);
-        Log.Info($"importing {add} more of a resource (short by {needed})");
+        *(int*)(cmd + Exporter) = exporter;
+        *(int*)(cmd + Amount) = (int)total;
+        if (!Commands.TryPost(cmd)) return false;
+        _sent[resource] = (balance, up, now + PendingMs);
+        return true;
     }
 }

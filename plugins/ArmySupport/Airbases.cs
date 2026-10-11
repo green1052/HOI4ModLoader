@@ -2,10 +2,10 @@ using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
-namespace AirbaseCapacity;
+namespace ArmySupport;
 
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
-public static class Signatures
+public static partial class Signatures
 {
     /// <summary>A string only <see cref="SendSelectedWings"/> references, to find it if the pattern stops matching.</summary>
     public const string SendAnchor = "order_airwing_effect";
@@ -24,12 +24,11 @@ public static class Signatures
 }
 
 /// <summary>
-/// Shift+right-click an airbase with air wings selected (WithoutShift: any send) to send only the wings that fit: the
-/// airbase's capacity minus the planes there and on their way, minus KeepFree. Wings that don't fit stay where they are.
-/// Only the UI's selection list is trimmed, so the game sends its own transfer commands (multiplayer works).
+/// Shift+right-click an airbase with air wings selected to send only the wings that fit: the airbase's capacity minus the
+/// planes there and on their way. Wings that don't fit stay where they are. Only the UI's selection list is trimmed, so the
+/// game sends its own transfer commands (multiplayer works).
 /// </summary>
-[Plugin("com.green1052.airbasecapacity", "Airbase Capacity", "1.0.0", GameVersion = "1.19.3")]
-public unsafe partial class AirbaseCapacity : Plugin
+public unsafe partial class ArmySupport
 {
     // Layouts for HOI4 1.19.3.
     private const int Handle = 0x08, Incoming = 0x18, Capacity = 0x78;           // CAirBase: CRef id, CPdxArray<CAirWing*> flying in, planes
@@ -42,21 +41,16 @@ public unsafe partial class AirbaseCapacity : Plugin
     private IHook<SelectedFn>? _selected;
     private delegate* unmanaged<nint, int> _planesAt;
     private nint _dest; // the airbase while a Shift+send runs
-    private int _keepFree;
 
-    public override void Load()
+    private void LoadSending()
     {
-        var always = Config.Bind("Sending", "WithoutShift", false, "Trim every send to an airbase, not only Shift+right-click.");
-        _keepFree = Math.Max(0, Config.Bind("Sending", "KeepFree", 0, "Planes' worth of capacity to leave free at the airbase."));
-        var rebase = Config.Bind("Rebase", "AutoRebase", true, "Fly a wing whose airbase only partly reaches its mission region to a usable airbase with room that reaches more (wings attached to an army: the game does it).");
-        var cas = Config.Bind("Rebase", "CasFollowsBattles", true, "An unattached close air support wing with no battle of ours in its region for 30 seconds takes its mission to the region where our divisions fight most (reachable from its airbase).");
         var send = Sig.Find(Signatures.SendSelectedWings, Signatures.SendAnchor);
         var selected = Sig.Find(Signatures.SelectedWings);
         _planesAt = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.PlanesAtBase);
 
         _send = Patches.Hook<SendFn>(send, dest =>
         {
-            _dest = always || Gui.ShiftHeld ? dest : 0;
+            _dest = Gui.ShiftHeld ? dest : 0;
             try { _send!.OriginalFunction(dest); }
             finally { _dest = 0; }
         });
@@ -65,14 +59,12 @@ public unsafe partial class AirbaseCapacity : Plugin
             _selected!.OriginalFunction(wings, filter);
             if (_dest != 0) Log.Guard("trim selection", () => KeepWhatFits(wings, _dest));
         });
-        if (rebase || cas) LoadRebase(rebase);
-        if (cas) LoadCas();
     }
 
     /// <summary>Drops wings from the selection list (in place; the caller owns it) until the rest fit at <paramref name="dest"/>.</summary>
     private void KeepWhatFits(nint wings, nint dest)
     {
-        var room = *(int*)(dest + Capacity) - _planesAt(dest) - _keepFree;
+        var room = *(int*)(dest + Capacity) - _planesAt(dest);
         foreach (var wing in Native.PdxArray(dest + Incoming)) room -= *(int*)(wing + Planes);
 
         var id = *(ulong*)(dest + Handle);

@@ -60,7 +60,8 @@ public static class Signatures
 /// queue/unqueue it; whenever a research slot, the focus or the agency is idle, the first queued entry the game accepts
 /// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
 /// "N." on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (added to its GUI below).
-/// The political power queue (<see cref="PoliticalQueue"/>) comes with it.
+/// Entries that can no longer start (researched techs, focuses completed or shut out by a mutually exclusive one, agency
+/// levels done) are dropped. The political power queue (<see cref="PoliticalQueue"/>) comes with it.
 /// </summary>
 [Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class Queues : Plugin
@@ -68,7 +69,8 @@ public unsafe class Queues : Plugin
     // Layouts for HOI4 1.19.3.
     private const int ResearchOfCountry = 0xF60, Slots = 0xA0;            // CCountry -> research -> CPdxArray<CResearchSlot*>
     private const int TechOfSlot = 0x18, IndexOfSlot = 0x40;              // slot: CTechnologyStatus* in progress (null = idle), slot number
-    private const int TechOfStatus = 0x160;                              // CTechnologyStatus -> CTechnology
+    private const int TechOfStatus = 0x160, LevelOfStatus = 0x174;       // CTechnologyStatus -> CTechnology, levels researched
+    private const int Statuses = 0x88, IndexOfTech = 0x38, MaxLevel = 0x3DC; // research: CPdxArray<CTechnologyStatus*> by tech index - 1; CTechnology
     private const int FocusOfCountry = 0x1380, FocusInProgress = 0x10;    // CCountry -> focus progress -> CNationalFocus* (null = idle)
     private const int AgencyOfCountry = 0xFC0, AgencyCreated = 0xC0, AgencyUpgradeInProgress = 0xD0;
     private const int Repetitions = 96, MaxRepetitions = 540;             // agency: CPdxArray<{upgrade*, int done}>; upgrade: allowed count
@@ -76,11 +78,12 @@ public unsafe class Queues : Plugin
     private const int WindowOfEntry = 16, UpgradeOfEntry = 40, ButtonOfEntry = 0x40, AgencyOfEntry = 4216; // agency upgrade entry
     private const int WindowOfItem = 0x10;                                // tech and focus tree items: their window
     private const int ViewOfTechItem = 0x30, StatusOfTechItem = 0xC8, StateOfTechItem = 0xD0; // CTechnologyTreeTechItem
-    private const int TechResearched = 4, TechResearching = 5;            // tech item states
+    private const int TechResearching = 5;                               // tech item state
     private const int ViewedTagOfTechView = 0x1AA0;                       // int tag of the country shown, <= 0 = the player
     private const int FocusItems = 0x2058, FocusOfItem = 0x20;            // CNationalFocusView items; CNationalFocusTreeItem -> CNationalFocus
     private const int ViewedCountryOfFocusView = 0x20F8, TagOfCountry = 8; // CCountry* shown, null = the player
     private const int Prerequisites = 0x570, FocusesOfGroup = 8;          // CNationalFocus: CPdxArray of prerequisite blocks (AND), each a CPdxArray of focuses (OR)
+    private const int MutuallyExclusive = 0x588;                          // CNationalFocus: CPdxArray of blocks like the prerequisites'
     private const int ResearchSlot = 56, ResearchBonus = 60;             // CSetResearchCommand fields after the target
     private const string NumberBox = "hoimod_queue";                      // added to the GUI by the GuiPatch above
     private const long SentTimeoutMs = 30_000;                            // a sent command not running by then failed: drop the entry
@@ -130,57 +133,47 @@ public unsafe class Queues : Plugin
             _numberedFocusItems.Clear();
         });
 
-        // A queue switched off leaves its Shift+click to the game.
-        if (Config.Bind("Queues", "Research", true, "Shift+click a tech to queue it; it starts as soon as a research slot is free."))
+        _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _techClick!.OriginalFunction(view, ev));
+        _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
+        _techItemBonus = Patches.Hook<EntryFn>(techItemBonus, item =>
         {
-            _techClick = Patches.Hook<TechClickFn>(techClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _techClick!.OriginalFunction(view, ev));
-            _xorTechClick = Patches.Hook<TechClickFn>(xorTechClick, (view, ev) => ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
-            _techItemBonus = Patches.Hook<EntryFn>(techItemBonus, item =>
-            {
-                _techItemBonus!.OriginalFunction(item);
-                Log.Guard("tech numbers", () => LabelTech(item));
-            });
-        }
-        if (Config.Bind("Queues", "Focus", true, "Shift+click a national focus to queue it; it starts as soon as the current one is done."))
+            _techItemBonus!.OriginalFunction(item);
+            Log.Guard("tech numbers", () => LabelTech(item));
+        });
+        _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
-            _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
-            {
-                _game.Check();
-                if (focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
-                else if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
-                else _focusClick!.OriginalFunction(view, focus, a3);
-            });
-            _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
-            {
-                _focusNodeStates!.OriginalFunction(view, dt, cache);
-                Log.Guard("focus numbers", () => LabelFocuses(view));
-            });
-        }
-        if (Config.Bind("Queues", "Agency", true, "Shift+click an intelligence agency upgrade to queue it; it starts as soon as the agency is idle."))
+            _game.Check();
+            if (focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
+            else if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
+            else _focusClick!.OriginalFunction(view, focus, a3);
+        });
+        _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
         {
-            _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
+            _focusNodeStates!.OriginalFunction(view, dt, cache);
+            Log.Guard("focus numbers", () => LabelFocuses(view));
+        });
+        _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
+        {
+            if (!Gui.ShiftHeld) return _agencyClick!.OriginalFunction(entry);
+            _game.Check();
+            AddLevel(*(nint*)(entry + AgencyOfEntry), *(nint*)(entry + UpgradeOfEntry));
+            if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
+            return 0;
+        });
+        _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
+        {
+            _agencyEntryRefresh!.OriginalFunction(entry);
+            Log.Guard("agency numbers", () =>
             {
-                if (!Gui.ShiftHeld) return _agencyClick!.OriginalFunction(entry);
-                _game.Check();
-                AddLevel(*(nint*)(entry + AgencyOfEntry), *(nint*)(entry + UpgradeOfEntry));
-                if (_agencyWindow != 0) _agencyWindowRefresh!.OriginalFunction(_agencyWindow); // renumber now, not on next reopen
-                return 0;
+                ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
+                KeepClickable(entry);
             });
-            _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
-            {
-                _agencyEntryRefresh!.OriginalFunction(entry);
-                Log.Guard("agency numbers", () =>
-                {
-                    ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
-                    KeepClickable(entry);
-                });
-            });
-            _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
-            {
-                _agencyWindow = window;
-                _agencyWindowRefresh!.OriginalFunction(window);
-            });
-        }
+        });
+        _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>
+        {
+            _agencyWindow = window;
+            _agencyWindowRefresh!.OriginalFunction(window);
+        });
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
         if (Config.Bind("Queues", "PoliticalPower", true, "Shift+click an idea, law, advisor or decision to take it as soon as there is the political power."))
@@ -203,11 +196,8 @@ public unsafe class Queues : Plugin
         var status = *(nint*)(item + StatusOfTechItem);
         var viewed = *(int*)(*(nint*)(item + ViewOfTechItem) + ViewedTagOfTechView);
         if (status == 0 || viewed > 0 && viewed != Game.ControlledTag) return;
-        var tech = *(nint*)(status + TechOfStatus);
-        var state = *(int*)(item + StateOfTechItem);
-        if (state == TechResearched && _research.Items.Remove(tech)) Log.Info("research: dropped a queued tech that is already researched");
-        var position = _research.Items.IndexOf(tech) + 1;
-        if (position == 0 || state == TechResearching) return;
+        var position = _research.Items.IndexOf(*(nint*)(status + TechOfStatus)) + 1;
+        if (position == 0 || *(int*)(item + StateOfTechItem) == TechResearching) return;
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "bonus"); // every item but secret weapons has one
         if (box == 0) return;
         Gui.Number(box, position);
@@ -383,6 +373,56 @@ public unsafe class Queues : Plugin
             if (current != 0) _agency.Running(0, current);
             else StartFirst(_agency, 0, tag);
         }
+
+        // After the running checks above, which take an entry off when it starts.
+        Drop(_research, tech => research != 0 && Researched(research, tech));
+        Drop(_focus, f => focus != 0 && Unreachable(focus, f));
+        if (agency == 0) return;
+        foreach (var upgrade in _agency.Items.Distinct().ToList()) // levels done by hand: keep only as many as are left
+            while (_agency.Items.Count(i => i == upgrade) > Math.Max(0, LevelsLeft(agency, upgrade))) _agency.Items.RemoveAt(_agency.Items.LastIndexOf(upgrade));
+    }
+
+    /// <summary>Unqueues the entries that can no longer start.</summary>
+    private void Drop(Queue queue, Func<nint, bool> stale)
+    {
+        var dropped = queue.Items.RemoveAll(i => stale(i));
+        if (dropped > 0) Log.Info($"{queue.Name}: dropped {dropped} that can no longer start, {queue.Items.Count} left");
+    }
+
+    /// <summary>Every level of <paramref name="tech"/> researched: the first test of the game's own CanResearch.</summary>
+    private static bool Researched(nint research, nint tech)
+    {
+        var index = *(int*)(tech + IndexOfTech) - 1;
+        var statuses = Native.PdxArray(research + Statuses);
+        if (index < 0 || index >= statuses.Length || statuses[index] == 0) return false;
+        var status = statuses[index];
+        return *(int*)(status + LevelOfStatus) >= *(int*)(*(nint*)(status + TechOfStatus) + MaxLevel);
+    }
+
+    /// <summary>
+    /// The focus is taken, shut out by a taken mutually exclusive one, or needs a prerequisite of which every option is
+    /// shut out. The game's availability check (CNationalFocus vtable slot 9) tests "taken" the same way: IsCompleted, the
+    /// focus has an entry in the progress (done or running).
+    /// </summary>
+    private bool Unreachable(nint progress, nint focus)
+    {
+        if (_focusCompleted(progress, focus) != 0 || ShutOut(progress, focus)) return true;
+        foreach (var block in Native.PdxArray(focus + Prerequisites))
+        {
+            var options = Native.PdxArray(block + FocusesOfGroup);
+            var open = options.Length == 0;
+            foreach (var option in options) open |= !ShutOut(progress, option);
+            if (!open) return true;
+        }
+        return false;
+    }
+
+    private bool ShutOut(nint progress, nint focus)
+    {
+        foreach (var block in Native.PdxArray(focus + MutuallyExclusive))
+            foreach (var other in Native.PdxArray(block + FocusesOfGroup))
+                if (_focusCompleted(progress, other) != 0) return true;
+        return false;
     }
 
     /// <summary>

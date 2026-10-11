@@ -34,97 +34,68 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | Plugin | What it does | Multiplayer |
 |---|---|---|
 | Queues | Research, focus, intelligence agency and political power queues | ✅ |
-| AutoConstruction | Auto construction targets per building, auto supply | ✅ |
-| AutoProduction | Moves factories from surplus equipment to equipment you are short of | ✅ |
-| AutoTrade | Imports resources you are short of | ✅ |
-| AirbaseCapacity | Sends only the air wings an airbase has room for, auto rebase | ✅ |
-| FrontLine | Division rotation on the front line | ✅ (AI part: single player) |
-| AirWingFieldMarshal | Air wings for field marshals, CAS in the whole mission area | Field marshals only (spread over armies) |
-| RailwayGuns | Railway guns for field marshals, better positioning | Field marshals only (spread over armies) |
-| ChecksumPatcher | Keeps achievements and ironman with mods | ✅ |
-| NoTelemetry | Blocks gameplay telemetry | ✅ |
+| AutoConstruction | Auto construction targets per building, auto supply, auto production | ✅ |
+| AutoTrade | Imports resources you are short of, cuts imports you no longer need, draws your trade routes | ✅ |
+| FrontLine | Front line micro (rotation, plugging, escape, attacks) and battle plan hotkeys | ✅ |
+| ArmySupport | Air wings and railway guns for field marshals, railway gun positioning, airbase capacity, auto rebase | ✅ (field marshals: spread over armies; railway gun positioning: single player) |
+| ChecksumPatcher | Keeps achievements with mods | ✅ |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
-| PlanTools | Batch stance and battle-plan controls, and batch retreat, for all your armies at once | ✅ |
-| SupplyOverlay | Where a starving division's supply comes from, and your trade routes, drawn on any map mode | ✅ |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show `N. ` in front of their name.
 - **Research, national focus, intelligence agency upgrades:** the first queued item starts as soon as a slot is free.
   - Repeatable agency upgrades queue one more level per click (`1x3`).
   - Unqueueing a focus also unqueues the queued focuses that need it.
+  - Items that can no longer start are dropped: researched techs, focuses already taken or shut out by a mutually exclusive focus, agency levels already done.
 - **National spirits, laws, designers, advisors, decisions:** taken one at a time as soon as you have the political power; a full slot is replaced.
-- Settings: each queue can be turned off (its Shift+click goes back to the game).
+- Settings: the political power queue on/off.
 
 ### AutoConstruction
-In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5 (setting), **Ctrl+click** to lower it by 1. The button shows how many are left as `+N`.
+In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are left as `+N`. Targets are kept per country for the whole session, across loads.
 - What's missing is added to the end of the construction queue, one level per state (or province) so they are built at the same time.
-- Location priority: core states, then infrastructure level, then free building slots. Core and infrastructure priority are settings.
-- **Auto supply:** where your divisions are low on supply, the right fix is queued: a saturated hub gets its railway to the capital upgraded (a naval base if the bottleneck is at sea), a cut-off hub a railway to the nearest connected one, and an area with no hub near a new supply hub (railway-connected provinces first). Settings: on/off, hub saturation, new hub distance.
+- Location priority: core states, then higher infrastructure (lower infrastructure first when the building is infrastructure itself), then free building slots.
+- **Auto supply:** where your divisions are low on supply, the right fix is queued: a saturated hub gets its railway to the capital upgraded (a naval base if the bottleneck is at sea), a cut-off hub a railway to the nearest connected one, and an area with no hub near a new supply hub (railway-connected provinces first). Setting: on/off.
+- **Auto production:** military factories move one at a time from a line whose equipment has a big surplus to a line whose equipment is short (biggest shortage first), with the production screen's own command, at most a few per game day (nothing moves while paused). Land and air lines only; no line is created or emptied. Settings: on/off, what counts as surplus (% of need), cover days, factories moved per game day.
 
 ### AutoTrade
-In the trade view, **Shift+click** a resource icon to turn auto trade on or off for it (`Auto` shows). A shortage is imported automatically.
-- Seller priority: your subjects, your faction, then whoever can sell the most; trade influence breaks ties.
-- Settings: subject and faction priority, and a surplus to keep (imports until the balance is at least that, not just 0).
-- Existing imports are never reduced.
-
-### AirbaseCapacity
-With air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
-- Settings: capacity to keep free, and trimming every send without Shift.
-- **Auto rebase:** a wing whose airbase only partly reaches its mission region flies to a usable airbase with room that reaches more, keeping its mission. Wings attached to an army are left to the game, which already does this.
-
-### AirWingFieldMarshal
-- **Field marshals:** attach air wings to field marshals (army groups). The marshal's card gets attach slots.
-  - In multiplayer, right-clicking a marshal's card with air wings selected spreads them over the marshal's armies instead (setting).
-- **CAS in the whole mission area (single player):** air wings attached to a general support every battle in their mission area, not only their own divisions' battles.
-
-### RailwayGuns
-- **Field marshal assignment:** right-click a marshal's card with railway guns selected. In single player they are assigned to the marshal; in multiplayer they are spread over the marshal's armies (setting).
-- **Better positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. The penalty and sea transfer are settings.
-
-### AutoProduction
-Every few seconds one military factory moves from a line whose equipment has a big surplus to a line whose equipment is short (biggest shortage first), with the production screen's own command. Land and air lines only; no line is created or emptied.
-- Settings: what counts as surplus (% of need, minimum units), minimum factories per line, factories moved at a time.
+In the trade view, **Shift+click** a resource icon to turn auto trade on or off for it (`Auto` shows; kept per country for the session). A shortage is imported automatically, and an import that is no longer needed is cut back by whole steps (cancelled at 0), so the balance stays at the surplus you set.
+- Seller priority: your subjects, your faction, then whoever can sell the most; trade influence breaks ties. Cuts go the other way round.
+- Settings: allies first, and a surplus to keep (imports until the balance is at least that, not just 0).
+- **Trade routes:** **Ctrl+Alt+C** draws your country's trade routes in gold, in any map mode: an arrow over the states a land route crosses and the strategic regions a sea route sails, for your imports and your exports alike.
 
 ### FrontLine
-Front line micro a player does by hand. Divisions taken off a front go back onto it once rested.
-- **Rotation:** a worn-out division in contact with the enemy rests a few provinces back, where another of ours holds its province; at most a share of a front rests at once.
+Front line micro a player does by hand, with the battle plan UI's own commands (multiplayer works). Divisions taken off a front go back onto it once rested.
+- **Rotation:** a worn-out division in contact with the enemy rests a few provinces back, where another of ours holds its province; at most a share of a front rests at once. A division short of equipment or manpower goes back after two weeks once its organisation has recovered.
 - **Plugging:** a defence of ours that is being lost gets the nearest fresh division (resting, unassigned, or spare on a quiet part of a front).
 - **Escape:** a division in a salient whose way back narrows to one province next to the enemy pulls back before the pocket closes.
-- **Opportunity attack / mop-up:** empty enemy provinces next to the line are taken, surrounded enemy divisions attacked.
-- Settings: every threshold, each feature on/off, rotation and plugging for AI countries too (single player; their army management is kept off the divisions it handles), AI countries taking empty enemy provinces and AI divisions escaping closing pockets (single player, both on by default).
+- **Attack:** empty enemy provinces next to the line are taken by a fresh division; surrounded enemy divisions are attacked only by enough fresh divisions to outnumber them, forts counted, and no more are sent while the first ones are still on their way or fighting.
+- **Battle plan keys:** Ctrl+Alt+E activates every battle plan of all your armies and army groups at once, Ctrl+Alt+H halts them (the same command the battle plan window's button posts).
+- Settings: every threshold, each feature on/off.
+
+### ArmySupport
+- **Field marshals:** right-click a marshal's card with air wings or railway guns selected. In single player they are attached to the marshal (army group): his card gets air wing slots, his air wings support his armies' battles, and his railway guns take positions along all of his armies' divisions. In multiplayer they are spread over the marshal's armies instead. Setting: on/off.
+- **Railway gun positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. The penalty and sea transfer are settings.
+- **Airbase capacity:** with air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
+- **Auto rebase:** a wing whose airbase reaches less than a share of its mission region (setting, 100% by default; 0 turns it off) flies to a usable airbase with room that reaches more, keeping its mission. Wings attached to an army are left to the game, which already does this.
 
 ### ChecksumPatcher
-Keeps achievements and ironman available when the checksum changes. Patched in memory only.
-
-### NoTelemetry
-Gameplay telemetry is not sent to Paradox. Login, multiplayer and crash reports are untouched.
-
-### PlanTools
-Hotkeys for all your armies and army groups at once, each posting the same command the battle-plan window's button posts: Ctrl+Alt+1/2/3 sets every stance (careful, balanced, rush), Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them, and Ctrl+Alt+R pulls every one of your divisions that is fighting back to a neighbouring province you control — the same move order the game's own retreat button makes. Each key is a setting.
-
-### SupplyOverlay
-**Ctrl+Alt+S** draws an arrow from the supply hub feeding each of your starving divisions to the division itself, in the supply map's own arrow style — in any map mode, without switching. Read-only, refreshed while on.
-**Ctrl+Alt+C** draws your country's trade routes in gold: an arrow over the states a land route crosses and the strategic regions a sea route sails, for your imports and your exports alike.
+Keeps achievements available when mods change the checksum (Ironman already works with mods). Patched in memory only.
 
 ### AiAssist
 An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.
-- **Production:** factories move from equipment the AI has plenty of (or nothing uses) to equipment it is short of. Air and land totals stay as vanilla split them.
-- **Offensive readiness:** an army doesn't start an attack while its divisions are worn out or out of supply, or while its country has too few divisions for the line it holds (advancing would widen it and get the spearhead encircled).
-- **Local attacks:** pocket-closing targets first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, empty or worn defences, dug-in defenders counting against a target), then ones that shorten the front — all on the day's breakthrough axis, the front's thinnest enemy sector, so the pushes don't zig-zag; armor avoids terrain and rivers that cripple it; line infantry holds while breakthrough divisions push.
-- **Stationing:** a division the theatre shuffle just walked to a front stays there a week; vanilla shuffles freshly arrived divisions back and forth.
-- **Hold the line:** at war, every province on the line keeps a defender; vanilla can ship a whole fighting front away (supply crisis, another front). The AI's regrouping can't take a province's last defender or the divisions walling in a pocket (it would staff the new front from far away and let the pocket break out meanwhile), free divisions walk back into empty line provinces, and a country short of divisions for its line doesn't start attacks.
-- **Defence priority:** holes are refilled where holding counts first — ports, victory points, river banks, cities and mountains — and key ground is worth walking twice as far for.
-- **Reserves:** a country with divisions to spare keeps reserve posts a province behind its line, on the ground covering the most front; the theatre shuffle leaves them there.
+- **Hold the line:** at war, every province on the line keeps a defender; vanilla can ship a whole fighting front away (supply crisis, another front). The AI's regrouping can't take a province's last defender, the divisions walling in a pocket, a reserve, or a division that arrived in the last week (vanilla shuffles fresh arrivals back and forth). Free divisions walk back into empty line provinces — ports, victory points, river banks, cities and mountains first, key ground from twice as far — and a country with divisions to spare keeps reserves a province behind its line. Worn-out divisions in contact rest a few provinces back where another division holds their province, and divisions in a salient whose way back is closing pull out before the pocket closes; both go back to a front once rested. A country short of divisions for its line doesn't start attacks (advancing would widen it and get the spearhead encircled).
 - **Beach defence:** a naval landing is answered at once: free divisions next to it wall the beachhead in and attack into it, instead of waiting for the front to collapse.
-- **Concentration:** fronts with no enemy at war keep a thin screen, the rest goes where the enemy is strong; borders of a country in a warring country's faction keep their garrison, and fronts at war are never thinned.
-- **Air:** planes leave regions where the AI keeps losing the air war badly, and airbases the enemy is about to overrun instead of waiting for the base to fall; close air support backs the day's breakthrough axis first — battles on the axis get the planes before ones elsewhere in the region.
-- **Navy:** task forces pick their fights by the strength they see in their region (outnumbered 2:1 they slip away, clearly stronger they press, pairs of ships only shadow the enemy), and convoy defence gets the naval fuel budget while convoys are being sunk fast.
-- **Leaders:** the biggest, fighting, attacking fronts choose their field marshals and generals first; infantry traits, doctrine and bad status count.
+- **Breakthrough axis:** local attacks keep to the day's breakthrough axis, the front's thinnest enemy sector, so the pushes don't zig-zag; close air support backs battles on the axis first.
+- **Attack targets:** local attacks go for pocket-closing targets first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, empty or worn defences, dug-in defenders counting against a target), then ones that shorten the front, instead of a random pick. Fresh divisions also take empty enemy provinces next to the line, which vanilla's local attacks often skip.
+- **Armor terrain:** armored and motorized divisions don't attack into terrain or across rivers that cripple them.
+- **Supply-aware attacks:** local attacks skip provinces the attackers couldn't be supplied in once taken (setting: the supply share required); pocket-closing targets are still taken.
+- **Air retreat:** planes leave regions where the AI keeps losing the air war badly and go where it can win.
+- **Refit priority:** reinforcements and new equipment go to front-line divisions (in combat or next to the enemy) before rear and garrison ones.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, never the checksum, so players without the loader can join the same game.
 - Plugins like the queues and auto construction send the same commands a player's clicks would, so they work as usual.
-- Features that change game rules (attached CAS, railway gun positioning, field marshals holding air wings and railway guns) switch off in a multiplayer lobby and back on in single player. Field marshal assignment switches to spreading over the marshal's armies with vanilla commands instead.
+- Features that change game rules (field marshals holding air wings and railway guns, railway gun positioning, AiAssist) switch off in a multiplayer lobby and back on in single player. Field marshal assignment switches to spreading over the marshal's armies with vanilla commands instead.
 
 ## Performance: mimalloc
 The game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap. If you suspect crashes or memory problems, set `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` (takes effect at the next start).

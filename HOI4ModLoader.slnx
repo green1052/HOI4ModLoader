@@ -1,16 +1,12 @@
 <Solution>
     <Folder Name="/plugins/">
         <Project Path="plugins/AiAssist/AiAssist.csproj" />
-        <Project Path="plugins/AirbaseCapacity/AirbaseCapacity.csproj" />
-        <Project Path="plugins/AirWingFieldMarshal/AirWingFieldMarshal.csproj" />
+        <Project Path="plugins/ArmySupport/ArmySupport.csproj" />
         <Project Path="plugins/AutoConstruction/AutoConstruction.csproj" />
-        <Project Path="plugins/AutoProduction/AutoProduction.csproj" />
         <Project Path="plugins/AutoTrade/AutoTrade.csproj" />
         <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
         <Project Path="plugins/FrontLine/FrontLine.csproj" />
-        <Project Path="plugins/NoTelemetry/NoTelemetry.csproj" />
         <Project Path="plugins/Queues/Queues.csproj" />
-        <Project Path="plugins/RailwayGuns/RailwayGuns.csproj" />
     </Folder>
     <Folder Name="/tests/">
         <Project Path="tests/Signatures.Tests/Signatures.Tests.csproj" />

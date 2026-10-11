@@ -46,6 +46,8 @@ public unsafe partial class AutoConstruction
     private const int UnitsOfCountry = 0x290, KindOfUnit = 8, LocationOfUnit = 0x1F0, IsLowSupplySlot = 43;
     private const long SupplyCooldownMs = 60_000;  // supply only changes once something is built
     private const int MaxSupplyActions = 2, MaxRailSearch = 15;
+    private const int SaturationPercent = 80; // a hub using this much of the supply it gets is upgraded (railway to the capital)
+    private const int HubDistance = 3;        // starving divisions with no hub this close (provinces) get a new one
 
     private delegate* unmanaged<nint, int*, nint, byte, int, nint, byte, byte, nint> _upgradeRail;
     private delegate* unmanaged<nint, void> _bottleneckDtor;
@@ -53,12 +55,9 @@ public unsafe partial class AutoConstruction
     private delegate* unmanaged<nint, int*, int, byte, byte, void> _queueRailway;
     private nint _supplyNode, _buildingDb;
     private readonly Dictionary<int, long> _supplySent = []; // province id -> until
-    private int _saturation, _hubDistance;
 
     private void LoadSupply()
     {
-        _saturation = Math.Clamp(Config.Bind("Supply", "SaturationPercent", 80, "A hub using this much (%) of the supply it gets is upgraded (railway to the capital)."), 1, 100);
-        _hubDistance = Math.Clamp(Config.Bind("Supply", "HubDistance", 3, "Build a new supply hub for starving divisions with no hub this close (provinces)."), 1, 10);
         _upgradeRail = (delegate* unmanaged<nint, int*, nint, byte, int, nint, byte, byte, nint>)Sig.Find(SupplySignatures.UpgradeRailToCapital);
         _bottleneckDtor = (delegate* unmanaged<nint, void>)Sig.Find(SupplySignatures.BottleneckDataDtor);
         _findRailPath = (delegate* unmanaged<nint, nint, int, int, byte, nint>)Sig.Find(SupplySignatures.FindRailPath);
@@ -116,9 +115,9 @@ public unsafe partial class AutoConstruction
             var nodeProvince = *(int*)(node + ProvinceOfNode);
             if (*(long*)(node + Connected) <= 0 && *(byte*)(node + Capital) == 0) return ConnectRailway(network, tag, nodeProvince);
             var supplied = *(long*)(node + SupplyIn);
-            if (supplied > 0 && (supplied - *(long*)(node + SupplyLeft)) * 100 / supplied >= _saturation)
+            if (supplied > 0 && (supplied - *(long*)(node + SupplyLeft)) * 100 / supplied >= SaturationPercent)
                 return UpgradeRail(tag, Game.Province(nodeProvince), *(int*)(node + KindOfNode) == NavalNode, nodeProvince);
-            if (Nearest(province, _hubDistance, id => id == nodeProvince) >= 0) return false; // near and not saturated: building won't help (disruption)
+            if (Nearest(province, HubDistance, id => id == nodeProvince) >= 0) return false; // near and not saturated: building won't help (disruption)
         }
         return BuildHub(country, tag, network, province);
     }
@@ -224,7 +223,6 @@ public unsafe partial class AutoConstruction
             if (*(int*)(pairs + i * 8 + 4) > 0) return true;
         return false;
     }
-
 
     /// <summary>The nearest province (breadth first over adjacency, up to <paramref name="max"/> steps) matching <paramref name="wanted"/>, or -1.</summary>
     private static int Nearest(nint from, int max, Func<int, bool> wanted)

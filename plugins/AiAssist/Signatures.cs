@@ -5,22 +5,8 @@ namespace AiAssist;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
-    /// <summary>
-    /// CAIInteriorMinister: turn its factories wanted per equipment archetype (minister+696, int each) into production line
-    /// changes (minister, CPdxArray&lt;CProductionLine*&gt;* production+88, current per archetype, current per naval role).
-    /// Every 2nd day, on the country's AI worker thread.
-    /// </summary>
-    [Signature] public const string ApplyFactoryTargets = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 55 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 90 00 00 00 4D 8B F9";
-
-    /// <summary>CLogistics::GetBalance(logistics, long* out, CEquipmentType* archetype): stockpile - need - net lend-lease (fixed point).</summary>
-    [Signature] public const string GetBalance = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 49 8B D8 48 8B F2 48 8B F9 E8 ? ? ? ? 45 33 C9";
-
-    /// <summary>CLogistics::GetNeed(logistics, long* out, CEquipmentType* archetype, null): missing in fielded divisions and reserves (fixed point).</summary>
-    [Signature] public const string GetNeed = "48 8B C4 4C 89 48 ? 4C 89 40 ? 48 89 50 ? 48 89 48 ? 56";
-
-    /// <summary>CEquipmentType::IsAir(type) / IsNaval(type) -> bool.</summary>
-    [Signature] public const string IsAir = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ? ? ? ? 48 3B CB 74 ? E8 ? ? ? ? 84 C0 74 ? B0 01 48 83 C4 20 5B C3 48 8B 83 ? ? ? ? 48 8B 8B ? ? ? ? 48 85 C0 75 ? 48 8B 83 ? ? ? ? 48 8B 80 ? ? ? ? 48 0B C8 E8 ? ? ? ? 48 B9 00 FC 37 00 1F 00 00 00";
-    [Signature] public const string IsNaval = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ? ? ? ? 48 3B CB 74 ? E8 ? ? ? ? 84 C0 74 ? B0 01 48 83 C4 20 5B C3 48 8B 83 ? ? ? ? 48 8B 8B ? ? ? ? 48 85 C0 75 ? 48 8B 83 ? ? ? ? 48 8B 80 ? ? ? ? 48 0B C8 E8 ? ? ? ? 48 B9 C1 03 40 00 80 00 00 00";
+    /// <summary>COrderUnassignCommand ctor (mem[0x50], CArmy* unit, COrdersGroup* group, bool ungroup, bool alsoParent): off every order, into the army's reserve.</summary>
+    [Signature] public const string UnassignCommand = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 48 83 EC 30 41 0F B6 F1 49 8B F8 48 8B EA 48 8B D9 C6 41 08 00";
 
     /// <summary>PostAICommand(command, int* postingTag) -> bool: every AI command, from every AI path; an invalid one is deleted and 0 returned.</summary>
     [Signature] public const string PostAICommand = "40 53 48 83 EC 40 80 3D ? ? ? ? 00 48 8B D9 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 75 ? 48 8B CA E8";
@@ -72,12 +58,6 @@ public static class Signatures
     /// <summary>CStrategicAir::GetRegionAirData: superiority records at sa+0xE0, 0xA0 each, by region+0x60 (pins those offsets).</summary>
     [Signature] public const string RegionAirData = "48 85 D2 75 ? 48 8D 05 ? ? ? ? C3 48 63 42 60 48 8D 04 80 48 C1 E0 05 48 03 81 E0 00 00 00 C3";
 
-    /// <summary>CAIGeneral::UpdateLeaders(general): daily, its fronts in array order (general+0x48) each take the best free leader.</summary>
-    [Signature] public const string UpdateLeaders = "48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC 88 02 00 00 0F 29 B4 24 ? ? ? ? 4C 8B F1 45 33 E4";
-
-    /// <summary>CAIBaseGeneral::ScoreLeader(leader, COrdersGroup*, operation, CAIFront*, bool defensive) -> int (&lt; 0: not allowed).</summary>
-    [Signature] public const string ScoreLeader = "4C 89 4C 24 20 4C 89 44 24 18 48 89 54 24 10 55 56 57 41 57 48 83 EC 68 48 8B EA 4C 8B F9 E8 ? ? ? ? 84 C0 75 ? 80 7D 39 00 BE E8 03 00 00 41 8B 87 7C 0E 00 00";
-
     /// <summary>
     /// CAIGeneral::UpdateFrontUnitRequests(general): every front of the theatre sets its Min/Desired/Max divisions
     /// (CAIFront+0x90/+0x94/+0x98); the theatre's divisions are shared out by them right after.
@@ -92,15 +72,6 @@ public static class Signatures
 
     /// <summary>CStrategicAir::GetOrCreateRegionCombatData: losses and kills per region at sa+0x170 (pins that offset; never called).</summary>
     [Signature] public const string RegionCombatData = "48 89 74 24 ? 57 48 83 EC 20 48 63 C2 48 8B F9 48 8D 34 C5 00 00 00 00 48 8B 81 70 01 00 00";
-
-    /// <summary>
-    /// The naval AI's task force allocator (navalAI): scores its objectives, sorts them into strike / convoy defence /
-    /// other buckets and hands its task forces out under fuel budgets read from NAI defines. Country AI worker thread.
-    /// </summary>
-    [Signature] public const string NavalAllocator = "48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 D8 F6 FF FF 48 81 EC 28 0A 00 00";
-
-    /// <summary>CSetNavyEngagementCommand ctor (cmd, CTaskForce*, int level 0-4): every AI aggression change posts it; the player's button uses it too.</summary>
-    [Signature] public const string NavyEngagement = "48 89 5C 24 20 48 89 4C 24 08 55 56 57 48 83 EC 30 41 8B F0 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10";
 
     /// <summary>
     /// CArmyReinforcementRequests vtable slot 1 (requests, long* score, CEquipmentType* archetype) -> score*: how much a division

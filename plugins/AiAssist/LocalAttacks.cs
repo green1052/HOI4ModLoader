@@ -5,7 +5,7 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Pocket closing: the micro attack candidate check, patched at its one call site ----
+    // ---- Local attack targets: the micro attack candidate check, patched at its one call site ----
 
     private const int ControllerOfProvince = 0x188, DivisionsInProvince = 0x11C;
 
@@ -32,9 +32,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Like the original check (nonzero = skip this target), but while some target of <paramref name="from"/> would cut off
-    /// enemy divisions, every target that wouldn't is skipped too; the game's random pick then takes a pocket-closing one.
-    /// Vanilla's own rejections stay. AI threads: read only.
+    /// Like the original check (nonzero = skip this target), but only the best kind of target of <paramref name="from"/>
+    /// stays: pocket-closing ones, else ones on the axis, else valuable ones, else none that lengthen the front; the game's
+    /// random pick then takes one of those. Vanilla's own rejections stay. AI threads: read only.
     /// </summary>
     [UnmanagedCallersOnly]
     private static byte PocketFilter(nint us, nint from, nint to)
@@ -46,7 +46,7 @@ public unsafe partial class AiAssist
             var tag = *(int*)us;
             var me = Game.Country(tag);
             if (me == 0 || !SheepMod.Active) return 0;
-            if (_armorTerrain && BadForArmor(tag, from, to) || _roles && LineOnly(tag, from) && Divisions(to) > 0 && Pocket(me, tag, to) == 0 && HasBreakthrough(me, tag))
+            if (_armorTerrain && BadForArmor(tag, from, to))
             {
                 Interlocked.Increment(ref _steered);
                 return 1;
@@ -56,22 +56,22 @@ public unsafe partial class AiAssist
                 Interlocked.Increment(ref _unsupplied);
                 return 1;
             }
-            if (!(_pocketClosing || _frontShortening || _targetValue || _axis)) return 0;
+            if (!(_attackTargets || _axis)) return 0;
             var (pocket, shortest, valuable) = (0, int.MaxValue, 0.0);
-            foreach (var id in Game.Neighbours(from))
+            foreach (var id in _attackTargets ? Game.Neighbours(from) : []) // the axis alone needs none of these
             {
                 var c = Game.Province(id);
                 if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)
                     || _supplyAware && Starved(me, tag, from, c) && Pocket(me, tag, c) == 0) continue;
                 if (Divisions(from) < Divisions(c) * (_fortLevel(c) / 2 + 1)) continue; // fails vanilla's strength test anyway
-                if (_pocketClosing) pocket = Math.Max(pocket, Pocket(me, tag, c));
-                if (_frontShortening) shortest = Math.Min(shortest, FrontChange(me, tag, c));
-                if (_targetValue) valuable = Math.Max(valuable, TargetValue(c));
+                pocket = Math.Max(pocket, Pocket(me, tag, c));
+                shortest = Math.Min(shortest, FrontChange(me, tag, c));
+                valuable = Math.Max(valuable, TargetValue(c));
             }
-            var skip = pocket > 0 ? Pocket(me, tag, to) == 0                                   // pocket targets only
-                : _axis && !OnAxis(tag, from, to) ? true                                             // nothing off the breakthrough axis
-                : _targetValue && valuable >= MinTargetValue ? TargetValue(to) < valuable / 2         // worth at least half the best
-                : _frontShortening && shortest < 0 && FrontChange(me, tag, to) > 0;              // nothing that lengthens the front
+            var skip = pocket > 0 ? Pocket(me, tag, to) == 0                  // pocket targets only
+                : _axis && !OnAxis(tag, from, to) ? true                        // nothing off the breakthrough axis
+                : valuable >= MinTargetValue ? TargetValue(to) < valuable / 2   // worth at least half the best
+                : shortest < 0 && FrontChange(me, tag, to) > 0;                 // nothing that lengthens the front
             if (skip) Interlocked.Increment(ref _steered);
             return skip ? (byte)1 : (byte)0;
         }
@@ -170,45 +170,6 @@ public unsafe partial class AiAssist
         return attack / mobile <= Crippling || river >= River && (*(int*)(terrain + CategoryOfTerrain) & (Mountain | Marsh | Jungle | Urban)) != 0;
     }
 
-    // ---- Roles: line infantry holds, breakthrough divisions push ----
-
-    private const int Defense = 0xA8, Breakthrough = 0xB0, UnitsOfCountry = 0x290, KindOfUnit = 8;
-    private const long RolesCacheMs = 60_000;
-    private static bool _roles;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (long Until, bool Has)> Breakthroughs = new();
-
-    /// <summary>Armored, or more breakthrough than defense: made to attack.</summary>
-    private static bool IsBreakthrough(nint unit)
-    {
-        var stats = *(nint*)(unit + StatsOfUnit);
-        return stats != 0 && (*(long*)(stats + Hardness) >= Armored || *(long*)(stats + Armor) > 0 || *(long*)(stats + Breakthrough) > *(long*)(stats + Defense));
-    }
-
-    /// <summary>Our divisions in the province are all line infantry.</summary>
-    private static bool LineOnly(int tag, nint province)
-    {
-        var any = false;
-        foreach (var unit in Native.PdxArray(province + UnitsInProvince))
-        {
-            if (*(int*)(unit + CommanderOfUnit) != tag) continue;
-            if (IsBreakthrough(unit)) return false;
-            any = true;
-        }
-        return any;
-    }
-
-    /// <summary>The country has breakthrough divisions at all (cached a minute): an all-infantry army still attacks with infantry.</summary>
-    private static bool HasBreakthrough(nint country, int tag)
-    {
-        var now = Environment.TickCount64;
-        if (Breakthroughs.TryGetValue(tag, out var cached) && now < cached.Until) return cached.Has;
-        var has = false;
-        foreach (var unit in Native.PdxArray(country + UnitsOfCountry))
-            if (*(int*)(unit + KindOfUnit) == 0 && IsBreakthrough(unit)) { has = true; break; }
-        Breakthroughs[tag] = (now + RolesCacheMs, has);
-        return has;
-    }
-
     // ---- Target value: victory points, capitals, supply hubs, airfields, resources, and how well it is held ----
 
     private const int VictoryPoints = 0x38, StateOfProvince = 0xC0, BuildingsOfProvince = 0x190;
@@ -217,10 +178,11 @@ public unsafe partial class AiAssist
     // Signatures.BuildingDbCall reads), 0x3C0 arms_factory, 0x3C8 industrial_complex; 0x298 the air base types.
     private const int ResourceEntries = 0xF8, SupplyNodeType = 0x3A0, AirBaseTypes = 0x298, CapitalOfCountry = 0x1018;
     private const int EntrenchOfUnit = 0x458, MaxEntrenchOfUnit = 0x460; // CArmy: dig-in now and at most (1e5)
-    private const int MinTargetValue = 30;
+    private const int MinTargetValue = 30, FreshStrength = 70;
     private const long CapitalsCacheMs = 60_000;
 
-    private static bool _targetValue, _entrenchment;
+    private static bool _attackTargets;
+    private static int _taken;
     private static (long Until, HashSet<int> States) _capitals = (0, []);
 
     /// <summary>
@@ -253,14 +215,14 @@ public unsafe partial class AiAssist
 
         // How it is held.
         var defenders = Native.PdxArray(target + UnitsInProvince);
-        if (defenders.Length == 0) return value + 25;
+        if (defenders.Length == 0) return value + MinTargetValue; // free for the taking: always a target worth going for
         long org = 0, strength = 0;
         var dugIn = 0;
         foreach (var unit in defenders)
         {
             org += Ratio(unit, OrgRatioSlot);
             strength += Ratio(unit, StrengthRatioSlot);
-            if (_entrenchment && *(long*)(unit + MaxEntrenchOfUnit) > 0 && *(long*)(unit + EntrenchOfUnit) * 100 >= 60 * *(long*)(unit + MaxEntrenchOfUnit)) dugIn++;
+            if (*(long*)(unit + MaxEntrenchOfUnit) > 0 && *(long*)(unit + EntrenchOfUnit) * 100 >= 60 * *(long*)(unit + MaxEntrenchOfUnit)) dugIn++;
         }
         if (org / defenders.Length < 30_000 || strength / defenders.Length < 50_000) return value + 10;
         return value - 5 * defenders.Length * (1 + _fortLevel(target) / 2.0) - 4 * dugIn;
@@ -276,6 +238,30 @@ public unsafe partial class AiAssist
             if (country != 0) states.Add(*(int*)(country + CapitalOfCountry));
         _capitals = (Environment.TickCount64 + CapitalsCacheMs, states);
         return states;
+    }
+
+    /// <summary>
+    /// An empty enemy province next to a stack of ours gets one fresh division from it (one always stays): vanilla's local
+    /// attacks often skip them. A plain move; a front division goes back to its front by itself afterwards. Main thread.
+    /// </summary>
+    private static void TakeEmpty(nint country, int tag, nint[] units, long now)
+    {
+        var taken = 0;
+        foreach (var here in units.Where(u => *(int*)(u + KindOfUnit) == 0 && *(int*)(u + CommanderOfUnit) == tag && *(nint*)(u + LocationOfUnit) != 0)
+                     .GroupBy(u => *(nint*)(u + LocationOfUnit)))
+        {
+            var fresh = here.Where(u => Spare(u, tag) && Percent(u, StrengthRatioSlot) >= FreshStrength).ToList();
+            var spare = Math.Min(here.Count() - 1, fresh.Count); // one stays
+            foreach (var id in Game.Neighbours(here.Key))
+            {
+                if (spare == 0) break;
+                var target = Game.Province(id);
+                if (target == 0 || _gap.ContainsKey(id) || Divisions(target) > 0 || !Enemy(country, tag, target)) continue;
+                if (!Send(fresh[--spare], id, now, SentMs)) continue;
+                Interlocked.Increment(ref _taken);
+                if (++taken == MaxMoves) return;
+            }
+        }
     }
 
     // ---- Supply-aware attacks: no local attacks the attackers' supply can't follow ----
