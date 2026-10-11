@@ -21,9 +21,27 @@ internal static class Updater
     /// <summary>The release installed for the next start (e.g. "v1.2.0"), if any.</summary>
     internal static string? Installed { get; private set; }
 
+    /// <summary>
+    /// Plugins later releases merged into others or dropped. Deleted at every start, before plugins load: a manual install over
+    /// an old one (or a first update, with no plugins.txt yet) would otherwise run them next to their replacements.
+    /// </summary>
+    private static readonly string[] Retired =
+        ["AirWingFieldMarshal", "AirbaseCapacity", "RailwayGuns", "AutoProduction", "NoTelemetry", "PlanTools", "SupplyOverlay", "WarStats"];
+
     /// <summary>Finishes an update installed last session: deletes the swapped-out files and moves the staged plugins in.</summary>
     internal static void Finish(string pluginsDir)
     {
+        foreach (var name in Retired)
+        foreach (var file in new[] { name + ".dll", name + ".pdb" }.Select(f => Path.Combine(pluginsDir, f)).Where(File.Exists))
+        {
+            try
+            {
+                File.Delete(file);
+                Log.Info($"removed {Path.GetFileName(file)}: merged into another plugin or dropped");
+            }
+            catch (Exception e) { Log.Error($"remove {Path.GetFileName(file)}: {e.Message}"); }
+        }
+
         var leftovers = Directory.EnumerateFiles(Loader.ModsDir, "*.old", SearchOption.AllDirectories)
             .Concat(Directory.EnumerateFiles(Loader.ModsDir, "*.new", SearchOption.AllDirectories))
             .Concat(Directory.EnumerateFiles(GameDir, "version.dll.*"));
