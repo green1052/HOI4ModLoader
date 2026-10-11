@@ -95,6 +95,7 @@ public static class Loader
             MainThread.Every(TimeSpan.FromMilliseconds(100), () =>
             {
                 if (Environment.TickCount64 < _reloadAt) return;
+                if (Multiplayer) return; // a settings toggle mid-session: rewrite deferred to the next single player menu
                 _reloadAt = long.MaxValue;
                 Reload();
             });
@@ -112,8 +113,10 @@ public static class Loader
     // Reloads once the plugin DLLs changed and then stayed the same for a tick (a build may still be copying them).
     // ponytail: patches are rewritten while game threads run; one executing a hooked prologue at that instant could crash.
     // Pause the game first if a plugin hooks simulation code; suspending the other threads is the upgrade if that bites.
+    // Never in a multiplayer session: a host rewriting hooks mid-simulation crashes for every player at once.
     private static void ReloadIfChanged()
     {
+        if (Multiplayer) return;
         var files = PluginFiles();
         if (files == _loadedFiles || files != _changedFiles)
         {
