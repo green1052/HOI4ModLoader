@@ -1401,7 +1401,7 @@ public unsafe class AiAssist : Plugin
     private void Backfill()
     {
         _game.Check();
-        if (!SheepMod.Active) return;
+        if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
         var now = Environment.TickCount64;
         foreach (var (unit, until) in _sent.ToArray()) if (now >= until) _sent.Remove(unit);
         foreach (var (province, until) in _gap.ToArray()) if (now >= until) _gap.Remove(province);
@@ -1550,7 +1550,7 @@ public unsafe class AiAssist : Plugin
     private void DefendBeachheads()
     {
         _game.Check();
-        if (!SheepMod.Active) return;
+        if (!SheepMod.Active || Game.State == 0) return; // 0 while the world is still loading: Game.Countries guards it too
         var now = Environment.TickCount64;
         if (now - _beachScanned >= LandingScanMs)
         {
