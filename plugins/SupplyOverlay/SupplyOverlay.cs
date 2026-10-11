@@ -183,11 +183,12 @@ public unsafe partial class SupplyOverlay : Plugin
         }
     }
 
-    /// <summary>One arrow in the supply map's own style, or 0: the manager's style list comes from the game's .gfx files,
-    /// so an unknown style falls back to the name the game itself last drew with.</summary>
+    /// <summary>One arrow in the supply map's own style, or 0. The manager holds the styles of the current map mode's
+    /// .gfx, so an unknown style can fall back to a captured name — but only a supply one: the game draws its fronts
+    /// through CreateArrow too, and reusing e.g. "defence_line" painted a huge dark band over the map.</summary>
     private nint MakeArrow(byte[] colourA, byte[] colourB)
     {
-        string[] tries = [_style, _capturedName];
+        string[] tries = _capturedName.Contains("supply") ? [_style, _capturedName] : [_style];
         foreach (var style in tries.Distinct())
         {
             var arrow = Create(style, colourA, colourB);
