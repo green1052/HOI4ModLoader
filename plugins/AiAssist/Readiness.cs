@@ -8,7 +8,7 @@ public unsafe partial class AiAssist
 {
     // ---- Offensive readiness: an "attack on" an AI army isn't ready for is dropped; the AI asks again every hour ----
 
-    private const int GroupOfCommand = 0x28, OrderOfCommand = 0x30, ExecuteOn = 0x34, AlsoArmies = 0x35; // COrderExecuteCommand
+    private const int GroupOfCommand = 0x28, OrderOfCommand = 0x30, ExecuteOn = 0x34;                     // COrderExecuteCommand
     private const int TypeOfOrder = 0x30, Executing = 0x248, Invasion = 3, Paradrop = 4;                   // COrder
     private const int UnitOfMemberSlot = 4, StrengthRatioSlot = 34, OrgRatioSlot = 39;                     // member -> CArmy; CArmy ratios (1e5)
     private const int SupplyOfUnit = 0x40;                                                                 // CArmy: supply ratio (1e5)
@@ -59,16 +59,15 @@ public unsafe partial class AiAssist
         foreach (var member in Native.PdxArray(g + OrdersGroup.MembersOffset))
         {
             var unit = ((delegate* unmanaged<nint, nint>)(*(nint**)member)[UnitOfMemberSlot])(member);
-            long o, s;
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[OrgRatioSlot])(unit, &o);
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[StrengthRatioSlot])(unit, &s);
+            if (unit == 0) continue;
+            var o = Ratio(unit, OrgRatioSlot);
             count++;
             org += o;
-            strength += s;
+            strength += Ratio(unit, StrengthRatioSlot);
             supply += *(long*)(unit + SupplyOfUnit);
             if (o < WeakOrg) weak++;
         }
         return count == 0 || org / count >= _minOrg && strength / count >= _minStrength && supply / count >= _minSupply && weak * 100 <= count * MaxWeakPercent
-            && Manned(*(int*)tag); // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
+            && (!_holdLine || Manned(*(int*)tag, LineOf(*(int*)tag, Hour))); // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
     }
 }

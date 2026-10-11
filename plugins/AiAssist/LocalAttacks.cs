@@ -9,9 +9,10 @@ public unsafe partial class AiAssist
 
     private const int ControllerOfProvince = 0x188, DivisionsInProvince = 0x11C;
 
+    private const int FlagsOfStatic = 0xD2, BlockedOfStateCategory = 0x15C, Impassable = 4; // what vanilla's candidate loop skips
+
     private static delegate* unmanaged<nint, nint, nint, byte> _cantMove;
-    private static int _steered, _pocketFailed;
-    private static Logger? _log;
+    private static int _steered;
 
     private void LoadPockets()
     {
@@ -22,12 +23,9 @@ public unsafe partial class AiAssist
         var river = Sig.Find(Signatures.RiverPenalty);
         _riverSmall = river + 14 + *(int*)(river + 10); // mov rdx,[rip+disp] (7 bytes at +7)
         _riverLarge = river + 22 + *(int*)(river + 18); // cmovnz rdx,[rip+disp] (8 bytes at +14)
-        _log = Log;
         if (*(ushort*)(site + 5) != 0xC084) throw new InvalidOperationException("micro attack candidate check: no `test al,al` after the call");
         // `call CantMoveInto; test al,al` (7 bytes: the hook's jump takes more than the call's 5) becomes a call of the filter
         // and the same test, for the `jnz skip` right after. rsp is 16-aligned at the call and its home space reserved.
-        // Its first call comes from an AI thread: compile it here first.
-        Patches.Warmup(typeof(AiAssist).GetMethod(nameof(PocketFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!);
         Patches.Asm(site, 7, "use64", $"mov rax, 0x{(nint)(delegate* unmanaged<nint, nint, nint, byte>)&PocketFilter:X}", "call rax", "test al, al");
     }
 
@@ -55,14 +53,14 @@ public unsafe partial class AiAssist
             foreach (var id in Game.Neighbours(from))
             {
                 var c = Game.Province(id);
-                if (c == 0 || !Enemy(me, tag, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)) continue;
+                if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)) continue;
                 if (Divisions(from) < Divisions(c) * (_fortLevel(c) / 2 + 1)) continue; // fails vanilla's strength test anyway
                 if (_pocketClosing) pocket = Math.Max(pocket, Pocket(me, tag, c));
                 if (_frontShortening) shortest = Math.Min(shortest, FrontChange(me, tag, c));
                 if (_targetValue) valuable = Math.Max(valuable, TargetValue(c));
             }
             var skip = pocket > 0 ? Pocket(me, tag, to) == 0                                   // pocket targets only
-                : _axis && !OnAxis(tag, to) ? true                                                   // nothing off the breakthrough axis
+                : _axis && !OnAxis(tag, from, to) ? true                                             // nothing off the breakthrough axis
                 : _targetValue && valuable >= MinTargetValue ? TargetValue(to) < valuable / 2         // worth at least half the best
                 : _frontShortening && shortest < 0 && FrontChange(me, tag, to) > 0;              // nothing that lengthens the front
             if (skip) Interlocked.Increment(ref _steered);
@@ -70,9 +68,21 @@ public unsafe partial class AiAssist
         }
         catch (Exception e)
         {
-            if (Interlocked.Exchange(ref _pocketFailed, 1) == 0) _log?.Error($"pocket filter: {e}");
+            Failed(e);
             return _cantMove(us, from, to);
         }
+    }
+
+    /// <summary>A neighbour vanilla's candidate loop would weigh at all (before its own CantMoveInto): not behind an impassable
+    /// border, a province units can enter, in no blocked state. Others must not make the real targets look worse.</summary>
+    private static bool Candidate(nint from, nint to)
+    {
+        if (Game.AdjacencyType(from, Game.Id(to)) == Impassable) return false;
+        var info = *(nint*)(to + StaticOfProvince);
+        if (info == 0 || (*(byte*)(info + FlagsOfStatic) & 1) == 0) return false;
+        var state = *(nint*)(to + StateOfProvince);
+        var category = state == 0 ? 0 : *(nint*)(state + ResourcesOfState);
+        return category == 0 || *(byte*)(category + BlockedOfStateCategory) == 0;
     }
 
     /// <summary>Enemy divisions that taking <paramref name="target"/> cuts off: in enemy provinces next to it whose other land neighbours are all ours or allied.</summary>
@@ -80,7 +90,7 @@ public unsafe partial class AiAssist
     private static int Pocket(nint me, int tag, nint target)
     {
         var cut = 0;
-        var targetId = Id(target);
+        var targetId = Game.Id(target);
         foreach (var id in Game.Neighbours(target))
         {
             var e = Game.Province(id);
@@ -110,7 +120,7 @@ public unsafe partial class AiAssist
 
     // ---- Armor and terrain: the divisions' own terrain attack (unit data: modded games too) plus the river crossing ----
 
-    private const int UnitsInProvince = 0x110, StaticOfProvince = 0xB8, TerrainOfStatic = 0xA8, AdjacenciesOfStatic = 0x70;
+    private const int UnitsInProvince = 0x110, StaticOfProvince = 0xB8, TerrainOfStatic = 0xA8;
     private const int IndexOfTerrain = 0x88, CategoryOfTerrain = 0x8C;
     private const int CommanderOfUnit = 0x1D8, StatsOfUnit = 0x138;
     private const int Hardness = 0xB8, Armor = 0x298, RiverAttack = 0x390, TerrainModifiers = 0x3F8, TerrainModifierSize = 0x28, AttackOfModifier = 0x10;
@@ -128,10 +138,10 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool BadForArmor(int tag, nint from, nint to)
     {
-        var terrain = *(nint*)(*(nint*)(to + StaticOfProvince) + TerrainOfStatic);
+        var terrain = Terrain(to);
         var index = terrain == 0 ? 0 : *(int*)(terrain + IndexOfTerrain);
         if (index <= 0) return false;
-        var river = Adjacency(from, Id(to));
+        var river = Game.AdjacencyType(from, Game.Id(to));
         var crossing = river == LargeRiver ? *(long*)_riverLarge : river == River ? *(long*)_riverSmall : 0;
         int ours = 0, mobile = 0;
         long attack = 0;
@@ -193,24 +203,15 @@ public unsafe partial class AiAssist
 
     private const int VictoryPoints = 0x38, StateOfProvince = 0xC0, BuildingsOfProvince = 0x190;
     private const int ProvincesOfState = 0x18, IdOfState = 0x58, BestVictoryPoints = 0x85C, BuildingsOfState = 0x120, ResourcesOfState = 0x30;
+    // CBuildingDatabase (0x3F0 bytes): 0x3A0 supply_node, 0x3A8 rail_way, 0x3B0 infrastructure, 0x3B8 naval_base (the slot
+    // Signatures.BuildingDbCall reads), 0x3C0 arms_factory, 0x3C8 industrial_complex; 0x298 the air base types.
     private const int ResourceEntries = 0xF8, SupplyNodeType = 0x3A0, AirBaseTypes = 0x298, CapitalOfCountry = 0x1018;
-    private const int NavalBaseType = 0x400;
     private const int EntrenchOfUnit = 0x458, MaxEntrenchOfUnit = 0x460; // CArmy: dig-in now and at most (1e5)
     private const int MinTargetValue = 30;
     private const long CapitalsCacheMs = 60_000;
 
     private static bool _targetValue, _entrenchment;
-    private static nint _buildingDb; // address of the building database global
-    private static delegate* unmanaged<nint, nint, nint> _findBuilding;
     private static (long Until, HashSet<int> States) _capitals = (0, []);
-
-    private void LoadTargetValue()
-    {
-        _findBuilding = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
-        var at = Sig.Find(Signatures.BuildingDbCall);
-        var getter = at + 5 + *(int*)(at + 1);
-        _buildingDb = getter + 18 + *(int*)(getter + 14);
-    }
 
     /// <summary>
     /// What taking the enemy province is worth: its victory points, a capital, a supply hub, the state's airfields and
@@ -226,7 +227,7 @@ public unsafe partial class AiAssist
 
         double value = 3 * Math.Min(*(int*)(target + VictoryPoints), 30);
         if (Capitals().Contains(*(int*)(state + IdOfState))) value += main ? 60 : 15;
-        var hub = _findBuilding(target + BuildingsOfProvince, *(nint*)(db + SupplyNodeType));
+        var hub = _findBuilding(target + BuildingsOfProvince, *(nint*)(db + SupplyNodeType)); // nodes (and air bases below) are always defined
         if (hub != 0 && *(short*)(hub + 0x40) > 0) value += 20;
 
         var air = 0;
@@ -247,11 +248,8 @@ public unsafe partial class AiAssist
         var dugIn = 0;
         foreach (var unit in defenders)
         {
-            long o, s;
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[OrgRatioSlot])(unit, &o);
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[StrengthRatioSlot])(unit, &s);
-            org += o;
-            strength += s;
+            org += Ratio(unit, OrgRatioSlot);
+            strength += Ratio(unit, StrengthRatioSlot);
             if (_entrenchment && *(long*)(unit + MaxEntrenchOfUnit) > 0 && *(long*)(unit + EntrenchOfUnit) * 100 >= 60 * *(long*)(unit + MaxEntrenchOfUnit)) dugIn++;
         }
         if (org / defenders.Length < 30_000 || strength / defenders.Length < 50_000) return value + 10;

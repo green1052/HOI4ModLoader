@@ -104,7 +104,7 @@ Hotkeys for all your armies and army groups at once, each posting the same comma
 
 ### SupplyOverlay
 **Ctrl+Alt+S** draws an arrow from the supply hub feeding each of your starving divisions to the division itself, in the supply map's own arrow style — in any map mode, without switching. Read-only, refreshed while on.
-**Ctrl+Alt+C** draws your country's trade routes in gold: an arrow over the states a land route crosses and the strategic regions a sea route sails, from the exporting country to you.
+**Ctrl+Alt+C** draws your country's trade routes in gold: an arrow over the states a land route crosses and the strategic regions a sea route sails, for your imports and your exports alike.
 
 ### AiAssist
 An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.

@@ -63,7 +63,7 @@ public static class Loader
                 "Check GitHub for a newer HOI4ModLoader at startup and then every this many hours, and install it for the next start. 0: only at startup, -1: never.");
             if (updateHours >= 0) Updater.Start(TimeSpan.FromHours(updateHours));
             var followMultiplayer = true;
-            try { _ = Game.IsMultiplayer; } // resolves its signature now, before any game rule plugin loads
+            try { _ = Game.IsMultiplayer; _ = Game.State; } // resolve their signatures now, on this thread: plugins read them from game threads
             catch (Exception e)
             {
                 followMultiplayer = false;
@@ -71,7 +71,7 @@ public static class Loader
                 Log.Error($"multiplayer check unavailable, game rule plugins stay off: {e.Message}");
             }
             // Signatures the core resolves on first use: a broken one (game update) is reported here, once, not in play.
-            foreach (var signature in new[] { Commands.PostSig, Commands.SessionHolderSig, Gui.SetTextSig, Gui.HasTextBoxSig })
+            foreach (var signature in new[] { Commands.PostSig, Commands.SessionHolderSig, Commands.MoveSig, Gui.SetTextSig, Gui.HasTextBoxSig })
             {
                 try { Sig.Find(signature); }
                 catch (Exception e) { Log.Error($"core signature: {e.Message}"); }
@@ -141,6 +141,7 @@ public static class Loader
         if (multiplayer == Multiplayer) return;
         Multiplayer = multiplayer;
         Log.Info(Multiplayer ? "multiplayer: game rule plugins off" : "single player: game rule plugins on");
+        _reloadAt = long.MaxValue; // a reload deferred in the session happens now, not once more after it
         Reload();
     }
 

@@ -95,7 +95,7 @@ public static unsafe class Game
     public static ReadOnlySpan<nint> Countries => State == 0 ? default : Native.PdxArray(State + _countries);
 
     private const int ProvincesOfGameState = 8;                              // province container: vtable slot 0 = by id
-    private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8;
+    private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8, TypeOfAdjacency = 0x10;
 
     /// <summary>CProvince by id (+164 id, +0xC0 state, +0xC8 strategic region, +0x188 controller tag, +400 buildings), or 0.</summary>
     public static nint Province(int id)
@@ -104,6 +104,23 @@ public static unsafe class Game
         if (gs == 0) return 0;
         var provinces = gs + ProvincesOfGameState;
         return ((delegate* unmanaged<nint, int, nint>)(**(nint**)provinces))(provinces, id);
+    }
+
+    public const int IdOfProvince = 0xA4;
+
+    /// <summary>The province's id (what <see cref="Province"/> and <see cref="Neighbours"/> take and give).</summary>
+    public static int Id(nint province) => *(int*)(province + IdOfProvince);
+
+    /// <summary>The adjacency from <paramref name="from"/> to its neighbour <paramref name="to"/> (an id): 0 normal, 1 strait,
+    /// 2 river, 3 large river, 4 impassable; 0 when they aren't neighbours.</summary>
+    public static int AdjacencyType(nint from, int to)
+    {
+        var adjacency = *(nint*)(from + AdjacencyOfProvince);
+        if (adjacency == 0) return 0;
+        var data = *(nint*)(adjacency + Adjacencies);
+        for (int i = 0, n = *(int*)(adjacency + Adjacencies + 0xC); i < n; i++)
+            if (*(int*)(data + i * AdjacencySize + NeighbourId) == to) return *(byte*)(data + i * AdjacencySize + TypeOfAdjacency);
+        return 0;
     }
 
     /// <summary>Ids of the provinces next to <paramref name="province"/> (land and sea).</summary>

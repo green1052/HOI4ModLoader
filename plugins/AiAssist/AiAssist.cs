@@ -20,7 +20,8 @@ namespace AiAssist;
 [Plugin("com.green1052.aiassist", "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
 {
-    private int _failed; // AI hooks run on worker threads: log the first error only
+    private static int _failed; // AI hooks run on worker threads: log the first error only
+    private static Logger? _log;
 
     public override void Load()
     {
@@ -72,39 +73,36 @@ public unsafe partial class AiAssist : Plugin
         _navalEscort = Config.Bind("AI", "NavalEscort", true,
             "While a country is losing convoys fast, its naval fuel budget for convoy defence is doubled for that pass of the task force allocator.");
 
+        _log = Log;
         ResolveShared();
+        _game = new PerGame(() =>
+        {
+            // Everything cached across games must go: a new world frees the old one's fronts,
+            // provinces and units, and a cached pointer into it is a crash.
+            _sent.Clear();
+            _gap.Clear();
+            _posted.Clear();
+            Axes.Clear();
+            Factors.Clear();
+            LastBattle.Clear();
+            Breakthroughs.Clear();
+            BaseThreat.Clear();
+            TraitNames.Clear();
+            _line.Clear();
+            _capitals = (0, []);
+            _beachheads = [];
+            _provinceCount = -1;
+        });
+        MainThread.Every(TimeSpan.FromSeconds(1), _game.Check); // AI threads read these caches: reset them soon after a load
         if (readiness) LoadReadiness();
-        if (_targetValue || _defensePriority) LoadTargetValue();
         if (_pocketClosing || _frontShortening || _armorTerrain || _roles || _targetValue || _axis) LoadPockets();
         if (_airRetreat || _airbaseEvac) LoadAirRetreat();
         if (_casConcentration) LoadCas();
         if (leaders) LoadLeaders();
         if (_concentration || _holdLine || _reserve || _axis || _stationing) LoadConcentration();
         if (_navalSortie || _navalEscort) LoadNavy();
-        if (_holdLine || _reserve || _beachDefense)
-        {
-            _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(Signatures.MoveCommand);
-            _game = new PerGame(() =>
-            {
-                // Everything cached across games must go: a new world frees the old one's fronts,
-                // provinces and units, and a cached pointer into it is the crash the old build died of.
-                _sent.Clear();
-                _gap.Clear();
-                _posted.Clear();
-                Axes.Clear();
-                Factors.Clear();
-                LastBattle.Clear();
-                Breakthroughs.Clear();
-                BaseThreat.Clear();
-                TraitNames.Clear();
-                _line.Clear();
-                _capitals = (0, []);
-                _beachheads = [];
-                _provinceCount = -1;
-            });
-            MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
-            if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(30), DefendBeachheads);
-        }
+        if (_holdLine || _reserve) MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
+        if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(30), DefendBeachheads);
         MainThread.Every(TimeSpan.FromMinutes(1), LogStats);
         if (!production) return;
         _balance = (delegate* unmanaged<nint, long*, nint, long*>)Sig.Find(Signatures.GetBalance);
@@ -113,10 +111,7 @@ public unsafe partial class AiAssist : Plugin
         _isNaval = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.IsNaval);
         _applyTargets = Patches.Hook<ApplyTargetsFn>(Sig.Find(Signatures.ApplyFactoryTargets), (minister, lines, byArchetype, byRole) =>
         {
-            Safely(() =>
-            {
-                if (SheepMod.Active) Rebalance(minister, lines - MilitaryLines);
-            });
+            Safely(() => Rebalance(minister, lines - MilitaryLines));
             _applyTargets!.OriginalFunction(minister, lines, byArchetype, byRole);
         });
     }
@@ -150,6 +145,9 @@ public unsafe partial class AiAssist : Plugin
     private static delegate* unmanaged<nint, int*, byte> _atWar;
     private static delegate* unmanaged<nint, int*, byte, byte, byte> _allied;
     private static delegate* unmanaged<nint, int> _fortLevel;
+    private static delegate* unmanaged<nint, nint, nint> _findBuilding;
+    private static nint _buildingDb; // address of the building database global
+    private static int _navalBaseSlot;
 
     private static void ResolveShared()
     {
@@ -157,38 +155,55 @@ public unsafe partial class AiAssist : Plugin
         _atWar = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.IsAtWarWith);
         _allied = (delegate* unmanaged<nint, int*, byte, byte, byte>)Sig.Find(Signatures.SameOrAllied);
         _fortLevel = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FortLevel);
+        _findBuilding = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
+        var at = Sig.Find(Signatures.BuildingDbCall);
+        var getter = at + 5 + *(int*)(at + 1);
+        _buildingDb = getter + 18 + *(int*)(getter + 14);
+        _navalBaseSlot = *(int*)(at + 8); // `mov rcx,[rax+3B8h]`: the naval base type, as the game reads it
     }
 
-    private const int IdOfProvince = 0xA4;
-
-    private static int Id(nint province) => *(int*)(province + IdOfProvince);
+    private static int Hour => *(int*)(Game.State + HourOfGameState);
 
     private static int Divisions(nint province) => *(int*)(province + DivisionsInProvince);
 
-    /// <summary>The adjacency type from one province to a neighbour: 0 normal, 1 strait, 2 river, 3 large river, 4 impassable.</summary>
-    private static int Adjacency(nint from, int to)
+    private static nint Terrain(nint province)
     {
-        var info = *(nint*)(from + StaticOfProvince);
-        var records = *(nint*)(info + AdjacenciesOfStatic);
-        for (int i = 0, n = *(int*)(info + AdjacenciesOfStatic + 0xC); i < n; i++)
-            if (*(int*)(records + i * 0x30 + 8) == to) return *(byte*)(records + i * 0x30 + 0x10);
-        return 0;
+        var info = *(nint*)(province + StaticOfProvince);
+        return info == 0 ? 0 : *(nint*)(info + TerrainOfStatic);
+    }
+
+    /// <summary>A CArmy ratio (organisation or strength slot), 1e5 = full.</summary>
+    private static long Ratio(nint unit, int slot)
+    {
+        long value;
+        ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[slot])(unit, &value);
+        return value;
+    }
+
+    private static bool AtWar(nint me, int tag)
+    {
+        if (tag <= 0) return false;
+        var other = stackalloc int[] { tag, Game.TagIndex(tag) };
+        return _atWar(me, other) != 0;
+    }
+
+    private static bool Allied(nint me, int tag)
+    {
+        if (tag <= 0) return false;
+        var other = stackalloc int[] { tag, Game.TagIndex(tag) };
+        return _allied(me, other, 0, 0) != 0;
     }
 
     private static bool Enemy(nint me, int tag, nint province)
     {
         var controller = *(int*)(province + ControllerOfProvince);
-        if (controller <= 0 || controller == tag) return false; // 0: sea
-        var other = stackalloc int[] { controller, Game.TagIndex(controller) };
-        return _atWar(me, other) != 0;
+        return controller != tag && AtWar(me, controller); // 0: sea
     }
 
     private static bool Friendly(nint me, int tag, nint province)
     {
         var controller = *(int*)(province + ControllerOfProvince);
-        if (controller == tag) return true;
-        var other = stackalloc int[] { controller, Game.TagIndex(controller) };
-        return _allied(me, other, 0, 0) != 0;
+        return controller == tag || Allied(me, controller);
     }
 
     /// <summary>The country's faction, or 0 when it is in none (CIsInFactionWith compares these pointers).</summary>
@@ -198,12 +213,16 @@ public unsafe partial class AiAssist : Plugin
         return member == 0 ? 0 : *(nint*)(member + FactionOfMember);
     }
 
-    private void Safely(Action action)
+    /// <summary>Runs a hook's own logic where Sheep Mod is in the game; an exception is logged (the first only) and the game goes on.</summary>
+    private static void Safely(Action action)
     {
+        if (!SheepMod.Active) return;
         try { action(); }
-        catch (Exception e)
-        {
-            if (Interlocked.Exchange(ref _failed, 1) == 0) Log.Error($"AI hook: {e}");
-        }
+        catch (Exception e) { Failed(e); }
+    }
+
+    private static void Failed(Exception e)
+    {
+        if (Interlocked.Exchange(ref _failed, 1) == 0) _log?.Error($"AI hook: {e}");
     }
 }

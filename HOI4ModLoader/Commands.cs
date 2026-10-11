@@ -41,18 +41,25 @@ public static unsafe class Commands
     /// </summary>
     public static bool CanExecute(nint cmd) => ((delegate* unmanaged<nint, nint, byte>)(*(nint**)cmd)[CanExecuteSlot])(cmd, 0) != 0;
 
-    /// <summary>Hands the command to the session, which owns and eventually frees it.</summary>
-    public static void Post(nint cmd) => Post(cmd, false);
+    /// <summary>Hands the command to the session, which owns and eventually frees it. False (command freed): no session.</summary>
+    public static bool Post(nint cmd) => Post(cmd, false);
 
     /// <summary>
     /// <see cref="Post(nint)"/>; <paramref name="force"/> as the game's own AI posts (PostAICommand): the session takes it even
     /// where it would drop a player's command. Use it for commands made on an AI country's behalf (single player).
     /// </summary>
-    public static void Post(nint cmd, bool force)
+    public static bool Post(nint cmd, bool force)
     {
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_post == null) _post = (delegate* unmanaged<nint, nint, byte, byte>)Sig.Find(PostSig);
-        _post(Session, cmd, force ? (byte)1 : (byte)0);
+        var session = Session;
+        if (session == 0) // loading or shutting down: PostCommand would dereference it
+        {
+            Free(cmd);
+            return false;
+        }
+        _post(session, cmd, force ? (byte)1 : (byte)0);
+        return true;
     }
 
     /// <summary>The game's CSession (clausewitz session.cpp), or 0 before the game application exists.</summary>
@@ -84,7 +91,26 @@ public static unsafe class Commands
             Free(cmd);
             return false;
         }
-        Post(cmd, force);
-        return true;
+        return Post(cmd, force);
+    }
+
+    /// <summary>
+    /// CMoveCommand ctor (mem[0x88], CArmy* unit, int province, bool clearQueue, int moveType, ...): a plain move, the one the
+    /// battle plan UI sends; the game turns a move out of combat into a retreat.
+    /// </summary>
+    [Signature] public const string MoveSig = "48 89 4C 24 ? 53 48 83 EC 60 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10 C7 43 14 00 00 FF FF 66 89 4B 18 48 89 4B 1C 48 8D 05 ? ? ? ? 48 89 03 48 8D 4B 28";
+
+    private const int MoveSize = 0x88;
+    private static delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
+
+    /// <summary>Moves <paramref name="unit"/> to <paramref name="province"/> (clearing its queue, as the AI moves units) if the game accepts it.</summary>
+    // ponytail: a refused move is freed without its destructor, leaking its small province array; call the deleting dtor if that adds up.
+    public static bool Move(nint unit, int province, bool force = false)
+    {
+        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment
+        if (_move == null) _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(MoveSig);
+        var cmd = Allocator.AllocZeroed(MoveSize);
+        _move(cmd, unit, province, 1, 2, 0, 0, 0, 0, 0);
+        return TryPost(cmd, force);
     }
 }

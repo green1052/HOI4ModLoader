@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
@@ -10,10 +11,11 @@ public unsafe partial class AiAssist
 
     private const int HandlesOfNavy = 0x50;                                            // naval AI: task force handles, 32 bytes each (+0xC count)
     private const int StationOfForce = 0x1F0, RegionOfStation = 0xC8;                  // CTaskForce -> station -> CNavalRegion
-    private const int OwnerOfForce = 0x1D8, MissionOfForce = 0x374, AggressionOfForce = 0x394;
+    private const int OwnerOfForce = 0x1D8, MissionOfForce = 0x374;
     private const int ShipsOfForce = 0x348, SpottedOfRegion = 0xF8, StrengthOfShip = 0x6F8; // CPdxArrays; CShip strength (1e5)
     private const int ConvoyThreats = 0x698, CountriesOfThreats = 8, TagOfThreats = 0x10, ThreatsOfCountry = 0x80; // gamestate -> per country
-    private const int ConvoyDefenseFuel = 0x337538, ThreatPerSunkConvoy = 0x337F70;    // NAI defines, from the image base
+    private const int ConvoyFuelRead = 0x7D6;                                          // allocator: `imul rcx,[rip+CONVOY_DEFENCE fuel ratio]`
+    private const int ThreatPerSunkConvoy = 0x3337F70;                                 // NAI define (int), from the image base
     private const int Patrol = 1, Strike = 2, Raiding = 3;                             // EMissionType
 
     [Function(CallingConventions.Microsoft)] public delegate void NavyFn(nint navalAI);
@@ -28,13 +30,14 @@ public unsafe partial class AiAssist
 
     private void LoadNavy()
     {
-        var image = Sig.Find(Signatures.NavalAllocator) - 0x1A65AB0; // the allocator's own address gives the image base
-        _convoyRatio = image + ConvoyDefenseFuel;
-        _threatPerConvoy = image + ThreatPerSunkConvoy;
+        var read = Sig.Find(Signatures.NavalAllocator) + ConvoyFuelRead;
+        if (*(uint*)read != 0x0DAF0F48) throw new InvalidOperationException("naval allocator: the convoy fuel define read moved");
+        _convoyRatio = read + 8 + *(int*)(read + 4); // a write here must land on the define: anywhere else is the game's code
+        _threatPerConvoy = NativeLibrary.GetMainProgramHandle() + ThreatPerSunkConvoy;
         _navyAllocator = Patches.Hook<NavyFn>(Sig.Find(Signatures.NavalAllocator), navalAI =>
         {
             var boosted = false;
-            Safely(() => boosted = SheepMod.Active && _navalEscort && ConvoyPressure(navalAI));
+            Safely(() => boosted = _navalEscort && ConvoyPressure(navalAI));
             if (boosted && Interlocked.Increment(ref _convoyBumps) == 1)
                 *(long*)_convoyRatio = ConvoyBaseline() * 2; // another country's worker may read the doubled ratio: once, too many escorts, never too few
             try { _navyAllocator!.OriginalFunction(navalAI); }
@@ -46,10 +49,7 @@ public unsafe partial class AiAssist
         });
         _engagement = Patches.Hook<EngagementFn>(Sig.Find(Signatures.NavyEngagement), (cmd, force, level) =>
         {
-            Safely(() =>
-            {
-                if (SheepMod.Active && _navalSortie) level = Engagement(force, level);
-            });
+            if (_navalSortie) Safely(() => level = Engagement(force, level));
             return _engagement!.OriginalFunction(cmd, force, level);
         });
     }
@@ -107,7 +107,12 @@ public unsafe partial class AiAssist
         if (tag == 0 || tag == Game.ControlledTag) return level; // the player's own button
         if (*(int*)(force + MissionOfForce) is not (Patrol or Strike or Raiding)) return level;
         var ships = Native.PdxArray<nint>(force + ShipsOfForce);
-        if (ships.Length <= 2) return 0; // a pair on patrol or raiding shadows the enemy, it doesn't fight it
+        if (ships.Length == 0) return level;
+        if (ships.Length <= 2 && *(int*)(force + MissionOfForce) == Patrol) // a pair on patrol shadows the enemy, it doesn't fight it
+        {
+            if (level != 0) Interlocked.Increment(ref _sortied);
+            return 0;
+        }
         long ours = 0;
         foreach (var ship in ships) ours += *(long*)(ship + StrengthOfShip);
         var station = *(nint*)(force + StationOfForce);
@@ -116,14 +121,10 @@ public unsafe partial class AiAssist
         var me = Game.Country(tag);
         if (me == 0) return level;
         long theirs = 0;
-        var pair = stackalloc int[2];
         foreach (var other in Native.PdxArray<nint>(region + SpottedOfRegion))
         {
             var owner = *(int*)(other + OwnerOfForce);
-            if (owner == 0 || owner == tag) continue;
-            pair[0] = owner;
-            pair[1] = Game.TagIndex(owner);
-            if (_atWar(me, pair) == 0) continue;
+            if (owner == tag || !AtWar(me, owner)) continue;
             foreach (var ship in Native.PdxArray<nint>(other + ShipsOfForce)) theirs += *(long*)(ship + StrengthOfShip);
         }
         var vanilla = level;

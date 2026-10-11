@@ -63,15 +63,6 @@ public static unsafe partial class Gui
         finally { Allocator.Free(str); } // SetText already took (and freed) any heap buffer
     }
 
-    private const int WindowWidgetOffset = 48; // a container window: its own GUI object (the one Show()/Hide() take)
-
-    /// <summary>Shows or hides a container window and everything in it (the game's own windows toggle it this way).</summary>
-    public static void ShowWindow(nint window, bool show)
-    {
-        var widget = window + WindowWidgetOffset;
-        ((delegate* unmanaged<nint, void>)(*(nint**)widget)[show ? ShowSlot : HideSlot])(widget);
-    }
-
     public static bool IsHidden(nint widget) => (*(byte*)(widget + Flags) & HiddenFlag) != 0;
 
     /// <summary>Shows a widget the code hid (what the game does: clear the hidden flag, then Show()).</summary>
@@ -154,26 +145,28 @@ public static unsafe partial class Gui
     [UnmanagedCallersOnly]
     private static void DestroyTooltip(nint handler, int flags) { }
 
-    public static bool ShiftHeld => (GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
-    public static bool CtrlHeld => (GetAsyncKeyState(0x11) & 0x8000) != 0;  // VK_CONTROL
-    public static bool AltHeld => (GetAsyncKeyState(0x12) & 0x8000) != 0;   // VK_MENU
+    public static bool ShiftHeld => KeyHeld(0x10); // VK_SHIFT
+    public static bool CtrlHeld => KeyHeld(0x11);  // VK_CONTROL
+    public static bool AltHeld => KeyHeld(0x12);   // VK_MENU
 
-    /// <summary>Runs <paramref name="onClick"/> when the game fires the button's click (what its own buttons do). UI thread.</summary>
-    public static void OnClick(nint button, Action onClick)
-    {
-        if (button == 0) return;
-        SettingsMods.BindButton(button, &RunClick, (nint)GCHandle.Alloc(onClick)); // never freed: the game keeps its buttons
-    }
+    /// <summary>Whether the key (a virtual-key code, e.g. 'S') is down right now, wherever the focus is.</summary>
+    public static bool KeyHeld(int key) => (GetAsyncKeyState(key) & 0x8000) != 0;
 
-    [UnmanagedCallersOnly]
-    private static void RunClick(nint handle)
-    {
-        try { ((Action)((GCHandle)handle).Target!)(); }
-        catch { /* never throw into the game */ }
-    }
+    /// <summary>
+    /// The game window has the focus: key state is global, so a hotkey must check this or it fires while the player types
+    /// in another program (and AltGr is Ctrl+Alt on many layouts).
+    /// </summary>
+    public static bool GameFocused => GetForegroundWindow() is var window && window != 0
+        && GetWindowThreadProcessId(window, out var process) != 0 && process == (uint)Environment.ProcessId;
 
     [LibraryImport("user32.dll")]
     private static partial short GetAsyncKeyState(int key);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint GetForegroundWindow();
+
+    [LibraryImport("user32.dll")]
+    private static partial uint GetWindowThreadProcessId(nint window, out uint process);
 
     private static nint NewString(ReadOnlySpan<byte> value)
     {

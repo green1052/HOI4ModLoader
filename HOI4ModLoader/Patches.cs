@@ -79,7 +79,6 @@ public static unsafe partial class Patches
             Expression.Catch(ex, Expression.Block(
                 Expression.Invoke(Expression.Constant(onError), ex),
                 Expression.Invoke(original.Body, argValues)))), args).Compile();
-        System.Runtime.CompilerServices.RuntimeHelpers.PrepareDelegate(guarded); // the first call lands on a game thread: compile it here — a just-in-time compile there is a clrjit fatal, the crash dumps' fingerprint
 
         hook = Hooks.CreateHook(guarded, at);
         Restorable(at, () => hook.Activate(), hook.Disable, hook);
@@ -104,34 +103,6 @@ public static unsafe partial class Patches
 
     /// <summary>Callable delegate for a game function.</summary>
     public static T Function<T>(nint at) where T : Delegate => Hooks.CreateWrapper<T>(at, out _);
-
-    /// <summary>Compiles an UnmanagedCallersOnly thunk now, before any game thread can call it first (see
-    /// <see cref="Hook"/>: a first call there is a just-in-time compile, which is what the crash dumps caught).</summary>
-    public static void Warmup(System.Reflection.MethodInfo thunk) => System.Runtime.CompilerServices.RuntimeHelpers.PrepareMethod(thunk.MethodHandle);
-
-    private static Func<nint, bool>? _keepFromBalancing;
-
-    /// <summary>
-    /// Tests for units AI army balancing must not move. FrontLine owns the only ApplyArmiesBalancing hook and applies
-    /// every subscriber — a second hook on that function stacks detours, which crashes Reloaded. Undone with the plugin.
-    /// </summary>
-    public static event Func<nint, bool>? KeepFromBalancing
-    {
-        add { _keepFromBalancing += value; Record(() => _keepFromBalancing -= value); }
-        remove { _keepFromBalancing -= value; }
-    }
-
-    /// <summary>Whether any <see cref="KeepFromBalancing"/> test is registered.</summary>
-    public static bool BalancingActive => _keepFromBalancing != null;
-
-    /// <summary>True when any <see cref="KeepFromBalancing"/> subscriber wants the unit left where it is.</summary>
-    public static bool BalancingKeeps(nint unit)
-    {
-        if (_keepFromBalancing == null) return false;
-        foreach (Func<nint, bool> keep in _keepFromBalancing.GetInvocationList())
-            if (keep(unit)) return true;
-        return false;
-    }
 
     private static void Claim(nint at, int length)
     {

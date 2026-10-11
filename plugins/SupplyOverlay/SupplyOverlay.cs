@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using HOI4ModLoader;
+using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
 namespace SupplyOverlay;
@@ -9,9 +10,9 @@ public static class Signatures
 {
     /// <summary>CMapArrowManager::CreateArrow(manager, style name std::string*, CColor* colour, CColor* colour, {CColor,
     /// std::string x3}*, uint layer): a CMapArrowObject, or 0 when the manager holds no such style. Hooked to catch the
-    /// manager: the game hands it over with every arrow it draws.</summary>
+    /// manager: the game hands it over with every arrow it draws. From the entry: a hook further in runs mid-prologue.</summary>
     [Signature] public const string CreateArrow =
-        "48 81 EC 90 00 00 00 0F 29 70 B8 4C 8B F2 48 63 81 AC 00 00 00 85 C0 7E 5D"; // reads the manager's style count (+0xAC)
+        "48 8B C4 48 89 58 10 4C 89 48 20 4C 89 40 18 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 00 00 00 0F 29 70 B8 4C 8B F2 48 63 81 AC 00 00 00";
 
     /// <summary>CMapArrowObject::AppendPoint(arrow, {i64 x, y}* point, char glyph, char head, int unused): the point is
     /// the province position scaled by 100000.</summary>
@@ -37,7 +38,7 @@ public static class Signatures
 /// routes, over land and sea. Read-only, so other players need nothing.
 /// </summary>
 [Plugin("com.green1052.supplyoverlay", "Supply Overlay", "1.0.0", GameVersion = "1.19.3")]
-public unsafe partial class SupplyOverlay : Plugin
+public unsafe class SupplyOverlay : Plugin
 {
     // Layouts for HOI4 1.19.3 (AutoSupply's supply system, the map arrow manager's CreateArrow calling convention).
     private const int SupplyOfGameState = 0x3D8, CountriesOfSupply = 0x108, NetworkOfCountry = 0x80;
@@ -51,20 +52,21 @@ public unsafe partial class SupplyOverlay : Plugin
     private const int StatesOfRoute = 72, RegionsOfRoute = 96; // route: the states (land) / regions (sea) it passes
     private const int ProvincesOfState = 24, ProvincesOfRegion = 0x18;
     private const int ColourSize = 32, LabelsSize = 128; // CreateArrow's colour and {colour, 3 label strings} blocks
-    private const int NameSlot = 0x10, ColourASlot = 0x30, ColourBSlot = 0x50, LabelsSlot = 0x70, SlotSize = 0xF0;
+    private const string Style = "supply_to_consumers";
 
     [Function(CallingConventions.Microsoft)]
     private delegate nint CreateFn(nint manager, nint name, nint colourA, nint colourB, nint labels, uint layer);
 
     private delegate* unmanaged<nint, nint, byte, byte, int, char> _append;
     private delegate* unmanaged<nint, byte, void> _clear, _rebuild, _visible;
-    private CreateFn? _create;
-    private nint _slot; // the capture stub fills it with every game CreateArrow call
+    private IHook<CreateFn>? _create;
+    private readonly Dictionary<string, nint> _names = []; // style -> its std::string, kept: CreateArrow only reads it
     private readonly byte[] _colourA = new byte[ColourSize], _colourB = new byte[ColourSize], _labels = new byte[LabelsSize];
     private readonly byte[] _tradeColourA = new byte[ColourSize], _tradeColourB = new byte[ColourSize];
     private nint _manager, _arrow, _tradeArrow;
     private uint _layer;
-    private string _style = "supply_to_consumers", _capturedName = "";
+    private string _capturedName = "";
+    private PerGame _game = null!;
     private long _drawn;
     private bool _on, _down, _reported, _tradeOn, _tradeDown;
 
@@ -76,65 +78,32 @@ public unsafe partial class SupplyOverlay : Plugin
         _clear = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.ClearPoints);
         _rebuild = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.RebuildGlyphs);
         _visible = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.SetVisible);
-        var at = Sig.Find(Signatures.CreateArrow);
-        _create = Patches.Function<CreateFn>(at);
-        InstallCaptureStub(at);
+        _create = Patches.Hook<CreateFn>(Sig.Find(Signatures.CreateArrow), (manager, name, colourA, colourB, labels, layer) =>
+        {
+            if (_manager == 0 && EmptyStrings(labels)) Capture(manager, name, colourA, colourB, labels, layer);
+            return _create!.OriginalFunction(manager, name, colourA, colourB, labels, layer);
+        });
+        _game = new PerGame(() => // a new map: its manager and arrows are new objects
+        {
+            _manager = _arrow = _tradeArrow = 0;
+            _capturedName = "";
+        });
         MainThread.Every(TimeSpan.FromMilliseconds(30), () => Poll(toggle, trade));
     }
 
-    /// <summary>A native stub at CreateArrow's entry copies the call's arguments into <see cref="_slot"/>. A managed hook
-    /// here crashed the game instead: the trampoline entered the CLR's first-call stub with a misaligned stack (dump
-    /// confirmed), so the capture must not cross into managed code.</summary>
-    private void InstallCaptureStub(nint at)
+    /// <summary>The game calls this with every arrow it draws: the first plain call hands us the manager and the colours.</summary>
+    private void Capture(nint manager, nint name, nint colourA, nint colourB, nint labels, uint layer)
     {
-        _slot = Allocator.AllocZeroed(SlotSize);
-        var asm = new List<string>
-        {
-            "use64",
-            $"mov r11, 0x{_slot:X}",
-            "mov [r11], rcx",       // manager
-            "mov r10d, [rsp+0x30]", // layer: the 6th argument
-            "mov [r11+8], r10d",
-            "push rsi",             // borrow a callee-saved register to copy through pointers
-        };
-        foreach (var (reg, slot, qwords) in new[] { ("rdx", NameSlot, 4), ("r8", ColourASlot, 4), ("r9", ColourBSlot, 4) })
-        {
-            asm.Add($"mov rsi, {reg}");
-            CopyAsm(asm, slot, qwords);
-        }
-        asm.Add("mov rsi, [rsp+0x30]"); // labels: the 5th argument, +8 past the pushed rsi
-        CopyAsm(asm, LabelsSlot, LabelsSize / 8);
-        asm.AddRange(new[] { "pop rsi", "sub rsp, 0x90", "movaps [rax-0x48], xmm6", "mov r14, rdx" }); // the replaced prologue
-        Patches.Asm(at, 14, asm.ToArray());
-    }
-
-    /// <summary>mov r10,[rsi+off] to [r11+slot+off] instruction pairs: FASM lines for the stub's copies.</summary>
-    private static void CopyAsm(List<string> asm, int slot, int qwords)
-    {
-        for (var i = 0; i < qwords; i++)
-        {
-            asm.Add(i == 0 ? "mov r10, [rsi]" : $"mov r10, [rsi+0x{i * 8:X}]");
-            asm.Add($"mov [r11+0x{slot + i * 8:X}], r10");
-        }
-    }
-
-    /// <summary>The stub stored the last CreateArrow call's arguments: take them when its labels are empty, like the old
-    /// hook demanded. Only an inline style name (length 1..15) is safe to read — a heap one dangles after the call.
-    /// ponytail: the stub rewrites the slot on another thread mid-copy, so a torn read only mixes two valid calls' colours.</summary>
-    private void TryCapture()
-    {
-        if (_slot == 0 || *(nint*)_slot == 0 || !EmptyStrings(_slot + LabelsSlot)) return;
-        if (*(long*)(_slot + NameSlot + 0x10) is < 1 or > 15) return;
-        _manager = *(nint*)_slot;
-        _layer = *(uint*)(_slot + 8);
-        _capturedName = Native.Utf8(Native.MsvcString(_slot + NameSlot));
-        Marshal.Copy(_slot + ColourASlot, _colourA, 0, ColourSize);
-        Marshal.Copy(_slot + ColourBSlot, _colourB, 0, ColourSize);
-        Marshal.Copy(_slot + ColourASlot, _tradeColourA, 0, ColourSize); // the same value objects, retinted: trade arrows get gold
-        Marshal.Copy(_slot + ColourBSlot, _tradeColourB, 0, ColourSize);
+        _layer = layer;
+        _capturedName = Native.Utf8(Native.MsvcString(name));
+        Marshal.Copy(colourA, _colourA, 0, ColourSize);
+        Marshal.Copy(colourB, _colourB, 0, ColourSize);
+        Marshal.Copy(colourA, _tradeColourA, 0, ColourSize); // the same value objects, retinted: trade arrows get gold
+        Marshal.Copy(colourB, _tradeColourB, 0, ColourSize);
         Tint(_tradeColourA);
         Tint(_tradeColourB);
-        Marshal.Copy(_slot + LabelsSlot, _labels, 0, LabelsSize);
+        Marshal.Copy(labels, _labels, 0, LabelsSize);
+        _manager = manager; // last: Poll takes a non-zero manager as "everything caught"
         Log.Info($"supply overlay: caught the map's arrow manager (style seen: \"{_capturedName}\")");
     }
 
@@ -152,12 +121,13 @@ public unsafe partial class SupplyOverlay : Plugin
 
     private void Poll(bool toggle, bool trade)
     {
-        var down = (GetAsyncKeyState('S') & 0x8000) != 0;
-        var hit = down && !_down && Gui.CtrlHeld && Gui.AltHeld;
+        _game.Check();
+        var hot = Gui.CtrlHeld && Gui.AltHeld && Gui.GameFocused;
+        var down = Gui.KeyHeld('S');
+        if (hot && down && !_down && toggle) _on = !_on;
         _down = down;
-        if (hit && toggle) _on = !_on;
-        var tradeDown = (GetAsyncKeyState('C') & 0x8000) != 0;
-        if (tradeDown && !_tradeDown && Gui.CtrlHeld && Gui.AltHeld && trade) _tradeOn = !_tradeOn;
+        var tradeDown = Gui.KeyHeld('C');
+        if (hot && tradeDown && !_tradeDown && trade) _tradeOn = !_tradeOn;
         _tradeDown = tradeDown;
         if (!_on && !_tradeOn)
         {
@@ -166,7 +136,7 @@ public unsafe partial class SupplyOverlay : Plugin
             return;
         }
         if (Game.ControlledTag == 0) { _arrow = _tradeArrow = 0; return; } // the menu: the map is rebuilt with it
-        if (_manager == 0) { TryCapture(); if (_manager == 0) { Warn(); return; } }
+        if (_manager == 0) { Warn(); return; }
         var redraw = Environment.TickCount64 - _drawn >= 5000;
         if (redraw) _drawn = Environment.TickCount64;
         if (_on)
@@ -188,7 +158,7 @@ public unsafe partial class SupplyOverlay : Plugin
     /// through CreateArrow too, and reusing e.g. "defence_line" painted a huge dark band over the map.</summary>
     private nint MakeArrow(byte[] colourA, byte[] colourB)
     {
-        string[] tries = _capturedName.Contains("supply") ? [_style, _capturedName] : [_style];
+        string[] tries = _capturedName.Contains("supply") ? [Style, _capturedName] : [Style];
         foreach (var style in tries.Distinct())
         {
             var arrow = Create(style, colourA, colourB);
@@ -200,9 +170,13 @@ public unsafe partial class SupplyOverlay : Plugin
 
     private nint Create(string style, byte[] colourA, byte[] colourB)
     {
-        fixed (byte* name = System.Text.Encoding.ASCII.GetBytes(style + '\0'))
+        if (!_names.TryGetValue(style, out var name))
+        {
+            _names[style] = name = Allocator.AllocZeroed(32); // an empty std::string, then the name (heap buffer past 15 chars)
+            Native.SetMsvcString(name, style);
+        }
         fixed (byte* a = colourA, b = colourB, l = _labels)
-            return _create!(_manager, (nint)name, (nint)a, (nint)b, (nint)l, _layer);
+            return _create!.OriginalFunction(_manager, name, (nint)a, (nint)b, (nint)l, _layer);
     }
 
     /// <summary>An arrow from the hub feeding each starving division to the division's province.</summary>
@@ -221,7 +195,7 @@ public unsafe partial class SupplyOverlay : Plugin
         {
             if (*(int*)(unit + KindOfUnit) != 0 || ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) == 0) continue;
             var province = *(nint*)(unit + LocationOfUnit);
-            if (province != 0 && !starving.ContainsKey(province)) starving[province] = FeedingNode(supply, network, *(int*)(province + 0xA4), Game.TagIndex(tag));
+            if (province != 0 && !starving.ContainsKey(province)) starving[province] = FeedingNode(supply, network, Game.Id(province), Game.TagIndex(tag));
         }
 
         _clear(_arrow, 0);
@@ -301,7 +275,4 @@ public unsafe partial class SupplyOverlay : Plugin
         _reported = true;
         Log.Info("supply overlay: the map's arrow manager is not caught yet; select a unit or open a map mode with arrows, then toggle again");
     }
-
-    [LibraryImport("user32.dll")]
-    private static partial short GetAsyncKeyState(int key);
 }

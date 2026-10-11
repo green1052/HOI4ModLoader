@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using HOI4ModLoader;
 
 namespace PlanTools;
@@ -11,11 +10,6 @@ public static class Signatures
 
     /// <summary>The plan's play button: (group CRefObj*, int orderId 0 = the whole group, char execute, char alsoArmies).</summary>
     [VTable] public const string ExecutePlan = "COrderExecuteCommand";
-
-    /// <summary>CMoveCommand ctor (mem[0x88], CArmy* unit, int province, bool clearQueue, int moveType, bool setFinalDestination,
-    /// ...) — as FrontLine posts it; the game turns a move order from combat into a retreat.</summary>
-    [Signature] public const string MoveCommand =
-        "48 89 4C 24 ? 53 48 83 EC 60 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10 C7 43 14 00 00 FF FF 66 89 4B 18 48 89 4B 1C 48 8D 05 ? ? ? ? 48 89 03 48 8D 4B 28";
 }
 
 /// <summary>
@@ -25,7 +19,7 @@ public static class Signatures
 /// holds and other players need nothing.
 /// </summary>
 [Plugin("com.green1052.plantools", "Plan Tools", "1.0.0", GameVersion = "1.19.3")]
-public unsafe partial class PlanTools : Plugin
+public unsafe class PlanTools : Plugin
 {
     private const int ProvidersOfCountry = 0x168; // CCountry: CPdxArray<COrdersGroupProvider*>, one per theatre
     private const int GroupsOfProvider = 0xB0;    // provider: CPdxArray<COrdersGroup*>: its armies and army groups
@@ -33,16 +27,15 @@ public unsafe partial class PlanTools : Plugin
     private const int SelfRefOfGroup = 0x8;       // the group's CRef {id, idx}, what the command ctors copy into cmd+0x28
     private const int OrdersOfGroup = 0x98;       // first of the group's three COrder* arrays (+0x98/+0xB0/+0xC8, stride 0x18)
     private const int ExecutingOfOrder = 0x248;   // byte: the order is running
-    private const int CommandSize = 0x38, GroupOfCommand = 0x28;
+    private const int CommandSize = 0x38, GroupOfCommand = 0x28, ExecuteOfCommand = 0x34, AlsoArmiesOfCommand = 0x35; // COrderExecuteCommand ctor
     private const int UnitsOfCountry = 0x290, KindOfUnit = 8, CommanderTag = 0x1D8; // FrontLine's unit layouts
     private const int LocationOfUnit = 0x1F0, CombatsOfUnit = 0x1A8, Retreating = 0x24C;
-    private const int ControllerOfProvince = 0x188, IdOfProvince = 0xA4, MoveSize = 0x88;
+    private const int ControllerOfProvince = 0x188;
 
     private static readonly string[] Stances = ["careful", "balanced", "rush"];
     private static readonly int[] Keys = ['1', '2', '3', 'E', 'H', 'R']; // with Ctrl+Alt held
     private readonly bool[] _down = new bool[Keys.Length];
     private bool _stance = true, _execute = true, _halt = true, _retreat = true;
-    private delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
 
     public override void Load()
     {
@@ -52,18 +45,17 @@ public unsafe partial class PlanTools : Plugin
         _halt = Config.Bind("Keys", "Halt", true, "Ctrl+Alt+H halts every battle plan at once.");
         _retreat = Config.Bind("Keys", "Retreat", true,
             "Ctrl+Alt+R pulls every one of your divisions that is fighting back to a neighbouring province you control.");
-        _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(Signatures.MoveCommand);
         MainThread.Every(TimeSpan.FromMilliseconds(30), Poll);
     }
 
     /// <summary>Fires each action once per key press while Ctrl+Alt is held (a key held across a modifier change does not re-fire).</summary>
     private void Poll()
     {
-        var hot = Gui.CtrlHeld && Gui.AltHeld;
+        var hot = Gui.CtrlHeld && Gui.AltHeld && Gui.GameFocused;
         var hit = -1;
         for (var i = 0; i < Keys.Length; i++)
         {
-            var down = (GetAsyncKeyState(Keys[i]) & 0x8000) != 0;
+            var down = Gui.KeyHeld(Keys[i]);
             if (hot && down && !_down[i]) hit = i;
             _down[i] = down;
         }
@@ -93,9 +85,7 @@ public unsafe partial class PlanTools : Plugin
             {
                 var to = Game.Province(id);
                 if (to == 0 || *(int*)(to + ControllerOfProvince) != tag) continue; // ponytail: our own ground only; allied ground when asked for
-                var cmd = Allocator.AllocZeroed(MoveSize);
-                _move(cmd, unit, id, 1, 2, 0, 0, 0, 0, 0); // as the AI moves units
-                if (Commands.TryPost(cmd)) moved++;
+                if (Commands.Move(unit, id)) moved++;
                 break;
             }
         }
@@ -123,8 +113,8 @@ public unsafe partial class PlanTools : Plugin
             if (!Pending(group, activate)) continue;
             var cmd = Commands.New(Signatures.ExecutePlan, CommandSize, tag, 0); // orderId 0: the whole group
             *(nint*)(cmd + GroupOfCommand) = *(nint*)(group + SelfRefOfGroup);
-            *(byte*)(cmd + GroupOfCommand + 4) = (byte)(activate ? 1 : 0);
-            *(byte*)(cmd + GroupOfCommand + 5) = 1; // an army group's command also reaches its armies
+            *(byte*)(cmd + ExecuteOfCommand) = (byte)(activate ? 1 : 0);
+            *(byte*)(cmd + AlsoArmiesOfCommand) = 1; // an army group's command also reaches its armies
             if (Commands.TryPost(cmd)) changed++;
         }
         Log.Info($"{(activate ? "activated" : "halted")} {changed} battle plan(s)");
@@ -149,7 +139,4 @@ public unsafe partial class PlanTools : Plugin
             groups.AddRange(Native.PdxArray(provider + GroupsOfProvider).ToArray());
         return groups;
     }
-
-    [LibraryImport("user32.dll")]
-    private static partial short GetAsyncKeyState(int key);
 }

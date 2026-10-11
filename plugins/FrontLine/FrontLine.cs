@@ -7,12 +7,6 @@ namespace FrontLine;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
-    /// <summary>
-    /// CMoveCommand ctor (mem[0x88], CArmy* unit, int province, bool clearQueue, int moveType, bool setFinalDestination,
-    /// bool, bool, bool, bool): the game finds the path to the province itself.
-    /// </summary>
-    [Signature] public const string MoveCommand = "48 89 4C 24 ? 53 48 83 EC 60 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10 C7 43 14 00 00 FF FF 66 89 4B 18 48 89 4B 1C 48 8D 05 ? ? ? ? 48 89 03 48 8D 4B 28";
-
     /// <summary>COrderAssignCommand ctor (mem[0x50], CPdxArray&lt;CArmy*&gt;* units, COrdersGroup* group, int orderId, bool): onto one of the group's (or its parent's) orders.</summary>
     [Signature] public const string AssignCommand = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 4C 24 ? 56 57 41 54 41 56 41 57 48 83 EC 30 41 8B D9 49 8B E8 4C 8B FA 4C 8B F1 0F B6 BC 24 80 00 00 00 C6 41 08 00";
 
@@ -67,7 +61,6 @@ public unsafe class FrontLine : Plugin
     private const long PendingMs = 30_000;   // a unit we gave orders to is left alone meanwhile (multiplayer: a round trip)
     private const long PlugCooldownMs = 20_000; // one helper per battle at a time: it needs time to get there
 
-    private delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
     private delegate* unmanaged<nint, nint, nint, int, byte, nint> _assign;
     private delegate* unmanaged<nint, nint, nint, byte, byte, nint> _unassign;
     private delegate* unmanaged<nint, int*, byte> _atWar;
@@ -98,7 +91,6 @@ public unsafe class FrontLine : Plugin
         _escape = Config.Bind("Escape", "Escape", true,
             "Pull a front division back out of a salient whose way back narrows to a single province next to the enemy, before the pocket closes.");
 
-        _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(Signatures.MoveCommand);
         _assign = (delegate* unmanaged<nint, nint, nint, int, byte, nint>)Sig.Find(Signatures.AssignCommand);
         _unassign = (delegate* unmanaged<nint, nint, nint, byte, byte, nint>)Sig.Find(Signatures.UnassignCommand);
         _atWar = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.IsAtWarWith);
@@ -145,8 +137,7 @@ public unsafe class FrontLine : Plugin
         });
     }
 
-    // ---- AI countries: their theatre distribution and army balancing must not regroup the divisions we took off a front;
-    // this one hook also applies other plugins' Patches.KeepFromBalancing tests, so nobody hooks it a second time ----
+    // ---- AI countries: their theatre distribution and army balancing must not regroup the divisions we took off a front ----
 
     [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
     [Function(CallingConventions.Microsoft)] public delegate void BalanceFn(nint front, nint units, nint partitions, nint specs, nint log);
@@ -182,7 +173,7 @@ public unsafe class FrontLine : Plugin
         _balance = Patches.Hook<BalanceFn>(Sig.Find(Signatures.ApplyArmiesBalancing), (front, units, partitions, specs, log) =>
         {
             var managed = Volatile.Read(ref _managed);
-            if (managed.Count > 0 || Patches.BalancingActive)
+            if (managed.Count > 0)
                 try
                 {
                     var unit = (nint*)*(nint*)units;
@@ -192,10 +183,7 @@ public unsafe class FrontLine : Plugin
                         var indices = (int*)*(nint*)part;
                         int n = *(int*)(part + 0xC), kept = 0;
                         for (var k = 0; k < n; k++)
-                        {
-                            var u = unit[indices[k]];
-                            if (!managed.Contains(u) && !Patches.BalancingKeeps(u)) indices[kept++] = indices[k];
-                        }
+                            if (!managed.Contains(unit[indices[k]])) indices[kept++] = indices[k];
                         *(int*)(part + 0xC) = kept; // the game skips empty partitions
                     }
                 }
@@ -239,8 +227,11 @@ public unsafe class FrontLine : Plugin
             foreach (var (unit, rest) in _resting.Where(r => r.Value.Tag == tag).ToList())
             {
                 if (_pending.ContainsKey(unit) || orders.ContainsKey(unit + MemberOfUnit) || *(int*)(unit + Path + 0xC) != 0) continue;
+                if (*(nint*)(unit + GroupOfUnit) != rest.Group) { _resting.Remove(unit); continue; } // the AI disbanded or regrouped its army: the stored one may be freed
                 if (Org(unit) < _returnOrg || Str(unit) < _returnStrength) continue;
-                if (Assign(unit, rest.Group, rest.Order)) _pending[unit] = now + PendingMs;
+                if (!Assign(unit, rest.Group, rest.Order)) continue;
+                _pending[unit] = now + PendingMs;
+                _resting.Remove(unit); // back on its front: the AI may balance it again
             }
         if (_rotation && (!_ai || _aiFront)) foreach (var group in groups) RotateArmy(country, tag, group, orders, now);
         if (_plugging && (!_ai || _aiFront)) Plug(country, tag, units, orders, now);
@@ -586,10 +577,5 @@ public unsafe class FrontLine : Plugin
         Commands.TryPost(cmd, _ai);
     }
 
-    private void Move(nint unit, int province)
-    {
-        var cmd = Allocator.AllocZeroed(0x88);
-        _move(cmd, unit, province, 1, 2, 0, 0, 0, 0, 0); // as the AI moves units
-        Commands.TryPost(cmd, _ai);
-    }
+    private void Move(nint unit, int province) => Commands.Move(unit, province, _ai);
 }

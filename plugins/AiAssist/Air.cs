@@ -16,6 +16,7 @@ public unsafe partial class AiAssist
     private const int WindowHours = 168, MinLosses = 20;
     private const long MinShare = 35_000, PullOutShare = 15_000; // our share of the region's air superiority
     private const int LossesPerKillPercent = 150;
+    private const int ThreatHours = 1; // a base's verdict holds for one AI pass
 
     [Function(CallingConventions.Microsoft)]
     public delegate void PrioritiesFn(nint aiObj, nint country, nint scratch, nint buffer, nint entries, nint bases, nint totals, nint buffer2);
@@ -25,7 +26,7 @@ public unsafe partial class AiAssist
     private int _pulled;
     private static int _evacuated;
     private static bool _airRetreat, _airbaseEvac;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Hour, bool Threat)> BaseThreat = new(); // base province -> enemy close, for an hour
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int Tag, int Province), (int Hour, bool Threat)> BaseThreat = new(); // enemies of the tag close to the base
 
     private void LoadAirRetreat()
     {
@@ -37,8 +38,7 @@ public unsafe partial class AiAssist
             _priorities!.OriginalFunction(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
             Safely(() =>
             {
-                if (!SheepMod.Active) return;
-                AirRetreat(country, entries);
+                if (_airRetreat) AirRetreat(country, entries);
                 if (_airbaseEvac) EvacuateAirbases(country, bases);
             });
         });
@@ -52,7 +52,7 @@ public unsafe partial class AiAssist
     {
         var tag = *(int*)(country + 8);
         if (tag == 0 || tag == Game.ControlledTag) return;
-        var hour = *(int*)(Game.State + HourOfGameState);
+        var hour = Hour;
         var data = *(nint*)bases;
         for (int i = 0, n = *(int*)(bases + 0xC); i < n; i++)
         {
@@ -60,9 +60,9 @@ public unsafe partial class AiAssist
             if (*(int*)(entry + FreeOfBase) <= 0) continue; // full or already emptied
             var province = *(nint*)(*(nint*)entry + ProvinceOfBase);
             if (province == 0) continue;
-            var id = Id(province);
-            if (!BaseThreat.TryGetValue(id, out var cached) || hour - cached.Hour is < 0 or >= 60) // a game hour, one pass of most AIs
-                BaseThreat[id] = cached = (hour, Threatened(country, tag, province));
+            var key = (tag, Game.Id(province));
+            if (!BaseThreat.TryGetValue(key, out var cached) || hour - cached.Hour is < 0 or >= ThreatHours)
+                BaseThreat[key] = cached = (hour, Threatened(country, tag, province));
             if (!cached.Threat) continue;
             *(int*)(entry + FreeOfBase) = -1_000_000;
             Interlocked.Increment(ref _evacuated);
@@ -72,22 +72,18 @@ public unsafe partial class AiAssist
     /// <summary>Enemy divisions within two provinces: the base's ground is about to fall.</summary>
     private static bool Threatened(nint me, int tag, nint province)
     {
-        var seen = new HashSet<int> { Id(province) };
+        var seen = new HashSet<int> { Game.Id(province) };
         var ring = new List<nint> { province };
         for (var depth = 0; depth < 2; depth++)
         {
             var next = new List<nint>();
             foreach (var p in ring)
+            foreach (var id in Game.Neighbours(p))
             {
-                var info = *(nint*)(p + StaticOfProvince);
-                var records = *(nint*)(info + AdjacenciesOfStatic);
-                for (int i = 0, n = *(int*)(info + AdjacenciesOfStatic + 0xC); i < n; i++)
-                {
-                    var q = Game.Province(*(int*)(records + i * 0x30 + 8));
-                    if (q == 0 || *(int*)(q + ControllerOfProvince) == 0 || !seen.Add(Id(q))) continue; // sea, or walked already
-                    if (*(int*)(q + DivisionsInProvince) > 0 && Enemy(me, tag, q)) return true;
-                    next.Add(q);
-                }
+                var q = Game.Province(id);
+                if (q == 0 || *(int*)(q + ControllerOfProvince) == 0 || !seen.Add(id)) continue; // sea, or walked already
+                if (Divisions(q) > 0 && Enemy(me, tag, q)) return true;
+                next.Add(q);
             }
             ring = next;
         }
@@ -102,7 +98,7 @@ public unsafe partial class AiAssist
         if (holder == 0 || *(int*)(holder + _countOffset) == 0) return;
         var air = *(nint*)(*(nint*)(holder + _arrayOffset) + 8 * Game.TagIndex(tag));
         if (air == 0) return;
-        var since = *(int*)(Game.State + HourOfGameState) - WindowHours;
+        var since = Hour - WindowHours;
         var records = Native.PdxArray<byte>(air + SuperiorityRecords); // only its size and data are used
         var combat = Native.PdxArray(air + CombatData);
         var data = *(nint*)entries;
@@ -161,11 +157,11 @@ public unsafe partial class AiAssist
         _tactical = Patches.Hook<TacticalFn>(Sig.Find(Signatures.CollectTacticalTargets), (mission, targets, chanceBase, seed, includeDivisions, firstOnly) =>
         {
             var result = _tactical!.OriginalFunction(mission, targets, chanceBase, seed, includeDivisions, firstOnly);
-            Safely(() =>
-            {
-                if (SheepMod.Active && _casConcentration && (*(int*)(mission + MissionBitsOfAirMission) & CasMission) != 0)
-                    ConcentrateCas(mission, targets);
-            });
+            if (targets != 0) // 0: the game only counts the targets
+                Safely(() =>
+                {
+                    if ((*(int*)(mission + MissionBitsOfAirMission) & CasMission) != 0) ConcentrateCas(mission, targets);
+                });
             return result;
         });
     }
@@ -182,15 +178,13 @@ public unsafe partial class AiAssist
         if (country == 0) return;
         var tag = *(int*)(country + 8);
         if (tag == 0 || tag == Game.ControlledTag) return;
-        var hour = *(int*)(Game.State + HourOfGameState);
-        if (!Axes.TryGetValue(tag, out var axis) || hour - axis.Hour is < 0 or >= 2 * AxisRetryHours) return; // stale: no axis today
         var data = (byte*)*(nint*)targets;
         int n = *(int*)(targets + 0xC);
         if (data == null || n < 2) return;
         var onAxis = new bool[n];
         var count = 0;
         for (var i = 0; i < n; i++)
-            if (axis.Core.Contains(*(int*)(data + (nint)i * TargetSize + ProvinceOfTarget))) { onAxis[i] = true; count++; }
+            if (OnAnyAxis(tag, *(int*)(data + (nint)i * TargetSize + ProvinceOfTarget))) { onAxis[i] = true; count++; }
         if (count == 0 || count == n) return;
         var copy = new byte[(nint)n * TargetSize];
         fixed (byte* dest = copy)

@@ -25,7 +25,6 @@ public unsafe partial class AiAssist
             nint[]? saved = null;
             Safely(() =>
             {
-                if (!SheepMod.Active) return;
                 var data = (nint*)*(nint*)fronts;
                 var order = Native.PdxArray(fronts).ToArray();
                 saved = order;
@@ -43,10 +42,10 @@ public unsafe partial class AiAssist
         _scoreLeader = Patches.Hook<ScoreLeaderFn>(Sig.Find(Signatures.ScoreLeader), (leader, group, operation, front, defensive) =>
         {
             var score = _scoreLeader!.OriginalFunction(leader, group, operation, front, defensive);
-            if (score <= 0 || front == 0 || !SheepMod.Active) return score;
+            if (score <= 0 || front == 0) return score;
             var fit = 1.0;
             Safely(() => fit = Fit(leader, front, defensive != 0));
-            return (int)Math.Min(int.MaxValue, score * Math.Max(fit, 0.5));
+            return (int)Math.Clamp(score * Math.Max(fit, 0.5), 1, int.MaxValue); // <= 0 would mean "not allowed
         });
     }
 
