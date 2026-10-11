@@ -14,8 +14,17 @@ public static class Signatures
     /// <summary>CCountry::IsAtWarWith(country, int* {tag, tag index}) -> bool.</summary>
     [Signature] public const string IsAtWarWith = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 08 48 8B FA 8B 12 48 8B F1 3B D0 74 ? 85 D2 74 ? 85 C0 74 ? 48 83 C1 08 E8 ? ? ? ? 39 47 04 74 ? 83 7E 08 00 7E ? 48 8B 86 ? ? ? ?";
 
+    /// <summary>CCountry: the same country or an ally (country, int* {tag, tag index}, 0, 0) -> bool.</summary>
+    [Signature] public const string SameOrAllied = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 08 48 8B F9 48 83 C1 08 48 8B DA 8B 12 41 0F B6 F1";
+
     /// <summary>FortLevel(CProvince*) -> int: land forts, as the AI's micro attacks weigh them.</summary>
     [Signature] public const string FortLevel = "4C 63 91 EC 01 00 00 33 C0 4D 85 D2 7E ? 4C 8B 99 E0 01 00 00 44 8B C8 0F 1F 84 00 00 00 00 00 4B 8B 0C CB 49 FF C1 48 8B 91 E0 01 00 00 44 0F BF 41 42 44 0F AF 82 08 03 00 00";
+
+    /// <summary>BuildingContainer::Find(container, CBuildingType*) -> CBuilding* or null (+0x40 level, +0x42 working level).</summary>
+    [Signature] public const string FindBuilding = "80 7A 20 00 74 ? 83 79 2C 00 74 ? 48 63 92 E0 02 00 00 48 8B 41 20";
+
+    /// <summary>A call of the building database getter, `call Get; mov rcx,[rax+3B8h]` (naval base type); the getter reads [rip+db].</summary>
+    [Signature] public const string BuildingDbCall = "E8 ? ? ? ? 48 8B 88 B8 03 00 00 E8 ? ? ? ? 8B D8";
 
     [VTable] public const string LandCombat = "CLandCombat";
 
@@ -30,16 +39,24 @@ public static class Signatures
 ///   (so no province is left empty) and few enough of that front are resting.
 /// - Plugging: a defence of ours that is being lost gets the nearest fresh division (resting, unassigned, or from a quiet
 ///   part of a front where another of ours stays) sent into the battle, where it joins the defence.
-/// - Escape: a front division in a salient whose way back narrows to one province next to the enemy pulls back before
-///   the pocket closes.
-/// - Attack: an empty enemy province next to the line is taken by a fresh division; enemy divisions already surrounded are
-///   attacked by enough fresh ones to outnumber them, forts counted (a province of ours always keeps one).
+/// - Escape: a front division in a salient whose way back narrows to a neck of one or two provinces next to the enemy
+///   pulls back through it, before the pocket closes.
+/// - Attack: fresh divisions take empty enemy provinces next to the line and attack enemy divisions already surrounded with
+///   enough of them to outnumber them (forts counted), best targets first: pocket closing, then victory points, supply hubs,
+///   airfields and ports, then front shortening; none their supply can't follow or that lengthen the front for nothing.
+/// - Fire brigade: a few armored or motorized divisions per front wait a province behind the line and counterattack where
+///   the enemy breaks in (ground lost in the last two days, a landing, enemy troops in our provinces), then go back to their post.
+/// - Depth defence: key line provinces (ports, victory points, river crossings, cities, mountains) get a second division a
+///   province behind them while the line holds there.
+/// - Shuffle: spare divisions of quiet fronts reinforce a losing front until a day after its crisis; fresh divisions near
+///   the crisis pin idle enemy stacks next to it with cheap attacks so they can't be moved in.
 /// - Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them (the plan window's own play button, for every group).
-/// Divisions taken off a front go back onto it once rested and free; one short of equipment or manpower goes back after
-/// MaxRestHours once its organisation is back. A reload forgets them: they stay where they are.
+/// - Ctrl+Alt+B / Ctrl+Alt+P: a blitz or a pincer with the selected armies (Operations.cs).
+/// Divisions taken off a front go back onto it once their job is done (rested, crisis over, post given up); one short of
+/// equipment or manpower goes back after MaxRestHours once its organisation is back. A reload forgets them: they stay where they are.
 /// </summary>
 [Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.3")]
-public unsafe class FrontLine : Plugin
+public unsafe partial class FrontLine : Plugin
 {
     // Layouts for HOI4 1.19.3. CArmy (a land division):
     private const int KindOfUnit = 0x08, MemberOfUnit = 0xB8, GroupOfUnit = 0xC0, Combats = 0x1A8;
@@ -58,8 +75,8 @@ public unsafe class FrontLine : Plugin
     private const int DivisionsOfSide = 0x20, ReservesOfSide = 0x100;
     private const int HourOfGameState = 0x468;
     // Provinces:
-    private const int IdOfProvince = 164, DivisionsInProvince = 0x11C, ControllerOfProvince = 392;
-    private const int MaxRestSearch = 6, MaxNeckSearch = 8, MaxPlugsPerTurn = 2, MaxEscapesPerTurn = 2, MaxAttacksPerTurn = 2;
+    private const int IdOfProvince = 164, UnitsInProvince = 0x110, DivisionsInProvince = 0x11C, ControllerOfProvince = 392;
+    private const int MaxRestSearch = 6, MaxPlugsPerTurn = 2, MaxEscapesPerTurn = 2, MaxAttacksPerTurn = 2;
     private const int RestDepth = 2;          // provinces behind the line a division rests (none of its neighbours enemy)
     private const int MaxSwapsPerArmy = 2;    // sent to rest at a time, so a front never changes all at once
     private const int MaxRestHours = 14 * 24; // short of equipment or manpower, strength may never come back: organisation is enough then
@@ -71,13 +88,34 @@ public unsafe class FrontLine : Plugin
     private delegate* unmanaged<nint, nint, nint, int, byte, nint> _assign;
     private delegate* unmanaged<nint, nint, nint, byte, byte, nint> _unassign;
     private delegate* unmanaged<nint, int*, byte> _atWar;
+    private delegate* unmanaged<nint, int*, byte, byte, byte> _allied;
     private delegate* unmanaged<nint, int> _fortLevel;
+    private delegate* unmanaged<nint, nint, nint> _findBuilding;
+    private nint _buildingDb; // address of the building database global
+    private int _navalBaseSlot;
 
-    private readonly Dictionary<nint, long> _pending = [];                                // unit -> until
-    private readonly Dictionary<nint, (nint Group, int Order, int Since)> _resting = []; // unit we took off a front -> where it goes back, since (game hour)
-    private readonly Dictionary<int, (nint[] Units, bool Attack)> _sent = [];          // province we sent divisions into (a battle to help, an attack) -> them
+    /// <summary>What a division we moved does for us. Rest: rests (rotation, escape, plugging) and goes back once rested. Operation: a blitz's or pincer's (Operations.cs), which gives it back itself.</summary>
+    private enum Job { Rest, Reserve, Counter, Depth, Shuffle, Pin, Operation }
+
+    /// <summary>
+    /// A division we moved. Group/Order: the order it goes back onto (0: none). Post: the province it holds (Reserve, Counter,
+    /// Depth, Shuffle) or attacks from (Pin). Target: what it attacks (Counter, Pin) or backs (Depth). Front: the front it serves.
+    /// </summary>
+    private readonly record struct Held(Job Job, nint Group, int Order, int Since, int Post, int Target, (nint, int) Front);
+
+    private readonly Dictionary<nint, long> _pending = [];                     // unit -> until
+    private readonly Dictionary<nint, Held> _held = [];                       // every division we took for a job: one bookkeeping, so no feature takes another's
+    private readonly Dictionary<int, (nint[] Units, bool Attack)> _sent = []; // province we sent divisions into (a battle to help, an attack) -> them
+    // Rebuilt every turn: who is on which order, how many of a front stand in a province, our divisions by province, memos.
+    private readonly Dictionary<nint, nint> _orders = [];                     // member -> order
+    private readonly Dictionary<(nint Front, nint Province), int> _holding = [];
+    private readonly Dictionary<nint, List<nint>> _at = [];                   // province -> our land divisions there
+    private readonly Dictionary<int, bool> _war = [], _allies = [];
+    private readonly Dictionary<nint, bool> _edge = [];                       // province -> next to enemy ground
+    private Dictionary<nint, double> _losingNow = [];                          // our defences being lost -> attacker's share (%)
+    private long _now;
     private PerGame _game = null!;
-    private bool _rotation, _plugging, _escape, _attack;
+    private bool _rotation, _plugging, _escape, _attack, _fireBrigade, _depth, _shuffle;
     private double _wornOrg, _wornStrength, _returnOrg, _returnStrength, _losing;
     private int _maxResting, _plugRadius;
 
@@ -96,23 +134,41 @@ public unsafe class FrontLine : Plugin
         _losing = Math.Clamp(Config.Bind("Plugging", "LosingPercent", 60, "A defence counts as being lost when the attacker holds this share (%) of the battle's organisation (the battle bar)."), 50, 100);
         _plugRadius = Math.Clamp(Config.Bind("Plugging", "PlugRadius", 4, "How far (provinces) a helper may come from."), 1, MaxRestSearch);
         _escape = Config.Bind("Escape", "Escape", true,
-            "Pull a front division back out of a salient whose way back narrows to a single province next to the enemy, before the pocket closes.");
+            "Pull front divisions back out of a salient whose way back narrows to one or two provinces next to the enemy, through that neck while it is still open.");
         _attack = Config.Bind("Attack", "Attack", true,
-            "Take empty enemy provinces next to the line with a fresh division, and attack enemy divisions already surrounded with enough fresh ones to outnumber them (forts counted); a province of ours always keeps one.");
+            "Take empty enemy provinces next to the line with a fresh division, and attack enemy divisions already surrounded with enough fresh ones to outnumber them (forts counted); a province of ours always keeps one. "
+            + "Best targets first: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front; none our supply can't follow (unless it closes a pocket) or that lengthen the front for nothing.");
+        _fireBrigade = Config.Bind("FireBrigade", "FireBrigade", true,
+            "Keep a few armored or motorized divisions per front a province behind the line, off its battle plan. Where the enemy breaks in (a province of ours lost in the last two days, a landing, enemy troops in our provinces), "
+            + "the nearest ones counterattack with enough to win (forts counted, each counting double), then go back to their post.");
+        _depth = Config.Bind("DepthDefense", "DepthDefense", true,
+            "Key line provinces (ports, victory points, river crossings, cities and mountains) get a second division a province behind them, from spare divisions of a front; it stays while the line holds there.");
+        _shuffle = Config.Bind("Shuffle", "Shuffle", true,
+            "When a front is losing (three provinces lost in two days or defences being lost, or facing twice its divisions), spare fresh divisions of quiet fronts reinforce its most pressed provinces and go back to their own front a day after the crisis. "
+            + "Meanwhile fresh divisions next to the crisis attack idle enemy stacks of one or two divisions (one attacker each, while its organisation holds) so they are locked in combat and can't be moved in.");
         if (Config.Bind("Keys", "BattlePlanKeys", true, "Ctrl+Alt+E activates every battle plan at once, Ctrl+Alt+H halts them."))
             MainThread.Every(TimeSpan.FromMilliseconds(30), PollKeys);
+        LoadOperations();
 
-        if (!_rotation && !_plugging && !_escape && !_attack) return;
+        if (!_rotation && !_plugging && !_escape && !_attack && !_fireBrigade && !_depth && !_shuffle) return;
         _assign = (delegate* unmanaged<nint, nint, nint, int, byte, nint>)Sig.Find(Signatures.AssignCommand);
         _unassign = (delegate* unmanaged<nint, nint, nint, byte, byte, nint>)Sig.Find(Signatures.UnassignCommand);
         _atWar = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.IsAtWarWith);
+        _allied = (delegate* unmanaged<nint, int*, byte, byte, byte>)Sig.Find(Signatures.SameOrAllied);
         _fortLevel = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FortLevel);
+        _findBuilding = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
+        var at = Sig.Find(Signatures.BuildingDbCall);
+        var getter = at + 5 + *(int*)(at + 1);
+        _buildingDb = getter + 18 + *(int*)(getter + 14); // the global; the database is created after the plugins load
+        _navalBaseSlot = *(int*)(at + 8);                  // `mov rcx,[rax+3B8h]`: the naval base type, as the game reads it
         _ = Sig.VTable(Signatures.LandCombat);
         _game = new PerGame(() =>
         {
             _pending.Clear();
-            _resting.Clear();
+            _held.Clear();
             _sent.Clear();
+            _lastSeen.Clear();
+            _crisis.Clear();
         });
         MainThread.Every(TimeSpan.FromSeconds(2), Manage);
     }
@@ -157,147 +213,191 @@ public unsafe class FrontLine : Plugin
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
-        if (country == 0) return;
-        var now = Environment.TickCount64;
+        if (country == 0 || Game.State == 0) return;
+        var now = _now = Environment.TickCount64;
         foreach (var (unit, until) in _pending.ToArray())
             if (now >= until) _pending.Remove(unit);
         var units = Native.PdxArray(country + UnitsOfCountry).ToArray();
-        foreach (var unit in _resting.Keys.Except(units).ToList()) _resting.Remove(unit); // gone
         var alive = units.ToHashSet();
+        foreach (var unit in _held.Keys.Where(u => !alive.Contains(u)).ToList()) _held.Remove(unit); // gone (died, merged): never dereferenced again
         foreach (var (id, sent) in _sent.ToArray()) // done once none of them is on the way (or, attacking, fighting) any more
             if (!sent.Units.Any(u => alive.Contains(u) && (_pending.ContainsKey(u) || Walking(u) || sent.Attack && *(int*)(u + Combats + 0xC) != 0)))
                 _sent.Remove(id);
+        _war.Clear();
+        _allies.Clear();
+        _edge.Clear();
 
         // Every order a division is on, of its army and of its army group (a field marshal's front holds his armies' divisions).
-        var orders = new Dictionary<nint, nint>(); // member -> order
+        _orders.Clear();
+        var fronts = new Dictionary<nint, Front>(); // front order -> its divisions and line
         var groups = units.Select(u => *(nint*)(u + GroupOfUnit)).Where(g => g != 0 && !new OrdersGroup(g).IsArmyGroup && *(nint*)(g + BorderWar) == 0).Distinct().ToList();
         foreach (var owner in groups.Concat(groups.Select(g => *(nint*)(g + OrdersGroup.ParentOffset)).Where(p => p != 0)).Distinct())
         foreach (var list in OrderLists)
         foreach (var order in Native.PdxArray(owner + list))
-        foreach (var member in Native.PdxArray(order + MembersOfOrder))
-            orders[member] = order;
+        {
+            if (order == 0) continue;
+            foreach (var member in Native.PdxArray(order + MembersOfOrder)) _orders[member] = order;
+            if (IsFront(order)) fronts.TryAdd(order, new Front(order, (owner, *(int*)(order + IdOfOrder))));
+        }
+        _holding.Clear();
+        _at.Clear();
+        foreach (var unit in units)
+        {
+            var location = *(nint*)(unit + LocationOfUnit);
+            if (*(int*)(unit + KindOfUnit) != 0 || location == 0) continue;
+            if (_orders.TryGetValue(unit + MemberOfUnit, out var order) && fronts.TryGetValue(order, out var front))
+            {
+                front.Units.Add(unit);
+                _holding[(order, location)] = _holding.GetValueOrDefault((order, location)) + 1;
+            }
+            if (*(int*)(unit + CommanderTag) != tag) continue;
+            if (!_at.TryGetValue(location, out var here)) _at[location] = here = [];
+            here.Add(unit);
+        }
+        _losingNow = _plugging || _shuffle ? LosingDefences(tag) : [];
+        if (_fireBrigade || _depth || _shuffle) Survey(country, tag, fronts.Values);
 
-        Return(tag, orders, now);
-        if (_rotation) foreach (var group in groups) RotateArmy(country, tag, group, orders, now);
-        if (_plugging) Plug(country, tag, units, orders, now);
-        if (_escape) Escape(country, tag, units, orders, now);
-        if (_attack) Attack(country, tag, units, now);
+        Return(tag);
+        if (_rotation) foreach (var group in groups) RotateArmy(country, tag, group);
+        if (_plugging) Plug(country, tag, units);
+        if (_fireBrigade) Counterattack(country, tag, fronts.Values);
+        if (_escape) Escape(country, tag, units);
+        if (_shuffle) Shuffle(country, tag, fronts.Values);
+        if (_depth) DepthDefense(country, tag, fronts.Values);
+        if (_fireBrigade) PostReserves(country, tag, fronts.Values);
+        if (_attack) Attack(country, tag);
     }
 
-    /// <summary>Divisions we took off a front go back onto it once rested; ones the player gave other orders are forgotten.</summary>
-    private void Return(int tag, Dictionary<nint, nint> orders, long now)
+    /// <summary>Our defences being lost, with the attacker's share of the battle (%), where no reserve already waits to step in.</summary>
+    private Dictionary<nint, double> LosingDefences(int tag)
     {
-        foreach (var (unit, rest) in _resting.ToArray())
+        var landCombat = Sig.VTable(Signatures.LandCombat);
+        var losing = new Dictionary<nint, double>();
+        foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState))
+        {
+            if (combat == 0 || *(nint*)combat != landCombat) continue;
+            var defender = *(nint*)(combat + DefenderOfCombat);
+            var province = *(nint*)(combat + ProvinceOfCombat);
+            if (defender == 0 || province == 0) continue;
+            var defending = Native.PdxArray(defender + DivisionsOfSide);
+            if (defending.Length == 0 || *(int*)(defending[0] + CommanderTag) != tag) continue;
+            if (*(int*)(defender + ReservesOfSide + 0xC) > 0) continue; // a reserve already waits to step in
+            long progress;
+            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress); // attacker's share
+            if (progress * 100.0 / Native.FixedPoint >= _losing) losing[province] = progress * 100.0 / Native.FixedPoint;
+        }
+        return losing;
+    }
+
+    /// <summary>
+    /// Divisions we hold go back onto their front once their job is done; resting ones once rested. Ones the player gave
+    /// other orders (or moved to another army) are forgotten.
+    /// </summary>
+    private void Return(int tag)
+    {
+        foreach (var (unit, held) in _held.ToArray())
         {
             if (_pending.ContainsKey(unit)) continue; // our command is still on its way
-            if (orders.ContainsKey(unit + MemberOfUnit) || *(nint*)(unit + GroupOfUnit) != rest.Group)
+            if (held.Job == Job.Operation) continue; // its operation's
+            if (held.Job != Job.Pin && (_orders.ContainsKey(unit + MemberOfUnit) || *(nint*)(unit + GroupOfUnit) != held.Group))
             {
-                _resting.Remove(unit); // back on an order, or into another army: the player's now
+                _held.Remove(unit); // back on an order, or into another army: the player's now
                 continue;
             }
-            if (!Free(unit, tag, now) || Walking(unit) || Org(unit) < _returnOrg) continue;
-            if (Str(unit) < _returnStrength && Hour - rest.Since < MaxRestHours) continue;
-            if (!Assign(unit, rest.Group, rest.Order)) continue;
-            _pending[unit] = now + PendingMs;
-            _resting.Remove(unit);
-            Log.Info($"a rested division ({Org(unit):0}% organisation, {Str(unit):0}% strength) is back on its front");
+            if (held.Job != Job.Rest || Walking(unit) || Org(unit) < _returnOrg) continue;
+            if (Str(unit) < _returnStrength && Hour - held.Since < MaxRestHours) continue;
+            if (Release(unit, tag)) Log.Info($"a rested division ({Org(unit):0}% organisation, {Str(unit):0}% strength) is back on its front");
         }
     }
 
-    private void RotateArmy(nint country, int tag, nint group, Dictionary<nint, nint> orders, long now)
+    private void RotateArmy(nint country, int tag, nint group)
     {
         var parent = *(nint*)(group + OrdersGroup.ParentOffset);
         nint[] owners = parent == 0 ? [group] : [group, parent];
-        if (!owners.SelectMany(o => Native.PdxArray(o + RootOrders).ToArray()).Any(IsFront)) return;
-        var members = Native.PdxArray(group + OrdersGroup.MembersOffset).ToArray();
+        if (!owners.SelectMany(o => Native.PdxArray(o + RootOrders).ToArray()).Any(o => o != 0 && IsFront(o))) return;
 
         // Worn and in contact: off the front to rest, where another of ours on that front holds the province.
-        var frontOf = members.Where(m => orders.TryGetValue(m, out var o) && IsFront(o)).ToDictionary(m => m, m => orders[m]);
-        var holding = Holding(frontOf);
         var swaps = 0;
-        foreach (var unit in frontOf.Keys.Select(m => m - MemberOfUnit)
-                     .Where(u => Free(u, tag, now) && (Org(u) < _wornOrg || Str(u) < _wornStrength) && InContact(country, tag, u)).OrderBy(Org))
+        foreach (var unit in Native.PdxArray(group + OrdersGroup.MembersOffset).ToArray()
+                     .Where(m => _orders.TryGetValue(m, out var o) && IsFront(o)).Select(m => m - MemberOfUnit)
+                     .Where(u => Free(u, tag, _now) && (Org(u) < _wornOrg || Str(u) < _wornStrength) && InContact(country, tag, u)).OrderBy(Org).ToList())
         {
             if (swaps == MaxSwapsPerArmy) break;
-            var front = frontOf[unit + MemberOfUnit];
-            var place = (front, *(nint*)(unit + LocationOfUnit));
-            if (holding[place] < 2) continue; // alone there: it holds on
+            var front = _orders[unit + MemberOfUnit];
+            if (_holding.GetValueOrDefault((front, *(nint*)(unit + LocationOfUnit))) < 2) continue; // alone there: it holds on
             var id = *(int*)(front + IdOfOrder);
-            var resting = _resting.Values.Count(r => r.Group == group && r.Order == id);
+            var resting = _held.Values.Count(h => h.Job == Job.Rest && h.Group == group && h.Order == id);
             if ((resting + 1) * 100 > (Native.PdxArray(front + MembersOfOrder).Length + resting) * _maxResting) continue;
             var rest = RestProvince(country, tag, unit);
             if (rest < 0) continue; // nowhere safe to rest: it stays
-            TakeOff(unit, front);
-            Commands.Move(unit, rest);
-            _pending[unit] = now + PendingMs;
-            holding[place]--;
+            Send(unit, rest, Job.Rest);
             swaps++;
             Log.Info($"rotation: a division at {Org(unit):0}% organisation, {Str(unit):0}% strength goes to rest");
         }
     }
 
     /// <summary>Our defences being lost get the nearest fresh division: resting, unassigned, or spare in a quiet part of a front.</summary>
-    private void Plug(nint country, int tag, nint[] units, Dictionary<nint, nint> orders, long now)
+    private void Plug(nint country, int tag, nint[] units)
     {
-        var landCombat = Sig.VTable(Signatures.LandCombat);
         var plugs = 0;
-        Dictionary<nint, List<nint>>? helpersAt = null;
-        foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState).ToArray())
+        Dictionary<nint, List<nint>>? helpers = null;
+        foreach (var (province, progress) in _losingNow)
         {
             if (plugs == MaxPlugsPerTurn) break;
-            if (*(nint*)combat != landCombat) continue;
-            var defender = *(nint*)(combat + DefenderOfCombat);
-            var defending = Native.PdxArray(defender + DivisionsOfSide);
-            if (defending.Length == 0 || *(int*)(defending[0] + CommanderTag) != tag) continue;
-            if (*(int*)(defender + ReservesOfSide + 0xC) > 0) continue; // a reserve already waits to step in
-            long progress;
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress); // attacker's share
-            if (progress * 100.0 / Native.FixedPoint < _losing) continue;
-            var province = *(nint*)(combat + ProvinceOfCombat);
             var id = *(int*)(province + IdOfProvince);
             if (_sent.ContainsKey(id)) continue; // one helper per battle on its way at a time
-
-            helpersAt ??= Helpers(country, tag, units, orders, now);
-            var helper = Nearest(tag, province, _plugRadius, helpersAt);
+            helpers ??= Pool(country, tag, units, true, u => Org(u) >= 80 && Str(u) >= 70);
+            var helper = Take(tag, province, _plugRadius, helpers);
             if (helper == 0) continue;
-            if (orders.TryGetValue(helper + MemberOfUnit, out var order)) TakeOff(helper, order);
-            Commands.Move(helper, id); // arriving, it joins the defence as a reserve
-            _pending[helper] = now + PendingMs;
+            Send(helper, id, Job.Rest); // arriving, it joins the defence as a reserve
             _sent[id] = ([helper], false);
-            helpersAt[*(nint*)(helper + LocationOfUnit)].Remove(helper);
             plugs++;
-            Log.Info($"plugging: a fresh division sent into a defence being lost ({progress * 100.0 / Native.FixedPoint:0}% for the attacker)");
+            Log.Info($"plugging: a fresh division sent into a defence being lost ({progress:0}% for the attacker)");
         }
     }
 
-    /// <summary>Fresh divisions that can leave where they are, by province: resting or unassigned, or spare on a quiet front.</summary>
-    private Dictionary<nint, List<nint>> Helpers(nint country, int tag, nint[] units, Dictionary<nint, nint> orders, long now)
+    /// <summary>
+    /// Divisions that can leave where they stand, by province: idle, free or resting with us, <paramref name="wanted"/>, and
+    /// spare on their front (another of that front stays in the province, no enemy troops next to it) or, with
+    /// <paramref name="unassigned"/>, on no order at all.
+    /// </summary>
+    private Dictionary<nint, List<nint>> Pool(nint country, int tag, IEnumerable<nint> units, bool unassigned, Func<nint, bool> wanted)
     {
-        var frontOf = units.Select(u => u + MemberOfUnit).Where(m => orders.TryGetValue(m, out var o) && IsFront(o)).ToDictionary(m => m, m => orders[m]);
-        var holding = Holding(frontOf);
-        var helpers = new Dictionary<nint, List<nint>>();
+        var left = new Dictionary<(nint Front, nint Province), int>(_holding);
+        var pool = new Dictionary<nint, List<nint>>();
         foreach (var unit in units)
         {
-            if (!Free(unit, tag, now) || Walking(unit) || Org(unit) < 80 || Str(unit) < 70) continue;
-            var member = unit + MemberOfUnit;
+            var resting = _held.TryGetValue(unit, out var held);
+            if (resting && held.Job != Job.Rest || !Ready(unit, tag, _now) || Walking(unit)) continue;
             var location = *(nint*)(unit + LocationOfUnit);
             if (location == 0) continue;
-            if (orders.TryGetValue(member, out var order))
+            if (_orders.TryGetValue(unit + MemberOfUnit, out var order))
             {
-                if (!IsFront(order) || holding[(order, location)] < 2 || InContact(country, tag, unit)) continue; // needed where it is
-                holding[(order, location)]--;
+                if (!IsFront(order) || left.GetValueOrDefault((order, location)) < 2 || InContact(country, tag, unit) || !wanted(unit)) continue; // needed where it is
+                left[(order, location)]--;
             }
-            if (!helpers.TryGetValue(location, out var here)) helpers[location] = here = [];
+            else if (!(unassigned || resting) || !wanted(unit)) continue;
+            if (!pool.TryGetValue(location, out var here)) pool[location] = here = [];
             here.Add(unit);
         }
-        return helpers;
+        return pool;
     }
 
-    /// <summary>The helper closest to <paramref name="target"/> (breadth first over our provinces), or 0.</summary>
-    private static nint Nearest(int tag, nint target, int radius, Dictionary<nint, List<nint>> helpersAt)
+    /// <summary>The pool's division closest to <paramref name="target"/> (breadth first over our provinces), taken out of the pool; 0 if none in reach.</summary>
+    private static nint Take(int tag, nint target, int radius, Dictionary<nint, List<nint>> pool)
     {
-        var seen = new HashSet<int> { *(int*)(target + IdOfProvince) };
-        var frontier = new List<nint> { target };
+        var at = Search(tag, target, radius, (p, _) => pool.TryGetValue(p, out var here) && here.Count > 0);
+        if (at == 0) return 0;
+        var unit = pool[at].MaxBy(Org);
+        pool[at].Remove(unit);
+        return unit;
+    }
+
+    /// <summary>Our provinces breadth first from <paramref name="from"/> (not itself), up to <paramref name="radius"/> steps: the first one <paramref name="found"/> (given its depth), or 0.</summary>
+    private static nint Search(int tag, nint from, int radius, Func<nint, int, bool> found)
+    {
+        var seen = new HashSet<int> { *(int*)(from + IdOfProvince) };
+        var frontier = new List<nint> { from };
         for (var depth = 1; depth <= radius && frontier.Count > 0; depth++)
         {
             var next = new List<nint>();
@@ -307,7 +407,7 @@ public unsafe class FrontLine : Plugin
                 if (!seen.Add(id)) continue;
                 var p = Game.Province(id);
                 if (p == 0 || *(int*)(p + ControllerOfProvince) != tag) continue;
-                if (helpersAt.TryGetValue(p, out var here) && here.Count > 0) return here.MaxBy(Org);
+                if (found(p, depth)) return p;
                 next.Add(p);
             }
             frontier = next;
@@ -315,141 +415,51 @@ public unsafe class FrontLine : Plugin
         return 0;
     }
 
-    /// <summary>
-    /// Empty enemy provinces next to the line get one fresh division; surrounded enemy divisions as many as outnumber them
-    /// with forts counted (as vanilla's local attacks weigh them), or none. A province of ours always keeps one. Nothing
-    /// more goes where ours are still on their way or fighting. Plain moves: front divisions go back to their front by themselves afterwards.
-    /// </summary>
-    private void Attack(nint country, int tag, nint[] units, long now)
+    /// <summary>Moves the unit for <paramref name="job"/> (off its order first, unless pinning), booked so no other feature takes it.</summary>
+    private void Send(nint unit, int province, Job job, int post = 0, int target = 0, (nint, int) front = default)
     {
-        var attacks = 0;
-        foreach (var here in units.Where(u => *(int*)(u + KindOfUnit) == 0 && *(int*)(u + CommanderTag) == tag && *(nint*)(u + LocationOfUnit) != 0)
-                     .GroupBy(u => *(nint*)(u + LocationOfUnit)))
+        var location = *(nint*)(unit + LocationOfUnit);
+        if (_orders.TryGetValue(unit + MemberOfUnit, out var order) && _holding.TryGetValue((order, location), out var n)) _holding[(order, location)] = n - 1; // one fewer holds it
+        var group = *(nint*)(unit + GroupOfUnit);
+        var id = 0;
+        if (_held.TryGetValue(unit, out var was)) (group, id) = (was.Group, was.Order); // already off its order: where it goes back to stays
+        else if (job != Job.Pin && order != 0)
         {
-            if (attacks == MaxAttacksPerTurn) break;
-            var spare = here.Count() - 1; // one stays
-            var fresh = here.Where(u => Free(u, tag, now) && !Walking(u) && Org(u) >= 70 && Str(u) >= 70).OrderByDescending(Org).ToList();
-            foreach (var id in Game.Neighbours(here.Key))
-            {
-                var free = Math.Min(spare, fresh.Count);
-                if (free == 0 || attacks == MaxAttacksPerTurn) break;
-                if (_sent.ContainsKey(id)) continue;
-                var target = Game.Province(id);
-                if (target == 0 || !Enemy(country, tag, target)) continue;
-                var defenders = *(int*)(target + DivisionsInProvince);
-                var need = defenders == 0 ? 1 : Surrounded(country, tag, target) ? defenders * (_fortLevel(target) / 2 + 1) : 0;
-                if (need == 0 || need > free) continue; // not a pocket, or too strong for what can leave here
-                var sent = fresh.GetRange(0, need);
-                fresh.RemoveRange(0, need);
-                spare -= need;
-                foreach (var unit in sent)
-                {
-                    Commands.Move(unit, id);
-                    _pending[unit] = now + PendingMs;
-                }
-                _sent[id] = ([.. sent], true);
-                attacks++;
-                Log.Info(defenders == 0 ? "opportunity: a fresh division takes an empty enemy province" : $"mop-up: {need} fresh division(s) attack {defenders} surrounded enemy division(s)");
-            }
+            Unassign(unit, group);
+            id = *(int*)(order + IdOfOrder);
         }
+        _held[unit] = new Held(job, group, id, Hour, post, target, front);
+        Commands.Move(unit, province);
+        _pending[unit] = _now + PendingMs;
     }
 
-    /// <summary>No land neighbour of the enemy province is held by a country at war with us: its divisions can't get out.</summary>
-    private bool Surrounded(nint country, int tag, nint province) =>
-        Game.Neighbours(province).All(n => Game.Province(n) is var p && (p == 0 || *(int*)(p + ControllerOfProvince) == 0 || !Enemy(country, tag, p)));
-
-    /// <summary>Front divisions in a salient whose way back narrows to one province next to the enemy pull back.</summary>
-    private void Escape(nint country, int tag, nint[] units, Dictionary<nint, nint> orders, long now)
+    /// <summary>Back onto the order it came from (when it had one); no longer ours. False: it can't take orders now.</summary>
+    private bool Release(nint unit, int tag)
     {
-        var escapes = 0;
-        var checkedPlaces = new Dictionary<nint, bool>(); // province -> narrow
-        var holding = Holding(units.Select(u => u + MemberOfUnit).Where(m => orders.TryGetValue(m, out var o) && IsFront(o)).ToDictionary(m => m, m => orders[m]));
-        foreach (var unit in units)
-        {
-            if (escapes == MaxEscapesPerTurn) break;
-            if (!orders.TryGetValue(unit + MemberOfUnit, out var order) || !IsFront(order) || !Free(unit, tag, now)) continue;
-            var location = *(nint*)(unit + LocationOfUnit);
-            if (location == 0) continue;
-            if (holding[(order, location)] < 2) continue; // alone there: pulling it out opens the line
-            if (!checkedPlaces.TryGetValue(location, out var narrow)) checkedPlaces[location] = narrow = Narrow(country, tag, location);
-            if (!narrow) continue;
-            var rest = RestProvince(country, tag, unit);
-            if (rest < 0) continue;
-            TakeOff(unit, order);
-            Commands.Move(unit, rest);
-            _pending[unit] = now + PendingMs;
-            holding[(order, location)]--;
-            escapes++;
-            Log.Info("escape: a division pulls back from a salient about to be cut off");
-        }
+        if (!Ready(unit, tag, _now)) return false;
+        var held = _held[unit];
+        _held.Remove(unit);
+        if (held.Order == 0 || held.Job == Job.Pin) return true;
+        if (Assign(unit, held.Group, held.Order)) _pending[unit] = _now + PendingMs; // its order gone: it stays in the army's reserve
+        return true;
     }
-
-    /// <summary>
-    /// Going back from <paramref name="from"/> over our provinces, one ring (provinces at the same distance) is a single
-    /// province next to the enemy before reaching provinces away from the enemy: the neck of a closing pocket.
-    /// </summary>
-    // ponytail: rings, not a max-flow of disjoint paths; a wide salient with a one-province gap elsewhere is missed.
-    private bool Narrow(nint country, int tag, nint from)
-    {
-        if (!NextToEnemy(country, tag, from)) return false;
-        var seen = new HashSet<int> { *(int*)(from + IdOfProvince) };
-        var ring = new List<nint> { from };
-        for (var depth = 1; depth <= MaxNeckSearch; depth++)
-        {
-            var next = new List<nint>();
-            foreach (var province in ring)
-            foreach (var id in Game.Neighbours(province))
-            {
-                if (!seen.Add(id)) continue;
-                var p = Game.Province(id);
-                if (p != 0 && *(int*)(p + ControllerOfProvince) == tag) next.Add(p);
-            }
-            if (next.Count == 0) return false;                                    // cut off already, or an island: nowhere to go
-            if (next.Any(p => !NextToEnemy(country, tag, p))) return false;       // safe ground within reach
-            if (next.Count == 1) return EnemyDivisionsNext(country, tag, next[0]); // the only way back, and enemy troops stand next to it
-                                                                                   // (a thin coastal strip borders enemy land everywhere: not a pocket)
-            ring = next;
-        }
-        return false;
-    }
-
-    private bool EnemyDivisionsNext(nint country, int tag, nint province) =>
-        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && *(int*)(p + DivisionsInProvince) > 0 && Enemy(country, tag, p));
-
-    private bool NextToEnemy(nint country, int tag, nint province) =>
-        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Enemy(country, tag, p));
 
     private static bool IsFront(nint order) => *(int*)(order + TypeOfOrder) == FrontOrder;
 
     private static bool Walking(nint unit) => *(int*)(unit + Path + 0xC) != 0;
 
+    private static bool Fighting(nint unit) => *(int*)(unit + Combats + 0xC) != 0;
+
     private static int Hour => *(int*)(Game.State + HourOfGameState);
 
-    /// <summary>Divisions of each front per province.</summary>
-    private static Dictionary<(nint Front, nint Province), int> Holding(Dictionary<nint, nint> frontOf)
-    {
-        var holding = new Dictionary<(nint Front, nint Province), int>();
-        foreach (var (member, front) in frontOf)
-        {
-            var place = (front, *(nint*)(member - MemberOfUnit + LocationOfUnit));
-            holding[place] = holding.GetValueOrDefault(place) + 1;
-        }
-        return holding;
-    }
-
-    /// <summary>Off its front, remembering where it goes back to.</summary>
-    private void TakeOff(nint unit, nint front)
-    {
-        var group = *(nint*)(unit + GroupOfUnit);
-        Unassign(unit, group);
-        _resting[unit] = (group, *(int*)(front + IdOfOrder), Hour);
-    }
-
-    /// <summary>A land division of <paramref name="tag"/> (not lent) that can take orders now: not fighting, retreating, embarked or just ordered.</summary>
-    private bool Free(nint unit, int tag, long now) =>
+    /// <summary>A land division of <paramref name="tag"/> (not lent) that can take orders now: not fighting (a defender can only retreat), retreating, embarked or just ordered.</summary>
+    private bool Ready(nint unit, int tag, long now) =>
         *(int*)(unit + KindOfUnit) == 0 && *(int*)(unit + CommanderTag) == tag && *(int*)(unit + OwnerTag) == tag
-        && *(int*)(unit + Combats + 0xC) == 0 && *(byte*)(unit + Retreating) == 0 && *(nint*)(unit + Busy) == 0
-        && !_pending.ContainsKey(unit);
+        && !Fighting(unit) && *(byte*)(unit + Retreating) == 0 && *(nint*)(unit + Busy) == 0
+        && !(_pending.TryGetValue(unit, out var until) && now < until);
+
+    /// <summary>Ready, and doing no job for us.</summary>
+    private bool Free(nint unit, int tag, long now) => Ready(unit, tag, now) && !_held.ContainsKey(unit);
 
     /// <summary>Organisation and strength in % of their maximum, from the division's own ratio getters (what has_unit_organization reads).</summary>
     private static double Org(nint unit) => Ratio(unit, OrgRatioSlot);
@@ -462,48 +472,62 @@ public unsafe class FrontLine : Plugin
         return ratio * 100.0 / Native.FixedPoint;
     }
 
-    /// <summary>
-    /// A province of ours at least RestDepth steps behind the unit, with no enemy-held neighbour, reached through our own
-    /// provinces; -1 if none nearby.
-    /// </summary>
+    /// <summary>A province of ours at least RestDepth steps behind the unit, with no enemy-held neighbour, reached through our own provinces; -1 if none nearby.</summary>
     // ponytail: looks at who holds provinces, not at enemy units inside ours (paratroopers, a breakthrough in progress).
     private int RestProvince(nint country, int tag, nint unit)
     {
         var location = *(nint*)(unit + LocationOfUnit);
-        if (location == 0) return -1;
-        var seen = new HashSet<int> { *(int*)(location + IdOfProvince) };
-        var frontier = new List<nint> { location };
-        for (var depth = 1; depth <= MaxRestSearch && frontier.Count > 0; depth++)
-        {
-            var next = new List<nint>();
-            foreach (var province in frontier)
-            foreach (var id in Game.Neighbours(province))
-            {
-                if (!seen.Add(id)) continue;
-                var p = Game.Province(id);
-                if (p == 0 || *(int*)(p + ControllerOfProvince) != tag) continue;
-                if (depth >= RestDepth && !NextToEnemy(country, tag, p)) return id;
-                next.Add(p);
-            }
-            frontier = next;
-        }
-        return -1;
+        var rest = location == 0 ? 0 : Search(tag, location, MaxRestSearch, (p, depth) => depth >= RestDepth && !NextToEnemy(country, tag, p));
+        return rest == 0 ? -1 : *(int*)(rest + IdOfProvince);
     }
 
     /// <summary>Enemy divisions stand next to the unit: only then is a worn division at risk on the line (it recovers as fast there otherwise).</summary>
     private bool InContact(nint country, int tag, nint unit)
     {
         var location = *(nint*)(unit + LocationOfUnit);
-        return location != 0 && Game.Neighbours(location).Any(n => Game.Province(n) is var p && p != 0 && *(int*)(p + DivisionsInProvince) > 0 && Enemy(country, tag, p));
+        return location != 0 && EnemyDivisionsNext(country, tag, location);
+    }
+
+    private bool EnemyDivisionsNext(nint country, int tag, nint province) =>
+        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && *(int*)(p + DivisionsInProvince) > 0 && Enemy(country, tag, p));
+
+    private bool NextToEnemy(nint country, int tag, nint province)
+    {
+        if (!_edge.TryGetValue(province, out var edge))
+            _edge[province] = edge = Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Enemy(country, tag, p));
+        return edge;
     }
 
     /// <summary>The province is held by a country at war with us.</summary>
     private bool Enemy(nint country, int tag, nint province)
     {
         var controller = *(int*)(province + ControllerOfProvince);
-        if (controller <= 0 || controller == tag) return false;
-        var other = stackalloc int[] { controller, Game.TagIndex(controller) };
-        return _atWar(country, other) != 0;
+        return controller != tag && AtWar(country, controller); // 0: sea
+    }
+
+    /// <summary>The province is ours or an ally's.</summary>
+    private bool Friendly(nint country, int tag, nint province)
+    {
+        var controller = *(int*)(province + ControllerOfProvince);
+        if (controller == tag) return true;
+        if (controller <= 0) return false;
+        if (!_allies.TryGetValue(controller, out var allied))
+        {
+            var other = stackalloc int[] { controller, Game.TagIndex(controller) };
+            _allies[controller] = allied = _allied(country, other, 0, 0) != 0;
+        }
+        return allied;
+    }
+
+    private bool AtWar(nint country, int other)
+    {
+        if (other <= 0) return false;
+        if (!_war.TryGetValue(other, out var war))
+        {
+            var pair = stackalloc int[] { other, Game.TagIndex(other) };
+            _war[other] = war = _atWar(country, pair) != 0;
+        }
+        return war;
     }
 
     // Commands from the game's own constructors. ponytail: a refused one is freed without its inner arrays (a few bytes).
