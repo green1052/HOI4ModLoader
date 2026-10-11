@@ -84,6 +84,31 @@ public static class Signatures
     [Signature] public const string UpgradeScore = "48 89 5C 24 08 48 89 6C 24 10 56 48 83 EC 20 48 8B F2 48 8B E9 48 8D 54 24 48 E8 ? ? ? ? 33 DB 48 39 5C 24 48 75";
 
     /// <summary>
+    /// CAIInteriorMinister: turn its factories wanted per equipment archetype (minister+696, int each) into production line
+    /// changes (minister, CPdxArray&lt;CProductionLine*&gt;* production+88, current per archetype, current per naval role).
+    /// Every 2nd day, on the country's AI worker thread.
+    /// </summary>
+    [Signature] public const string ApplyFactoryTargets = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 55 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 90 00 00 00 4D 8B F9";
+
+    /// <summary>
+    /// CProductionLine::GetEfficiency(line, long* out) -> out: average efficiency of its active factories (line+0x18, capped at
+    /// vfunc+0x58), Q15 percent (10 % = 10 &lt;&lt; 15). Vanilla AI calls it on worker threads (production line switch check).
+    /// </summary>
+    [Signature] public const string LineEfficiency = "40 53 48 83 EC 20 44 8B 41 18 48 8B DA E8 ? ? ? ? 48 8B C3 48 83 C4 20 5B C3";
+
+    /// <summary>CEquipmentType::IsNaval(type) -> bool.</summary>
+    [Signature] public const string IsNaval = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ? ? ? ? 48 3B CB 74 ? E8 ? ? ? ? 84 C0 74 ? B0 01 48 83 C4 20 5B C3 48 8B 83 ? ? ? ? 48 8B 8B ? ? ? ? 48 85 C0 75 ? 48 8B 83 ? ? ? ? 48 8B 80 ? ? ? ? 48 0B C8 E8 ? ? ? ? 48 B9 C1 03 40 00 80 00 00 00";
+
+    /// <summary>
+    /// NAIAirEvaluation, sea neighbours of land regions: `mov rax,[gs+2E0h]` regions, `cmp [region+0A0h],50000` water share,
+    /// `movsxd r14,[region+0BCh]; mov rax,[region+0B0h]` neighbour regions, `movsxd r8,[neighbour+60h]` region id (pins those offsets).
+    /// </summary>
+    [Signature] public const string RegionNeighbours = "45 3B A5 EC 02 00 00 7D ? 49 8B 85 E0 02 00 00 48 8B 2C F8 48 8B 44 24 ? EB ? 33 ED 48 81 BD A0 00 00 00 50 C3 00 00 0F 8D ? ? ? ? 4C 63 B5 BC 00 00 00 33 DB 4D 85 F6 0F 8E ? ? ? ? 4C 8B AC 24 ? ? ? ? 4C 8B A4 24 ? ? ? ? 0F 1F 44 00 00 48 8B 85 B0 00 00 00 4C 8B 0C D8 4D 63 41 60";
+
+    /// <summary>Strategic bombing region scorer: `add [entry+68h]` escorts, `add [entry+80h]` strategic bombing, `add [entry+0B0h]` logistics strike: plane wishes by mission bit (pins them).</summary>
+    [Signature] public const string StrBombWishes = "B9 1A 00 00 00 4C 01 4B 68 4C 01 83 80 00 00 00 48 01 93 B0 00 00 00 E8";
+
+    /// <summary>
     /// CAirMission::CollectTacticalTargets(mission, CPdxArray&lt;STacticalTarget&gt;* targets, ...): the battles a close air
     /// support mission sees, in region province-list order — the order the plane budget is spent in. Main thread.
     /// </summary>

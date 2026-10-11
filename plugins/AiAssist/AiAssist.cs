@@ -12,9 +12,14 @@ namespace AiAssist;
 /// - Beach defence: landings are walled in and attacked at once.
 /// - Breakthrough axis: local attacks (and close air support) keep to the theatre's thinnest enemy sector for a day.
 /// - Attack targets: local attacks pick pocket-closing, then valuable, then front-shortening targets instead of at random
-///   (Sheep's pocket test in script is never read); fresh divisions take empty enemy provinces next to the line.
+///   (Sheep's pocket test in script is never read); next to a pocket of our own, the target that opens a corridor to it
+///   comes first (and breakouts from inside); fresh divisions take empty enemy provinces next to the line.
 /// - Armor terrain, supply-aware attacks: local attacks skip targets that cripple armor or that supply can't follow.
 /// - Air retreat: regions the AI is losing the air war in get fewer planes.
+/// - Bombing targets: strategic bombers ask for more planes for the enemy regions next to the land front, less (and a lower
+///   score) for ones far behind it.
+/// - Production lines: small factory cuts on efficiently running production lines are held for a while (vanilla restarts the
+///   freed factories elsewhere at 10 % efficiency).
 /// - Refit priority: front-line divisions get reinforcements and upgrades first (until they are 75 % full).
 /// </summary>
 [Plugin("com.green1052.aiassist", "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
@@ -38,13 +43,23 @@ public unsafe partial class AiAssist : Plugin
             "The AI's local attacks keep to a breakthrough axis: its front's thinnest enemy sector (few divisions, no forts, open terrain), held for a day. Its close air support backs battles on the axis first.");
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
-            + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Fresh divisions also take empty enemy provinces next to the line, where another of ours stays.");
+            + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "
+            + "comes first (also breakouts from inside), ahead of pocket closing when at least as many of its divisions are trapped as the attack would cut off. "
+            + "Fresh divisions also take empty enemy provinces next to the line, where another of ours stays.");
         _armorTerrain = Config.Bind("AI", "ArmorTerrain", true,
             "Armored and motorized divisions don't make local attacks into terrain that cripples them (forest, hills, marsh...) or across a river into mountains, marsh, jungle or cities.");
         _airRetreat = Config.Bind("AI", "AirRetreat", true,
             "The AI pulls its planes out of regions where it is losing the air war badly (low air superiority, heavy losses, few kills) and uses them where it can win.");
+        _bombingTargets = Config.Bind("AI", "BombingTargets", true,
+            "The AI's strategic bombers go for the enemy regions next to its land front first (the factories, supply hubs and airfields feeding the battle): they ask for twice the planes there, "
+            + "while regions far behind the front get half the planes and a lower priority.");
+        var productionLines = Config.Bind("AI", "ProductionLines", true,
+            "The AI keeps factories on production lines that have built up efficiency: a small cut (up to a quarter) to equipment whose lines average 35 %+ efficiency is held for a while "
+            + "and the factories come off the smallest increases elsewhere; vanilla moves them to other equipment, where they start over at 10 %. Big cuts and full stops go through.");
+        var stickyDays = Math.Clamp(Config.Bind("AI", "StickyDays", 30,
+            "Days a small cut to an efficient production line is held; if the AI still wants it after that, it goes through."), 1, 365);
         _supplyAware = Config.Bind("AI", "SupplyAwareAttacks", true,
-            "The AI's local attacks skip provinces its divisions couldn't be supplied in once taken: supply only flows through provinces of ours or our allies, and the attack's own province gets too little while no other of ours next to the target has some to spare. Pocket-closing targets are still taken.");
+            "The AI's local attacks skip provinces its divisions couldn't be supplied in once taken: supply only flows through provinces of ours or our allies, and the attack's own province gets too little while no other of ours next to the target has some to spare. Pocket-closing targets and the corridor to a pocket of ours are still taken.");
         _supplyShare = Math.Clamp(Config.Bind("AI", "SupplyAwareMinPercent", 25,
             "Supply (% of what the attacking province needs) it must get, or another province of ours next to the target must have to spare, for a local attack."), 1, 200);
 
@@ -61,6 +76,8 @@ public unsafe partial class AiAssist : Plugin
             Axes.Clear();
             _line.Clear();
             FrontCache.Clear();
+            Encircled.Clear();
+            HoldSince.Clear();
             _capitals = (0, []);
             _beachheads = [];
             _provinceCount = -1;
@@ -68,7 +85,8 @@ public unsafe partial class AiAssist : Plugin
         MainThread.Every(TimeSpan.FromSeconds(1), _game.Check); // AI threads read these caches: reset them soon after a load
         if (_attackTargets || _armorTerrain || _axis || _supplyAware) LoadPockets();
         if (refit) LoadRefit();
-        if (_airRetreat) LoadAirRetreat();
+        if (_airRetreat || _bombingTargets) LoadRegionPriorities();
+        if (productionLines) LoadProductionLines(stickyDays);
         if (_axis) LoadCas();
         if (_holdLine || _axis) LoadFronts();
         if (_holdLine)
@@ -97,6 +115,8 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _taken, "sent {0} division(s) into empty enemy provinces");
         Add(ref _refitted, "put {0} front-line division-day(s) first for equipment");
         Add(ref _pulled, "lowered {0} lost air region(s)");
+        Add(ref _bombing, "aimed {0} strategic bombing plan(s) at the front");
+        Add(ref _stuck, "held factories on efficient lines in {0} AI production plan(s)");
         Add(ref _raised, "raised {0} front request(s) to cover the line");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
         Add(ref _reserved, "posted {0} reserve(s)");

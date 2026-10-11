@@ -33,8 +33,9 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// Like the original check (nonzero = skip this target), but only the best kind of target of <paramref name="from"/>
-    /// stays: pocket-closing ones, else ones on the axis, else valuable ones, else none that lengthen the front; the game's
-    /// random pick then takes one of those. Vanilla's own rejections stay. AI threads: read only.
+    /// stays: ones opening a corridor to a pocket of ours (when it holds at least as many of our divisions as the best
+    /// pocket-closing target cuts off), else pocket-closing ones, else ones on the axis, else valuable ones, else none that
+    /// lengthen the front; the game's random pick then takes one of those. Vanilla's own rejections stay. AI threads: read only.
     /// </summary>
     [UnmanagedCallersOnly]
     private static byte PocketFilter(nint us, nint from, nint to)
@@ -51,27 +52,29 @@ public unsafe partial class AiAssist
                 Interlocked.Increment(ref _steered);
                 return 1;
             }
-            if (_supplyAware && Starved(me, tag, from, to) && Pocket(me, tag, to) == 0)
+            if (_supplyAware && Starved(me, tag, from, to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0)
             {
                 Interlocked.Increment(ref _unsupplied);
                 return 1;
             }
             if (!(_attackTargets || _axis)) return 0;
-            var (pocket, shortest, valuable) = (0, int.MaxValue, 0.0);
+            var (pocket, relief, shortest, valuable) = (0, 0, int.MaxValue, 0.0);
             foreach (var id in _attackTargets ? Game.Neighbours(from) : []) // the axis alone needs none of these
             {
                 var c = Game.Province(id);
                 if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)
-                    || _supplyAware && Starved(me, tag, from, c) && Pocket(me, tag, c) == 0) continue;
+                    || _supplyAware && Starved(me, tag, from, c) && Pocket(me, tag, c) == 0 && Relief(me, tag, c) == 0) continue;
                 if (Divisions(from) < Divisions(c) * (_fortLevel(c) / 2 + 1)) continue; // fails vanilla's strength test anyway
                 pocket = Math.Max(pocket, Pocket(me, tag, c));
+                relief = Math.Max(relief, Relief(me, tag, c));
                 shortest = Math.Min(shortest, FrontChange(me, tag, c));
                 valuable = Math.Max(valuable, TargetValue(c));
             }
-            var skip = pocket > 0 ? Pocket(me, tag, to) == 0                  // pocket targets only
-                : _axis && !OnAxis(tag, from, to) ? true                        // nothing off the breakthrough axis
-                : valuable >= MinTargetValue ? TargetValue(to) < valuable / 2   // worth at least half the best
-                : shortest < 0 && FrontChange(me, tag, to) > 0;                 // nothing that lengthens the front
+            var skip = relief > 0 && relief >= pocket ? Relief(me, tag, to) == 0 // the corridor to our own pocket first
+                : pocket > 0 ? Pocket(me, tag, to) == 0                          // pocket targets only
+                : _axis && !OnAxis(tag, from, to) ? true                         // nothing off the breakthrough axis
+                : valuable >= MinTargetValue ? TargetValue(to) < valuable / 2    // worth at least half the best
+                : shortest < 0 && FrontChange(me, tag, to) > 0;                  // nothing that lengthens the front
             if (skip) Interlocked.Increment(ref _steered);
             return skip ? (byte)1 : (byte)0;
         }
@@ -126,6 +129,78 @@ public unsafe partial class AiAssist
             else if (Friendly(me, tag, n)) change--;
         }
         return change;
+    }
+
+    // ---- Relief: local attacks next to a pocket of ours open the corridor to it (part of AttackTargets) ----
+
+    private const int MaxPocketProvinces = 40;
+    private static readonly Dictionary<int, int> NoPockets = [];
+    // tag -> (game hour, province id in a pocket of ours -> the tag's divisions in that pocket). Published whole, never
+    // mutated; ids and counts only, so a stale entry after a load is harmless (cleared anyway).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Hour, Dictionary<int, int> Pockets)> Encircled = new();
+
+    /// <summary>
+    /// Our divisions in a pocket that taking the enemy <paramref name="target"/> connects to ground of ours or an ally's
+    /// outside every pocket (it is the corridor; also a breakout from inside); 0 when it opens none or AttackTargets is off.
+    /// </summary>
+    // ponytail: one-province corridors only; a pocket two enemy provinces deep has no single target that opens it.
+    private static int Relief(nint me, int tag, nint target)
+    {
+        if (!_attackTargets) return 0;
+        var pockets = OurPockets(me, tag);
+        if (pockets.Count == 0) return 0;
+        var (trapped, outside) = (0, false);
+        foreach (var id in Game.Neighbours(target))
+            if (pockets.TryGetValue(id, out var n)) trapped = Math.Max(trapped, n);
+            else if (Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) > 0 && Friendly(me, tag, p)) outside = true; // sea: controller 0
+        return outside ? trapped : 0;
+    }
+
+    /// <summary>
+    /// The tag's encircled ground, rebuilt once per game hour: from each province holding its land divisions, a flood fill
+    /// over our and allied land; a region that closes within <see cref="MaxPocketProvinces"/> provinces with enemy land
+    /// around it (no neutral land) is a pocket. AI threads: read only; a racing thread may build the same map twice.
+    /// </summary>
+    // ponytail: bounded fill; encirclements bigger than MaxPocketProvinces are missed, and a separate enclave with none of
+    // our divisions counts as "outside". A per-province pocket id if that ever links two pockets.
+    private static Dictionary<int, int> OurPockets(nint me, int tag)
+    {
+        var hour = Hour;
+        if (Encircled.TryGetValue(tag, out var cached) && cached.Hour == hour) return cached.Pockets;
+        var ours = new Dictionary<nint, int>();
+        foreach (var unit in Native.PdxArray(me + UnitsOfCountry))
+            if (unit != 0 && *(int*)(unit + KindOfUnit) == 0 && *(nint*)(unit + LocationOfUnit) is var at && at != 0)
+                ours[at] = ours.GetValueOrDefault(at) + 1;
+        Dictionary<int, int>? pockets = null;
+        var fills = new Dictionary<int, int>(); // province id -> the fill that reached it
+        var fill = 0;
+        foreach (var start in ours.Keys)
+        {
+            fill++;
+            if (*(int*)(start + ControllerOfProvince) <= 0 || !Friendly(me, tag, start) || !fills.TryAdd(Game.Id(start), fill)) continue;
+            var region = new List<nint> { start };
+            var (open, enemy) = (false, false);
+            for (var i = 0; i < region.Count && !open && region.Count <= MaxPocketProvinces; i++)
+                foreach (var id in Game.Neighbours(region[i]))
+                {
+                    var p = Game.Province(id);
+                    if (p == 0 || *(int*)(p + ControllerOfProvince) <= 0) continue; // sea, wasteland
+                    if (Friendly(me, tag, p))
+                    {
+                        if (fills.TryAdd(id, fill)) region.Add(p);
+                        else if (fills[id] != fill) open = true; // joins a region an earlier fill gave up on: too big
+                    }
+                    else if (Enemy(me, tag, p)) enemy = true;
+                    else open = true; // neutral land: a way out
+                }
+            if (open || !enemy || region.Count > MaxPocketProvinces) continue;
+            var trapped = 0;
+            foreach (var p in region) trapped += ours.GetValueOrDefault(p);
+            foreach (var p in region) (pockets ??= [])[Game.Id(p)] = trapped;
+        }
+        var result = pockets ?? NoPockets;
+        Encircled[tag] = (hour, result);
+        return result;
     }
 
     // ---- Armor and terrain: the divisions' own terrain attack (unit data: modded games too) plus the river crossing ----
@@ -278,7 +353,8 @@ public unsafe partial class AiAssist
     /// Supply only flows through our side's provinces, so once <paramref name="to"/> is taken its supply comes over its land
     /// neighbours held by us or allies. Starved: <paramref name="from"/> gets less than SupplyAwareMinPercent % of what it
     /// needs and no other friendly neighbour of the target has that much spare (flow in minus its own need).
-    /// AI threads, read only: the game rebuilds the flow on the main thread each hour, before the AI pass.
+    /// The callers exempt pocket-closing and relief targets. AI threads, read only: the game rebuilds the flow on the main
+    /// thread each hour, before the AI pass.
     /// </summary>
     private static bool Starved(nint me, int tag, nint from, nint to)
     {

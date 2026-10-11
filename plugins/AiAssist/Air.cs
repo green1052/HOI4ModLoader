@@ -24,15 +24,21 @@ public unsafe partial class AiAssist
     private int _pulled;
     private static bool _airRetreat;
 
-    private void LoadAirRetreat()
+    /// <summary>The region scoring hook, shared by air retreat and bombing targets; each runs only under its own setting.</summary>
+    private void LoadRegionPriorities()
     {
         var at = Sig.FindAll(Signatures.StrategicAir, 2)[0];
         (_holderOffset, _countOffset, _arrayOffset) = (*(int*)(at + 3), *(byte*)(at + 14), *(byte*)(at + 36));
-        _ = Sig.Find(Signatures.RegionAirData) + Sig.Find(Signatures.RegionCombatData); // the offsets below are still where they were
+        _ = Sig.Find(Signatures.RegionAirData) + Sig.Find(Signatures.RegionCombatData) // the offsets below are still where they were
+            + Sig.Find(Signatures.RegionNeighbours) + Sig.Find(Signatures.StrBombWishes);
         _priorities = Patches.Hook<PrioritiesFn>(Sig.Find(Signatures.UpdateRegionPriorities), (aiObj, country, scratch, buffer, entries, bases, totals, buffer2) =>
         {
             _priorities!.OriginalFunction(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
-            Safely(() => AirRetreat(country, entries));
+            Safely(() =>
+            {
+                if (_bombingTargets) BombingTargets(country, entries, totals); // first: air retreat may still lower a lost region
+                if (_airRetreat) AirRetreat(country, entries);
+            });
         });
     }
 
@@ -86,6 +92,79 @@ public unsafe partial class AiAssist
         }
         return planes / Native.FixedPoint;
     }
+
+    // ---- Bombing targets: strategic bombers go for the enemy regions right behind the front, not the far hinterland ----
+
+    private const int StrategicBombingRegion = 4;                      // entry kind the STR_BOMB_* rules score: enemy-held region
+    private const int WishesOfEntry = 0x68, StrategicBombing = 3;      // planes wanted per mission (fixed point), by mission bit
+    private const int WaterOfRegion = 0xA0, NeighboursOfRegion = 0xB0; // water share (> 50 %: sea region); CPdxArray<CStrategicRegion*>
+    private const long SeaShare = 50_000, MinScore = 100;              // MinScore: vanilla's floor for a scored region
+    private const int NextToFrontWishPercent = 200, FarPercent = 50;
+    private static bool _bombingTargets;
+    private static int _bombing;
+
+    /// <summary>
+    /// Enemy-held regions the strategic bombing rules scored, by their distance to our land front (land regions both sides hold
+    /// ground in): next to it they ask for twice the bombers, one further as is, farther their score and bomber wish are halved.
+    /// Scores are never raised: the allocator's top-N cut and score shares would take CAS and fighters from the front regions.
+    /// No land front: vanilla. Writes only this country's own entries: AI worker threads.
+    /// </summary>
+    private static void BombingTargets(nint country, nint entries, nint totals)
+    {
+        var tag = *(int*)(country + 8);
+        if (tag == 0 || tag == Game.ControlledTag) return;
+        var data = *(nint*)entries;
+        var n = *(int*)(entries + 0xC);
+        if (data == 0 || n <= 0) return;
+        Span<byte> ring = n <= 4096 ? stackalloc byte[n] : new byte[n]; // 1 front, 2 next to it, 3 one further, 0 farther
+        Span<int> queue = n <= 4096 ? stackalloc int[n] : new int[n];
+        ring.Clear();
+        int head = 0, tail = 0;
+        for (var i = 0; i < n; i++)
+        {
+            var entry = data + (nint)i * RegionEntrySize;
+            if (*(int*)(entry + KindOfEntry) is 0 or 2 && LandRegion(*(nint*)(entry + RegionOfEntry))) { ring[i] = 1; queue[tail++] = i; }
+        }
+        if (tail == 0) return;
+        while (head < tail)
+        {
+            var i = queue[head++];
+            var region = *(nint*)(data + (nint)i * RegionEntrySize + RegionOfEntry);
+            if (ring[i] == 3 || region == 0) continue;
+            foreach (var next in Native.PdxArray(region + NeighboursOfRegion))
+            {
+                if (!LandRegion(next)) continue;
+                var j = *(int*)(next + SuperiorityIdOfRegion) - 1; // region id; entry 0 is region 1
+                if ((uint)j >= (uint)n || ring[j] != 0) continue;
+                ring[j] = (byte)(ring[i] + 1);
+                queue[tail++] = j;
+            }
+        }
+        long delta = 0;
+        var changed = false;
+        for (var i = 0; i < n; i++)
+        {
+            var entry = data + (nint)i * RegionEntrySize;
+            var score = *(long*)(entry + ScoreOfEntry);
+            if (*(int*)(entry + KindOfEntry) != StrategicBombingRegion || score <= 0 || ring[i] == 3 || !LandRegion(*(nint*)(entry + RegionOfEntry))) continue;
+            var wish = (long*)(entry + WishesOfEntry + 8 * StrategicBombing);
+            long scaled;
+            if (ring[i] == 2) scaled = *wish * NextToFrontWishPercent / 100;
+            else
+            {
+                *(long*)(entry + ScoreOfEntry) = Math.Max(MinScore, score * FarPercent / 100);
+                scaled = *wish * FarPercent / 100;
+                if (scaled < Native.FixedPoint) scaled = 0; // under a plane: vanilla then drops its escorts too
+            }
+            delta += scaled - *wish;
+            *wish = scaled;
+            changed = true;
+        }
+        if (totals != 0) *(long*)(totals + 8 * StrategicBombing) += delta; // the per-mission sums URP already made
+        if (changed) Interlocked.Increment(ref _bombing);
+    }
+
+    private static bool LandRegion(nint region) => region != 0 && *(long*)(region + WaterOfRegion) <= SeaShare;
 
     // ---- Breakthrough axis, in the air: battles on the day's axis get the close air support first ----
 
