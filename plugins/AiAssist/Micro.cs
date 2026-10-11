@@ -25,13 +25,13 @@ public unsafe partial class AiAssist
         _game.Check(); // a save loaded since the last reset: its caches point into the old world
         var now = Environment.TickCount64;
         Expire(now);
-        var hour = Hour;
+        var hour = Game.Hour;
         var player = Game.ControlledTag;
         foreach (var country in Game.Countries)
         {
-            var tag = country == 0 ? 0 : *(int*)(country + 8);
+            var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag <= 0 || tag == player) continue;
-            var units = Array.FindAll(Native.PdxArray(country + UnitsOfCountry).ToArray(), u => u != 0);
+            var units = Array.FindAll(Game.Units(country).ToArray(), u => u != 0);
             if (_holdLine)
             {
                 Release(tag, units, hour);
@@ -49,8 +49,8 @@ public unsafe partial class AiAssist
     private static void Release(int tag, nint[] units, int hour)
     {
         foreach (var (unit, rest) in _resting)
-            if (rest.Tag == tag && (Array.IndexOf(units, unit) < 0 || *(int*)(unit + Path + 0xC) == 0
-                    && (Percent(unit, OrgRatioSlot) >= RestedOrg && Percent(unit, StrengthRatioSlot) >= RestedStrength || hour - rest.Hour is < 0 or >= MaxRestHours)))
+            if (rest.Tag == tag && (Array.IndexOf(units, unit) < 0 || !Division.Walking(unit)
+                    && (Percent(Division.Organisation(unit)) >= RestedOrg && Percent(Division.Strength(unit)) >= RestedStrength || hour - rest.Hour is < 0 or >= MaxRestHours)))
                 _resting.TryRemove(unit, out _);
     }
 
@@ -61,7 +61,7 @@ public unsafe partial class AiAssist
     private void PullBack(nint country, int tag, nint[] units, long now, int hour)
     {
         var land = 0;
-        foreach (var unit in units) if (*(int*)(unit + KindOfUnit) == 0) land++;
+        foreach (var unit in units) if (Division.IsLand(unit)) land++;
         var resting = _resting.Values.Count(r => r.Tag == tag);
         var moves = 0;
         var narrow = new Dictionary<nint, bool>(); // province -> its way back is closing
@@ -70,14 +70,14 @@ public unsafe partial class AiAssist
         {
             if (moves == MaxMoves) return;
             if (!Movable(unit, tag)) continue;
-            var location = *(nint*)(unit + LocationOfUnit);
+            var location = Division.Location(unit);
             if (location == 0) continue;
             if (!left.TryGetValue(location, out var here)) here = left[location] = Standing(country, tag, location);
             if (here < 2) continue; // alone there: it holds on
             if (!narrow.TryGetValue(location, out var closing)) closing = narrow[location] = Narrow(country, tag, location);
             if (closing && Grads.TryGetValue(tag, out var grad) && grad.Fortresses.Contains(Game.Id(location))) closing = false; // a fortress city on the grad holds to the last
-            var worn = Percent(unit, OrgRatioSlot) < WornOrg || Percent(unit, StrengthRatioSlot) < WornStrength;
-            if (!closing && !(worn && (resting + 1) * 100 <= land * MaxRestingPercent && EnemyDivisionsNext(country, tag, location))) continue;
+            var worn = Percent(Division.Organisation(unit)) < WornOrg || Percent(Division.Strength(unit)) < WornStrength;
+            if (!closing && !(worn && (resting + 1) * 100 <= land * MaxRestingPercent && Province.EnemyDivisionsNext(country, tag, location))) continue;
             var rest = RestProvince(country, tag, location);
             if (rest < 0 || !Rest(unit, rest, tag, now, hour)) continue; // nowhere safe nearby: it stays
             left[location] = here - 1;
@@ -94,8 +94,8 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool Rest(nint unit, int province, int tag, long now, int hour)
     {
-        var group = *(nint*)(unit + GroupOfUnit);
-        if (group != 0) Unassign(unit, group);
+        var group = Division.Group(unit);
+        if (group != 0) Commands.Unassign(unit, group, true);
         if (!Commands.Move(unit, province, true)) return false;
         _sent[unit] = now + SentMs;
         _resting[unit] = (tag, hour);
@@ -110,7 +110,7 @@ public unsafe partial class AiAssist
     // ponytail: rings, not a max-flow of disjoint paths; a wide salient with a one-province gap elsewhere is missed.
     private static bool Narrow(nint me, int tag, nint from)
     {
-        if (!NextToEnemy(me, tag, from)) return false;
+        if (!Province.NextToEnemy(me, tag, from)) return false;
         var seen = new HashSet<int> { Game.Id(from) };
         var ring = new List<nint> { from };
         for (var depth = 1; depth <= MaxNeckSearch; depth++)
@@ -118,10 +118,10 @@ public unsafe partial class AiAssist
             var next = new List<nint>();
             foreach (var province in ring)
             foreach (var id in Game.Neighbours(province))
-                if (seen.Add(id) && Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) == tag) next.Add(p);
+                if (seen.Add(id) && Game.Province(id) is var p && p != 0 && Province.Controller(p) == tag) next.Add(p);
             if (next.Count == 0) return false;                               // cut off already, or an island: nowhere to go
-            if (next.Any(p => !NextToEnemy(me, tag, p))) return false;       // safe ground within reach
-            if (next.Count == 1) return EnemyDivisionsNext(me, tag, next[0]); // the only way back, enemy troops next to it (a coastal strip isn't a pocket)
+            if (next.Any(p => !Province.NextToEnemy(me, tag, p))) return false;                // safe ground within reach
+            if (next.Count == 1) return Province.EnemyDivisionsNext(me, tag, next[0]); // the only way back, enemy troops next to it (a coastal strip isn't a pocket)
             ring = next;
         }
         return false;
@@ -144,18 +144,12 @@ public unsafe partial class AiAssist
             {
                 if (!seen.Add(id)) continue;
                 var p = Game.Province(id);
-                if (p == 0 || *(int*)(p + ControllerOfProvince) != tag) continue;
-                if (depth >= RestDepth && !NextToEnemy(me, tag, p) && !GivenUp(tag, id)) return id;
+                if (p == 0 || Province.Controller(p) != tag) continue;
+                if (depth >= RestDepth && !Province.NextToEnemy(me, tag, p) && !GivenUp(tag, id)) return id;
                 next.Add(p);
             }
             frontier = next;
         }
         return -1;
     }
-
-    private static bool NextToEnemy(nint me, int tag, nint province) =>
-        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Enemy(me, tag, p));
-
-    private static bool EnemyDivisionsNext(nint me, int tag, nint province) =>
-        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Divisions(p) > 0 && Enemy(me, tag, p));
 }

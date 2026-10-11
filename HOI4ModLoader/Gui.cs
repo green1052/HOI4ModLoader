@@ -162,6 +162,46 @@ public static unsafe partial class Gui
     public static bool GameFocused => GetForegroundWindow() is var window && window != 0
         && GetWindowThreadProcessId(window, out var process) != 0 && process == (uint)Environment.ProcessId;
 
+    /// <summary>
+    /// Ctrl+Alt+<paramref name="key"/> was just pressed with the game focused: once per press, for a timer polling it
+    /// (<paramref name="down"/>: the key's state at the last poll; a key held across a modifier change does not fire).
+    /// </summary>
+    public static bool HotkeyPressed(int key, ref bool down)
+    {
+        var now = KeyHeld(key);
+        var hit = now && !down && CtrlHeld && AltHeld && GameFocused;
+        down = now;
+        return hit;
+    }
+
+    /// <summary>
+    /// UI_AreAirWingsSelected: `mov rcx,[rip+ui]; test rcx,rcx; jz; add rcx,538h`: the player's selection list (CSelectionList)
+    /// inside the UI object. List +0x30 first node {item, ?, next at +0x10}, +0x40 count; an item's kind at +8 (0 = a land
+    /// division, the CArmy itself; 1 ship, 2 air wing).
+    /// </summary>
+    [Signature] public const string AirWingsSelectedSig = "48 83 EC 28 48 8B 0D ? ? ? ? 48 85 C9 74 ? 48 81 C1 38 05 00 00";
+
+    private const int FirstNode = 0x30, NextOfNode = 0x10;
+    private static nint* _selectionUi;
+    private static int _selectionOffset;
+
+    /// <summary>The selected items (divisions, ships, air wings), unchecked: compare them with live objects before reading them. UI thread.</summary>
+    public static List<nint> Selection()
+    {
+        if (_selectionUi == null)
+        {
+            var at = Sig.Find(AirWingsSelectedSig);
+            _selectionOffset = *(int*)(at + 19);
+            _selectionUi = (nint*)(at + 11 + *(int*)(at + 7));
+        }
+        var items = new List<nint>();
+        var ui = *_selectionUi;
+        if (ui == 0) return items;
+        var node = *(nint*)(ui + _selectionOffset + FirstNode);
+        for (var n = 0; node != 0 && n < 5000; n++, node = *(nint*)(node + NextOfNode)) items.Add(*(nint*)node);
+        return items;
+    }
+
     [LibraryImport("user32.dll")]
     private static partial short GetAsyncKeyState(int key);
 

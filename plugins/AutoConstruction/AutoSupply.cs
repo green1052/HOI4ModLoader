@@ -20,9 +20,6 @@ public static class SupplySignatures
 
     /// <summary>QueueRailway(CPdxArray&lt;int&gt;* path, int* tag, int addLevels, byte position, bool skipIfQueued): what the game's helpers queue railways with.</summary>
     [Signature] public const string QueueRailway = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 54 41 55 41 56 41 57 48 83 EC 30 45 0F B6 E9";
-
-    /// <summary>A call of the building database getter, `call Get; mov rcx,[rax+3B8h]` (naval base type); the getter reads [rip+db].</summary>
-    [Signature] public const string BuildingDbCall = "E8 ? ? ? ? 48 8B 88 B8 03 00 00 E8 ? ? ? ? 8B D8";
 }
 
 /// <summary>
@@ -35,15 +32,13 @@ public static class SupplySignatures
 public unsafe partial class AutoConstruction
 {
     // Layouts for HOI4 1.19.3.
-    private const int SupplyOfGameState = 0x3D8, RailwaysOfGameState = 0x3E0;
-    private const int CountriesOfSupply = 0x108, FlowOfSupply = 0x138, FlowSize = 0xD8, NetworkOfCountry = 0x80;
+    private const int RailwaysOfGameState = 0x3E0;
+    private const int CountriesOfSupply = 0x108, NetworkOfCountry = 0x80;                                 // CSupplySystem (Game.Supply)
     private const int Nodes = 0xB8, NodeSize = 0xE8, LandNodes = 0x2C0;                                  // supply network
     private const int ProvinceOfNode = 4, KindOfNode = 8, Capital = 12, SupplyIn = 56, SupplyLeft = 64, Connected = 152, NavalNode = 3;
-    private const int FlowEntries = 48, FlowEntrySize = 16, CountryOfEntry = 2, AmountOfEntry = 8;      // flow: {u16 node, u16 country, pad, i64 amount}
+    private const int FlowEntrySize = 16, CountryOfEntry = 2, AmountOfEntry = 8;                         // Game.EntriesOfFlow: {u16 node, u16 country, pad, i64 amount}
     private const int RailwayPairs = 0x38;                                                                // railway info: {int neighbour, int level}
-    private const int SupplyNodeOfDb = 0x3A0, InfrastructureOfDb = 0x3B0;
-    private const int StateOfProvince = 0xC0, ControllerOfProvince = 0x188; // (+0xC8 is the strategic region)
-    private const int UnitsOfCountry = 0x290, KindOfUnit = 8, LocationOfUnit = 0x1F0, IsLowSupplySlot = 43;
+    private const int IsLowSupplySlot = 43;                                                               // CArmy vtable
     private const long SupplyCooldownMs = 60_000;  // supply only changes once something is built
     private const int MaxSupplyActions = 2, MaxRailSearch = 15;
     private const int SaturationPercent = 80; // a hub using this much of the supply it gets is upgraded (railway to the capital)
@@ -53,7 +48,7 @@ public unsafe partial class AutoConstruction
     private delegate* unmanaged<nint, void> _bottleneckDtor;
     private delegate* unmanaged<nint, nint, int, int, byte, nint> _findRailPath;
     private delegate* unmanaged<nint, int*, int, byte, byte, void> _queueRailway;
-    private nint _supplyNode, _buildingDb;
+    private nint _supplyNode;
     private readonly Dictionary<int, long> _supplySent = []; // province id -> until
 
     private void LoadSupply()
@@ -62,9 +57,7 @@ public unsafe partial class AutoConstruction
         _bottleneckDtor = (delegate* unmanaged<nint, void>)Sig.Find(SupplySignatures.BottleneckDataDtor);
         _findRailPath = (delegate* unmanaged<nint, nint, int, int, byte, nint>)Sig.Find(SupplySignatures.FindRailPath);
         _queueRailway = (delegate* unmanaged<nint, int*, int, byte, byte, void>)Sig.Find(SupplySignatures.QueueRailway);
-        var at = Sig.Find(SupplySignatures.BuildingDbCall);
-        var getter = at + 5 + *(int*)(at + 1);
-        _buildingDb = getter + 18 + *(int*)(getter + 14); // the global; the database is created after the plugins load
+        _ = Sig.Find(Buildings.DbCallSig);
         MainThread.Every(TimeSpan.FromSeconds(5), SupplyPump);
     }
 
@@ -74,22 +67,20 @@ public unsafe partial class AutoConstruction
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
-        var supply = *(nint*)(Game.State + SupplyOfGameState);
-        if (country == 0 || supply == 0) return;
-        var db = *(nint*)_buildingDb;
-        if (db == 0) return;
-        _supplyNode = *(nint*)(db + SupplyNodeOfDb);
-        if (_infrastructure == 0) _infrastructure = *(nint*)(db + InfrastructureOfDb);
+        var supply = Game.Supply;
+        if (country == 0 || supply == 0 || Buildings.Db == 0) return;
+        _supplyNode = Buildings.Type(Buildings.SupplyNodeSlot);
+        if (_infrastructure == 0) _infrastructure = Buildings.Type(Buildings.InfrastructureSlot);
         var countries = *(nint*)(supply + CountriesOfSupply);
         var countrySupply = countries == 0 ? 0 : *(nint*)(countries + 8 * Game.TagIndex(tag));
         var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);
         if (network == 0 || _supplyNode == 0) return;
 
         var starving = new Dictionary<nint, int>(); // province -> divisions low on supply there
-        foreach (var unit in Native.PdxArray(country + UnitsOfCountry))
+        foreach (var unit in Game.Units(country))
         {
-            if (*(int*)(unit + KindOfUnit) != 0 || ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) == 0) continue;
-            var province = *(nint*)(unit + LocationOfUnit);
+            if (!Division.IsLand(unit) || ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) == 0) continue;
+            var province = Division.Location(unit);
             if (province != 0) starving[province] = starving.GetValueOrDefault(province) + 1;
         }
 
@@ -100,7 +91,7 @@ public unsafe partial class AutoConstruction
             if (actions == MaxSupplyActions) break;
             var id = Game.Id(province);
             if (_supplySent.TryGetValue(id, out var until) && now < until) continue;
-            var acted = FixSupply(country, tag, supply, network, province);
+            var acted = FixSupply(country, tag, network, province);
             // Whether or not there was something to do, give it time: what was queued or is missing changes slowly.
             _supplySent[id] = now + SupplyCooldownMs;
             if (!acted) continue;
@@ -109,9 +100,9 @@ public unsafe partial class AutoConstruction
         }
     }
 
-    private bool FixSupply(nint country, int tag, nint supply, nint network, nint province)
+    private bool FixSupply(nint country, int tag, nint network, nint province)
     {
-        var node = FeedingNode(supply, network, Game.Id(province), Game.TagIndex(tag));
+        var node = FeedingNode(network, Game.Id(province), Game.TagIndex(tag));
         if (node != 0)
         {
             var nodeProvince = *(int*)(node + ProvinceOfNode);
@@ -125,14 +116,13 @@ public unsafe partial class AutoConstruction
     }
 
     /// <summary>Our node sending the most supply into the province (its supply flow), or 0.</summary>
-    private static nint FeedingNode(nint supply, nint network, int province, int tagIndex)
+    private static nint FeedingNode(nint network, int province, int tagIndex)
     {
-        var flows = *(nint*)(supply + FlowOfSupply);
-        if (flows == 0) return 0;
-        var flow = flows + (nint)FlowSize * province;
-        var entries = *(nint*)(flow + FlowEntries);
+        var flow = Game.SupplyFlow(province);
+        if (flow == 0) return 0;
+        var entries = *(nint*)(flow + Game.EntriesOfFlow);
         (int Node, long Amount) best = (-1, 0);
-        for (int i = 0, n = *(int*)(flow + FlowEntries + 0xC); i < n; i++)
+        for (int i = 0, n = *(int*)(flow + Game.EntriesOfFlow + 0xC); i < n; i++)
         {
             var e = entries + i * FlowEntrySize;
             if (*(ushort*)(e + CountryOfEntry) != tagIndex || *(long*)(e + AmountOfEntry) <= best.Amount) continue;
@@ -183,14 +173,14 @@ public unsafe partial class AutoConstruction
     /// <summary>A supply hub for the starving province's area, in its state or next to it, then a railway to it if it has none.</summary>
     private bool BuildHub(nint country, int tag, nint network, nint province)
     {
-        var state = *(nint*)(province + StateOfProvince);
+        var state = Province.State(province);
         if (state == 0 || QueuedHubIn(country, state)) return false;
         var candidates = new List<nint>();
-        foreach (var p in Native.PdxArray(state + ProvincesOfState)) candidates.Add(p);
+        foreach (var p in State.Provinces(state)) candidates.Add(p);
         foreach (var id in Game.Neighbours(province))
             if (Game.Province(id) is var p && p != 0 && !candidates.Contains(p)) candidates.Add(p);
         var best = candidates
-            .Where(p => *(int*)(p + ControllerOfProvince) == tag && _canBuildInProvince(country, p, _supplyNode, 1) != 0 && _freeLevels(p + BuildingsOfProvince, _supplyNode) > 0)
+            .Where(p => Province.Controller(p) == tag && _canBuildInProvince(country, p, _supplyNode, 1) != 0 && _freeLevels(Province.Buildings(p), _supplyNode) > 0)
             .OrderByDescending(HasRailway).ThenByDescending(p => p == province).ThenBy(Game.Id)
             .FirstOrDefault();
         if (best == 0) return false;
@@ -202,8 +192,8 @@ public unsafe partial class AutoConstruction
     }
 
     private bool QueuedHubIn(nint country, nint state) => ConstructionLines(country, _supplyNode).Any(line =>
-        *(nint*)(line.Building + ContainerOfBuilding) is var container && container != 0 // province + BuildingsOfProvince
-        && *(nint*)(container - BuildingsOfProvince + StateOfProvince) == state);
+        *(nint*)(line.Building + ContainerOfBuilding) is var container && container != 0 // Province.Buildings(province)
+        && Province.State(container - Province.BuildingsOffset) == state);
 
     /// <summary>Any railway out of the province (the railway map's level per neighbour).</summary>
     private static bool HasRailway(nint province)
@@ -232,7 +222,7 @@ public unsafe partial class AutoConstruction
             {
                 if (!seen.Add(id)) continue;
                 if (wanted(id)) return id;
-                if (Game.Province(id) is var q && q != 0 && *(int*)(q + ControllerOfProvince) != 0) next.Add(q); // land only
+                if (Game.Province(id) is var q && q != 0 && Province.Controller(q) != 0) next.Add(q); // land only
             }
             frontier = next;
         }

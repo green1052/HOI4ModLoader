@@ -16,9 +16,6 @@ public static class Signatures
     /// <summary>CCountryConstructionView::UpdateBuildingItems(view): (re)fills the building buttons, every frame while the tab is open.</summary>
     [Signature] public const string UpdateBuildingItems = "48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC D0 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B E9";
 
-    /// <summary>BuildingContainer::Find(container, CBuildingType*) -> CBuilding* or null.</summary>
-    [Signature] public const string FindBuilding = "80 7A 20 00 74 ? 83 79 2C 00 74 ? 48 63 92 E0 02 00 00 48 8B 41 20";
-
     /// <summary>BuildingContainer::GetFreeLevels(container, type) -> int: max level minus planned (built and queued), shared slots included.</summary>
     [Signature] public const string FreeLevels = "48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 4C 63 82";
 
@@ -51,10 +48,9 @@ public unsafe partial class AutoConstruction : Plugin
 {
     // Layouts for HOI4 1.19.3.
     private const int StatesOfCountry = 0x460, ProductionOfCountry = 0xF68;
-    private const int ProvincesOfState = 24, IdOfState = 88, CoresOfState = 176, BuildingsOfState = 288;
-    private const int BuildingsOfProvince = 400;
+    private const int CoresOfState = 176;
     private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
-    private const int LevelOfBuilding = 64, ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: int16 level, its container
+    private const int ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: its container, its type
     private const int Lines = 112, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
     private const int Items = 1440, WindowOfItem = 16, TypeOfItem = 32; // construction view building buttons
     private const int Location = 56, Building = 60, Levels = 72, Insertion = 76; // CAddConstructionCommand
@@ -68,7 +64,6 @@ public unsafe partial class AutoConstruction : Plugin
 
     private IHook<ClickFn>? _click;
     private IHook<ViewFn>? _update;
-    private delegate* unmanaged<nint, nint, nint> _find;
     private delegate* unmanaged<nint, nint, int> _freeLevels;
     private delegate* unmanaged<nint, nint, nint, byte, byte> _canBuildInState, _canBuildInProvince;
     private delegate* unmanaged<nint, int> _freeSharedSlots;
@@ -94,7 +89,7 @@ public unsafe partial class AutoConstruction : Plugin
         _coverDays = Math.Max(0, Config.Bind("Production", "CoverDays", 60, "A short line only gets factories if its own output won't cover the shortage within this many days: a moved factory starts over at the base efficiency."));
         _movesPerDay = Math.Max(1, Config.Bind("Production", "MovesPerTurn", 2, "Factories moved at most per game day, so lines keep their efficiency."));
 
-        _find = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
+        _ = Sig.Find(Buildings.FindSig);
         _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.FreeLevels);
         _canBuildInState = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInState);
         _canBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInProvince);
@@ -198,8 +193,8 @@ public unsafe partial class AutoConstruction : Plugin
         var perProvince = *(int*)(type + ProvinceLevel) > 0;
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
         {
-            if (!perProvince) count += Level(state + BuildingsOfState, type);
-            else foreach (var province in Native.PdxArray(state + ProvincesOfState)) count += Level(province + BuildingsOfProvince, type);
+            if (!perProvince) count += Buildings.Level(State.Buildings(state), type);
+            else foreach (var province in State.Provinces(state)) count += Buildings.Level(Province.Buildings(province), type);
         }
         foreach (var (line, _) in ConstructionLines(country, type))
             if (*(byte*)(line + RepairLine) == 0) count += *(int*)(line + LevelsOfLine);
@@ -221,12 +216,6 @@ public unsafe partial class AutoConstruction : Plugin
         return lines;
     }
 
-    private int Level(nint container, nint type)
-    {
-        var building = _find(container, type);
-        return building == 0 ? 0 : *(short*)(building + LevelOfBuilding);
-    }
-
     /// <summary>
     /// Queues up to <paramref name="wanted"/> levels, one per place (state, or province for province buildings) from the
     /// best down, places that already have a line of this building last: separate lines are built at the same time, while
@@ -242,15 +231,15 @@ public unsafe partial class AutoConstruction : Plugin
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
         {
             if (_canBuildInState(country, state, type, 1) == 0) continue;
-            var infrastructure = _infrastructure == 0 ? 0 : Level(state + BuildingsOfState, _infrastructure);
+            var infrastructure = _infrastructure == 0 ? 0 : Buildings.Level(State.Buildings(state), _infrastructure);
             var rank = (Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0,
                 type == _infrastructure ? -infrastructure : infrastructure, // faster construction; infrastructure itself where it's lacking
-                _freeSharedSlots(state), -*(int*)(state + IdOfState));
-            if (!perProvince) places.Add((state + BuildingsOfState, *(int*)(state + IdOfState), _freeLevels(state + BuildingsOfState, type), rank));
+                _freeSharedSlots(state), -State.Id(state));
+            if (!perProvince) places.Add((State.Buildings(state), State.Id(state), _freeLevels(State.Buildings(state), type), rank));
             else
-                foreach (var province in Native.PdxArray(state + ProvincesOfState))
+                foreach (var province in State.Provinces(state))
                     if (_canBuildInProvince(country, province, type, 1) != 0)
-                        places.Add((province + BuildingsOfProvince, Game.Id(province), _freeLevels(province + BuildingsOfProvince, type), rank));
+                        places.Add((Province.Buildings(province), Game.Id(province), _freeLevels(Province.Buildings(province), type), rank));
         }
         var order = places.Where(p => p.Free > 0)
             .OrderBy(p => building.Contains(p.Container)).ThenByDescending(p => p.Rank).ToList();

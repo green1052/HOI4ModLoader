@@ -39,7 +39,7 @@ public static class Signatures
 public unsafe partial class AutoTrade : Plugin
 {
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.
-    private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484, TagOfCountry = 8;
+    private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484;
     private const int Influence = 0xF0;                         // CCountry: CPdxArray<long> trade influence, by importer TagIndex
     private const int DiplomacyOfCountry = 0xF88, Overlord = 0x188, Faction = 0x290; // diplomacy block: overlord tag (0 = none), faction*
     private const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem
@@ -155,29 +155,25 @@ public unsafe partial class AutoTrade : Plugin
     {
         var ours = *(nint*)(Game.Country(tag) + DiplomacyOfCountry);
         var faction = ours == 0 ? 0 : *(nint*)(ours + Faction);
-        var importer = stackalloc long[1];
-        *(int*)importer = tag;
-        ((int*)importer)[1] = Game.TagIndex(tag);
-        var exporterIdx = stackalloc long[1];
+        var importer = Game.TagIdx(tag);
         var sellers = new List<(int, int, long, long, long, long)>();
         foreach (var exporter in Game.Countries)
         {
-            var exporterTag = exporter == 0 ? 0 : *(int*)(exporter + TagOfCountry);
+            var exporterTag = exporter == 0 ? 0 : Game.Tag(exporter);
             if (exporterTag == 0 || exporterTag == tag || *(int*)(exporter + StatesOfCountry) <= 0) continue;
             var exporterResources = *(nint*)(exporter + ResourcesOfCountry);
             var diplomacy = *(nint*)(exporter + DiplomacyOfCountry);
             if (exporterResources == 0 || diplomacy == 0) continue;
 
             long max, existing;
-            _maxExport(exporterResources, importer, resource, &max, &existing, 0);
+            _maxExport(exporterResources, &importer, resource, &max, &existing, 0);
             if (max <= 0 && existing <= 0) continue;
-            *(int*)exporterIdx = exporterTag;
-            ((int*)exporterIdx)[1] = Game.TagIndex(exporterTag);
+            var exporterIdx = Game.TagIdx(exporterTag);
             long step;
-            _amountForFactories(&step, resource, importer, exporterIdx, 1);
+            _amountForFactories(&step, resource, &importer, &exporterIdx, 1);
 
             var influences = Native.PdxArray<long>(exporter + Influence);
-            var index = ((int*)importer)[1];
+            var index = (int)(importer >> 32);
             var relation = !_alliesFirst ? 0 : *(int*)(diplomacy + Overlord) == tag ? 2 : faction != 0 && *(nint*)(diplomacy + Faction) == faction ? 1 : 0;
             sellers.Add((exporterTag, relation, (max - existing) / Native.FixedPoint, index < influences.Length ? influences[index] : 0,
                 existing / Native.FixedPoint, Math.Max(1, step / Native.FixedPoint)));

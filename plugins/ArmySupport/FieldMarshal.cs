@@ -26,9 +26,6 @@ public static partial class Signatures
     /// <summary>Army card: creates the attached-wing slots ("attached_units" gridbox).</summary>
     [Signature] public const string CreateWingSlots = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 40 48 8B D9 33 ED";
 
-    /// <summary>bool: are air wings currently selected.</summary>
-    [Signature] public const string AirWingsSelected = "48 83 EC 28 48 8B 0D ? ? ? ? 48 85 C9 74 ? 48 81 C1 38 05 00 00";
-
     /// <summary>
     /// UI: attach air wings to a group (CPdxArray&lt;CAirWing*&gt;* wings, COrdersGroup* group): posts one vanilla
     /// CAttachAirWingToArmyCommand for them. The army card's right-click and the army list both end here.
@@ -85,7 +82,7 @@ public unsafe partial class ArmySupport
     {
         // Resolve everything first: a missing pattern throws before anything is patched.
         var rightClick = Sig.Find(ArmyCard.RightClickSig);
-        _airWingsSelected = Patches.Function<ByteFn>(Sig.Find(Signatures.AirWingsSelected));
+        _airWingsSelected = Patches.Function<ByteFn>(Sig.Find(Gui.AirWingsSelectedSig));
         var at = Sig.Find(Signatures.CardAssign);
         var gunsSelected = (delegate* unmanaged<nint, byte>)(at + 9 + *(int*)(at + 5));
         var postAssign = at + 57 + *(int*)(at + 53);

@@ -24,11 +24,11 @@ public unsafe partial class AiAssist
         if (beachheads.Count == 0) return;
         var now = Environment.TickCount64;
         Expire(now);
-        var hour = Hour;
+        var hour = Game.Hour;
         var player = Game.ControlledTag;
         foreach (var country in Game.Countries)
         {
-            var tag = country == 0 ? 0 : *(int*)(country + 8);
+            var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag <= 0 || tag == player) continue;
             // An island or a quiet country being invaded has no land line yet; a grad's holders stay on the grad.
             var line = (Grads.TryGetValue(tag, out var grad) ? Held(grad, tag) : LineOf(tag, hour)) ?? [];
@@ -36,17 +36,17 @@ public unsafe partial class AiAssist
             foreach (var beachhead in beachheads)
             {
                 var first = Game.Province(beachhead.First());
-                var holder = first == 0 ? 0 : *(int*)(first + ControllerOfProvince);
-                if (holder == tag || !AtWar(country, holder)) continue; // a friendly or neutral landing, not ours to answer
+                var holder = first == 0 ? 0 : Province.Controller(first);
+                if (holder == tag || !Game.AtWar(country, holder)) continue; // a friendly or neutral landing, not ours to answer
                 foreach (var id in beachhead)
                 {
                     var p = Game.Province(id);
-                    if (p == 0 || *(int*)(p + ControllerOfProvince) != holder) continue;
+                    if (p == 0 || Province.Controller(p) != holder) continue;
                     // Wall it in: an empty land neighbour of ours the landing could pour through gets a defender.
                     foreach (var n in Game.Neighbours(p))
                     {
                         var q = Game.Province(n);
-                        if (q == 0 || beachhead.Contains(n) || _gap.ContainsKey(n) || *(int*)(q + ControllerOfProvince) != tag || Standing(country, tag, q) > 0) continue;
+                        if (q == 0 || beachhead.Contains(n) || _gap.ContainsKey(n) || Province.Controller(q) != tag || Standing(country, tag, q) > 0) continue;
                         var helper = Helper(tag, q, line, ReserveRadius);
                         if (helper == 0 || !Send(helper, n, now, LandingMs)) continue;
                         if (++sent >= MaxLandingSends) goto nextCountry;
@@ -76,13 +76,13 @@ public unsafe partial class AiAssist
             if (p == 0) { misses++; continue; }
             misses = 0;
             _provinceCount = id; // the run of valid ids up to here
-            var holder = *(int*)(p + ControllerOfProvince);
-            if (holder <= 0 || seen.Contains(id) || Divisions(p) == 0 || !Coastal(p)) continue;
+            var holder = Province.Controller(p);
+            if (holder <= 0 || seen.Contains(id) || Province.Divisions(p) == 0 || !Coastal(p)) continue;
             var holderCountry = Game.Country(holder);
             if (holderCountry == 0) continue;
             // A land neighbour held by a country at war with the holder.
             var contested = Game.Neighbours(p).Any(n => Game.Province(n) is var q && q != 0
-                && *(int*)(q + ControllerOfProvince) is var controller && controller != holder && AtWar(holderCountry, controller));
+                && Province.Controller(q) is var controller && controller != holder && Game.AtWar(holderCountry, controller));
             if (!contested) continue;
             var beachhead = new HashSet<int> { id };
             var frontier = new List<int> { id };
@@ -91,7 +91,7 @@ public unsafe partial class AiAssist
                 var next = new List<int>();
                 foreach (var b in frontier)
                 foreach (var n in Game.Province(b) is var bp && bp != 0 ? Game.Neighbours(bp) : [])
-                    if (Game.Province(n) is var q && q != 0 && *(int*)(q + ControllerOfProvince) == holder && beachhead.Add(n)) next.Add(n);
+                    if (Game.Province(n) is var q && q != 0 && Province.Controller(q) == holder && beachhead.Add(n)) next.Add(n);
                 frontier = next;
             }
             foreach (var b in beachhead) seen.Add(b); // its home coast too: don't rescan it every half minute
@@ -102,5 +102,5 @@ public unsafe partial class AiAssist
 
     /// <summary>Whether the province borders the sea (a neighbour with no controller).</summary>
     private static bool Coastal(nint p) =>
-        Game.Neighbours(p).Any(id => Game.Province(id) is var q && q != 0 && *(int*)(q + ControllerOfProvince) == 0);
+        Game.Neighbours(p).Any(id => Game.Province(id) is var q && q != 0 && Province.Controller(q) == 0);
 }

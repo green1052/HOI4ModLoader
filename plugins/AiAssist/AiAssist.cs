@@ -126,7 +126,7 @@ public unsafe partial class AiAssist : Plugin
         if (_holdLine || _strategicInvasions || _paradrops) LoadPostAICommand(); // one hook; each part runs under its own setting
         if (_holdLine)
         {
-            _unassign = (delegate* unmanaged<nint, nint, nint, byte, byte, nint>)Sig.Find(Signatures.UnassignCommand);
+            _ = Sig.Find(Commands.UnassignSig);
             MainThread.Every(TimeSpan.FromSeconds(20), Backfill);
         }
         if (_strategicInvasions) LoadInvasions();
@@ -177,76 +177,19 @@ public unsafe partial class AiAssist : Plugin
 
     // Game functions more than one feature calls: resolved once, whichever features are on.
     private static delegate* unmanaged<nint, nint> _resolve;
-    private static delegate* unmanaged<nint, int*, byte> _atWar;
-    private static delegate* unmanaged<nint, int*, byte, byte, byte> _allied;
-    private static delegate* unmanaged<nint, int> _fortLevel;
-    private static delegate* unmanaged<nint, nint, nint> _findBuilding;
-    private static nint _buildingDb; // address of the building database global
-    private static int _navalBaseSlot;
 
     private static void ResolveShared()
     {
         _resolve = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.ResolveRef);
-        _atWar = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.IsAtWarWith);
-        _allied = (delegate* unmanaged<nint, int*, byte, byte, byte>)Sig.Find(Signatures.SameOrAllied);
-        _fortLevel = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FortLevel);
-        _findBuilding = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
-        var at = Sig.Find(Signatures.BuildingDbCall);
-        var getter = at + 5 + *(int*)(at + 1);
-        _buildingDb = getter + 18 + *(int*)(getter + 14);
-        _navalBaseSlot = *(int*)(at + 8); // `mov rcx,[rax+3B8h]`: the naval base type, as the game reads it
+        // The core's game functions the AI hooks call: a broken pattern fails the load, not a hook on an AI thread.
+        _ = Sig.Find(Game.IsAtWarWithSig) + Sig.Find(Game.SameOrAlliedSig) + Sig.Find(Province.FortLevelSig) + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig);
         var river = Sig.Find(Signatures.RiverPenalty);
         _riverSmall = river + 14 + *(int*)(river + 10); // mov rdx,[rip+disp] (7 bytes at +7)
         _riverLarge = river + 22 + *(int*)(river + 18); // cmovnz rdx,[rip+disp] (8 bytes at +14)
     }
 
-    private const int HourOfGameState = 0x468;
-
-    private static int Hour => *(int*)(Game.State + HourOfGameState);
-
-    private static int Divisions(nint province) => *(int*)(province + DivisionsInProvince);
-
-    private static nint Terrain(nint province)
-    {
-        var info = *(nint*)(province + StaticOfProvince);
-        return info == 0 ? 0 : *(nint*)(info + TerrainOfStatic);
-    }
-
-    private const int StrengthRatioSlot = 34, OrgRatioSlot = 39; // CArmy vtable: (unit, long* out) -> out
-
-    /// <summary>A CArmy ratio (organisation or strength slot), 1e5 = full.</summary>
-    private static long Ratio(nint unit, int slot)
-    {
-        long value;
-        ((delegate* unmanaged<nint, long*, long*>)(*(nint**)unit)[slot])(unit, &value);
-        return value;
-    }
-
-    private static bool AtWar(nint me, int tag)
-    {
-        if (tag <= 0) return false;
-        var other = stackalloc int[] { tag, Game.TagIndex(tag) };
-        return _atWar(me, other) != 0;
-    }
-
-    private static bool Allied(nint me, int tag)
-    {
-        if (tag <= 0) return false;
-        var other = stackalloc int[] { tag, Game.TagIndex(tag) };
-        return _allied(me, other, 0, 0) != 0;
-    }
-
-    private static bool Enemy(nint me, int tag, nint province)
-    {
-        var controller = *(int*)(province + ControllerOfProvince);
-        return controller != tag && AtWar(me, controller); // 0: sea
-    }
-
-    private static bool Friendly(nint me, int tag, nint province)
-    {
-        var controller = *(int*)(province + ControllerOfProvince);
-        return controller == tag || Allied(me, controller);
-    }
+    /// <summary>A ratio (organisation, strength: 1e5 = full) in % of full.</summary>
+    private static long Percent(long ratio) => ratio * 100 / Native.FixedPoint;
 
     /// <summary>Runs a hook's own logic where Sheep Mod is in the game; an exception is logged (the first only) and the game goes on.</summary>
     private static void Safely(Action action)

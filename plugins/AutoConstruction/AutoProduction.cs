@@ -24,9 +24,9 @@ public static class ProductionSignatures
 public unsafe partial class AutoConstruction
 {
     // Layouts for HOI4 1.19.3.
-    private const int LogisticsOfCountry = 0xF98, MilitaryLines = 88, HourOfGameState = 0x468;
-    private const int HandleOfLine = 8, CostOfLine = 40, OutputOfLine = 48, VariantOfLine = 136, RequestedOfLine = 232, MaxFactoriesSlot = 11;
-    private const int TypeOfVariant = 1008, ArchetypeOfType = 1240, CostOfVariant = 976;
+    private const int LogisticsOfCountry = 0xF98;
+    private const int HandleOfLine = 8, CostOfLine = 40, OutputOfLine = 48, RequestedOfLine = 232, MaxFactoriesSlot = 11;
+    private const int CostOfVariant = 976;
     private const int LineOfCommand = 40, DeltaOfCommand = 48;
     private const int MinSurplus = 500;           // units: a small need's percentage alone would move factories over a handful of guns
     private const long ProductionPendingMs = 20_000; // a line we changed is left alone meanwhile (multiplayer: a round trip)
@@ -50,7 +50,7 @@ public unsafe partial class AutoConstruction
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         if (country == 0) return;
-        var day = *(int*)(Game.State + HourOfGameState) / 24;
+        var day = Game.Hour / 24;
         if (day != _day) (_day, _movesToday) = (day, 0);
         if (_movesToday >= _movesPerDay) return;
         var production = *(nint*)(country + ProductionOfCountry);
@@ -64,12 +64,11 @@ public unsafe partial class AutoConstruction
         var donors = new List<(nint Line, double Surplus)>();
         var receivers = new List<(nint Line, double Gap)>();
         var lineVTable = Sig.VTable(ProductionSignatures.MilitaryLine);
-        foreach (var line in Native.PdxArray(production + MilitaryLines))
+        foreach (var line in Native.PdxArray(production + ProductionLine.MilitaryLinesOffset))
         {
             if (*(nint*)line != lineVTable || _pending.ContainsKey(line)) continue;
-            var variant = *(nint*)(line + VariantOfLine);
-            var type = variant == 0 ? 0 : *(nint*)(variant + TypeOfVariant);
-            var archetype = type == 0 ? 0 : *(nint*)(type + ArchetypeOfType);
+            var variant = ProductionLine.Variant(line);
+            var archetype = ProductionLine.Archetype(variant);
             if (archetype == 0) continue;
             long balance, need;
             _balance(logistics, &balance, archetype);

@@ -8,10 +8,9 @@ public unsafe partial class AiAssist
 {
     // ---- Production lines: small factory cuts don't drain lines that have built up efficiency ----
 
-    private const int MilitaryLines = 88, BestVariants = 208;                      // CCountryProduction: CPdxArray<CProductionLine*>, best variant per archetype
+    private const int BestVariants = 208;                                          // CCountryProduction: best variant per archetype
     private const int DesiredFactories = 696;                                       // CAIInteriorMinister: int per archetype
-    private const int VariantOfLine = 0x88, ActiveFactoriesOfLine = 0x18;           // CProductionLine
-    private const int TypeOfVariant = 1008, ArchetypeOfType = 1240, IndexOfArchetype = 1336;
+    private const int ActiveFactoriesOfLine = 0x18, IndexOfArchetype = 1336;       // CProductionLine; CEquipmentType
     private const long StickyEfficiency = 35L << 15;                                // average line efficiency 35 %; GetEfficiency is Q15 percent
     private const int StickyBand = 25, MaxArchetypes = 256;                         // cuts up to 25 % (at least 1) are held
 
@@ -46,7 +45,7 @@ public unsafe partial class AiAssist
     {
         var desired = Native.PdxArray<int>(minister + DesiredFactories);
         var current = Native.PdxArray<int>(byArchetype);
-        var best = Native.PdxArray(lines - MilitaryLines + BestVariants);
+        var best = Native.PdxArray(lines - ProductionLine.MilitaryLinesOffset + BestVariants);
         var n = Math.Min(Math.Min(desired.Length, current.Length), best.Length);
         if (n is <= 0 or > MaxArchetypes) return;
         Span<long> weighted = stackalloc long[n];
@@ -55,7 +54,7 @@ public unsafe partial class AiAssist
         active.Clear();
         foreach (var line in Native.PdxArray(lines))
         {
-            var archetype = line == 0 ? 0 : ArchetypeOf(*(nint*)(line + VariantOfLine));
+            var archetype = line == 0 ? 0 : ProductionLine.Archetype(ProductionLine.Variant(line));
             var factories = archetype == 0 ? 0 : *(int*)(line + ActiveFactoriesOfLine);
             if (factories <= 0) continue;
             var i = *(int*)(archetype + IndexOfArchetype);
@@ -68,7 +67,7 @@ public unsafe partial class AiAssist
 
         var since = HoldSince.GetOrAdd(minister, static (_, size) => new int[size], n);
         if (since.Length != n) HoldSince[minister] = since = new int[n];
-        var hour = Hour;
+        var hour = Game.Hour;
         var kept = 0;
         for (var i = 0; i < n; i++)
         {
@@ -102,15 +101,9 @@ public unsafe partial class AiAssist
         }
     }
 
-    private static nint ArchetypeOf(nint variant)
-    {
-        var type = variant == 0 ? 0 : *(nint*)(variant + TypeOfVariant);
-        return type == 0 ? 0 : *(nint*)(type + ArchetypeOfType);
-    }
-
     private static bool Military(nint variant)
     {
-        var archetype = ArchetypeOf(variant);
+        var archetype = ProductionLine.Archetype(variant);
         return archetype != 0 && _isNaval(archetype) == 0;
     }
 }

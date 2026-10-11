@@ -112,4 +112,37 @@ public static unsafe class Commands
         _move(cmd, unit, province, 1, 2, 0, 0, 0, 0, 0);
         return TryPost(cmd, force);
     }
+
+    /// <summary>COrderUnassignCommand ctor (mem[0x50], CArmy* unit, COrdersGroup* group, bool ungroup, bool alsoParent): off every order, into the army's reserve.</summary>
+    [Signature] public const string UnassignSig = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 48 83 EC 30 41 0F B6 F1 49 8B F8 48 8B EA 48 8B D9 C6 41 08 00";
+
+    private const int UnassignSize = 0x50;
+    private static delegate* unmanaged<nint, nint, nint, byte, byte, nint> _unassign;
+
+    /// <summary>Takes <paramref name="unit"/> off every order of its army <paramref name="group"/> (and its army group's), staying in the army, as the battle plan UI does.</summary>
+    public static bool Unassign(nint unit, nint group, bool force = false)
+    {
+        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment
+        if (_unassign == null) _unassign = (delegate* unmanaged<nint, nint, nint, byte, byte, nint>)Sig.Find(UnassignSig);
+        var cmd = Allocator.AllocZeroed(UnassignSize);
+        _unassign(cmd, unit, group, 0, 1); // a refused one is freed whole by its destructor
+        return TryPost(cmd, force);
+    }
+
+    /// <summary>The battle plan's play button: (group CRef, order id 0 = the whole group, execute, also its armies).</summary>
+    [VTable] public const string ExecuteOrder = "COrderExecuteCommand";
+
+    // Order commands (COrderExecuteCommand, COrderDeleteCommand, COrderSetParadropTargetCommand...): group CRef over the tag,
+    // order id over the target, then their argument (execute: a byte, then also-armies; a paradrop target: the province).
+    public const int OrderCommandSize = 0x38, GroupOfOrderCommand = 0x28, OrderOfOrderCommand = 0x30, ArgOfOrderCommand = 0x34, AlsoArmiesOfOrderCommand = 0x35;
+
+    /// <summary>A new order command <paramref name="className"/> for <paramref name="order"/> (0: the whole group) of the group with CRef <paramref name="group"/>.</summary>
+    public static nint NewOrderCommand(string className, long group, int order, int argument)
+    {
+        var cmd = New(className, OrderCommandSize, 0, 0);
+        *(long*)(cmd + GroupOfOrderCommand) = group;
+        *(int*)(cmd + OrderOfOrderCommand) = order;
+        *(int*)(cmd + ArgOfOrderCommand) = argument;
+        return cmd;
+    }
 }

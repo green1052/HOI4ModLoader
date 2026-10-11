@@ -5,12 +5,6 @@ namespace ArmySupport;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static partial class Signatures
 {
-    /// <summary>
-    /// GetStrategicAirForCountry (twice, identical): `mov rbx,[rax+690h]; test rbx,rbx; jz; cmp dword [rbx+3Ch],0; ...;
-    /// mov rax,[rbx+30h]; mov rax,[rax+rcx*8]`: the per-country air (+0x10 usable airbases, +0x58 wing pools) by tag index.
-    /// </summary>
-    [Signature(2)] public const string StrategicAir = "48 8B 98 90 06 00 00 48 85 DB 74 ? 83 7B ? ? 74 ? 83 7F ? ? 48 8D 4F ? 75 ? 33 C0 48 63 C8 48 8B 43 ? 48 8B 04 C8";
-
     /// <summary>CAirBase: provinces of a strategic region in range (CPdxArray* outOrNull, region, base, long range, int maxCount) -> int.</summary>
     [Signature] public const string ProvincesInRange = "48 89 5C 24 ? 55 56 57 41 56 41 57 48 83 EC 50 41 83 78";
 
@@ -50,8 +44,6 @@ public unsafe partial class ArmySupport
     private const int StateOfBase = 0x68;
     private const uint Exercise = 0x800;
 
-    private nint _strategicAir;
-    private int _holderOffset, _countOffset, _arrayOffset;
     private delegate* unmanaged<nint, nint, nint, long, int, int> _inRange;
     private delegate* unmanaged<nint, long*, long*> _range;
     private delegate* unmanaged<nint, int> _freeCapacity, _maxSize;
@@ -63,8 +55,7 @@ public unsafe partial class ArmySupport
     private void LoadRebase(int coverage)
     {
         _coverage = coverage * Native.FixedPoint / 100;
-        _strategicAir = Sig.FindAll(Signatures.StrategicAir, 2)[0];
-        (_holderOffset, _countOffset, _arrayOffset) = (*(int*)(_strategicAir + 3), *(byte*)(_strategicAir + 14), *(byte*)(_strategicAir + 36));
+        _ = Sig.FindAll(Game.StrategicAirSig, 2);
         _inRange = (delegate* unmanaged<nint, nint, nint, long, int, int>)Sig.Find(Signatures.ProvincesInRange);
         _range = (delegate* unmanaged<nint, long*, long*>)Sig.Find(Signatures.GetRange);
         _freeCapacity = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FreeCapacity);
@@ -77,7 +68,7 @@ public unsafe partial class ArmySupport
 
     private void Rebase()
     {
-        var air = Game.HasStarted ? StrategicAir(Game.ControlledTag) : 0;
+        var air = Game.HasStarted ? Game.StrategicAir(Game.ControlledTag) : 0;
         if (air == 0) return;
         var free = new Dictionary<nint, int>();
         foreach (var b in Native.PdxArray(air + BasesOfAir))
@@ -109,12 +100,5 @@ public unsafe partial class ArmySupport
             moved++;
         }
         if (moved > 0) Log.Info($"rebased {moved} air wing(s) closer to their mission regions");
-    }
-
-    private nint StrategicAir(int tag)
-    {
-        var holder = tag <= 0 || Game.State == 0 ? 0 : *(nint*)(Game.State + _holderOffset);
-        if (holder == 0 || *(int*)(holder + _countOffset) == 0) return 0;
-        return *(nint*)(*(nint*)(holder + _arrayOffset) + 8 * Game.TagIndex(tag));
     }
 }

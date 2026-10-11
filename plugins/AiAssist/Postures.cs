@@ -57,7 +57,7 @@ public unsafe partial class AiAssist
             }
             return null;
         }
-        var broken = grad != null && grad.Want.Keys.Any(id => Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) != tag);
+        var broken = grad != null && grad.Want.Keys.Any(id => Game.Province(id) is var p && p != 0 && Province.Controller(p) != tag);
         if ((grad == null || broken || !grad.Strong.SetEquals(stance.Strong) || hour - grad.Hour is < 0 or >= RedrawHours)
             && Cut(country, tag, border, grad, stance.Strong, hour) is { } next)
         {
@@ -75,14 +75,14 @@ public unsafe partial class AiAssist
     /// </summary>
     private static Stance Decide(nint country, int tag, HashSet<nint>? border, Stance? old, int hour)
     {
-        var kept = old?.Strong.Where(e => AtWar(country, e)).ToHashSet() ?? [];
+        var kept = old?.Strong.Where(e => Game.AtWar(country, e)).ToHashSet() ?? [];
         var young = old != null && hour - old.Since is >= 0 and < MinGradHours;
         if (border == null || border.Count == 0)
             return new Stance(hour, old?.Since ?? hour, young ? kept : [], old?.Border ?? []);
         long ours = 0;
         var land = 0;
-        foreach (var unit in Native.PdxArray(country + UnitsOfCountry))
-            if (unit != 0 && *(int*)(unit + KindOfUnit) == 0)
+        foreach (var unit in Game.Units(country))
+            if (unit != 0 && Division.IsLand(unit))
             {
                 land++;
                 ours += Power(unit);
@@ -90,8 +90,8 @@ public unsafe partial class AiAssist
         var contact = new Dictionary<int, int>();          // enemy -> our line provinces facing it
         var ground = new Dictionary<int, HashSet<nint>>(); // enemy -> its provinces up to two deep from our line
         foreach (var b in border)
-        foreach (var facing in Game.Neighbours(b).Select(Game.Province).Where(p => p != 0 && Enemy(country, tag, p))
-                     .GroupBy(p => *(int*)(p + ControllerOfProvince)))
+        foreach (var facing in Game.Neighbours(b).Select(Game.Province).Where(p => p != 0 && Province.Enemy(country, tag, p))
+                     .GroupBy(Province.Controller))
         {
             contact[facing.Key] = contact.GetValueOrDefault(facing.Key) + 1;
             if (!ground.TryGetValue(facing.Key, out var g)) ground[facing.Key] = g = [];
@@ -99,18 +99,18 @@ public unsafe partial class AiAssist
             {
                 g.Add(p);
                 foreach (var id in Game.Neighbours(p))
-                    if (Game.Province(id) is var q && q != 0 && *(int*)(q + ControllerOfProvince) == facing.Key) g.Add(q);
+                    if (Game.Province(id) is var q && q != 0 && Province.Controller(q) == facing.Key) g.Add(q);
             }
         }
-        var lost = old?.Border.Count(id => Game.Province(id) is var p && p != 0 && Enemy(country, tag, p)) ?? 0;
+        var lost = old?.Border.Count(id => Game.Province(id) is var p && p != 0 && Province.Enemy(country, tag, p)) ?? 0;
         var thin = land * 5 < border.Count * 6; // under ~1.2 divisions per line province, as Manned
         var strong = new HashSet<int>();
         foreach (var (enemy, provinces) in ground)
         {
             long theirs = 0;
             foreach (var p in provinces)
-            foreach (var unit in Native.PdxArray(p + UnitsInProvince))
-                if (*(int*)(unit + KindOfUnit) == 0 && AtWar(country, *(int*)(unit + CommanderOfUnit))) theirs += Power(unit);
+            foreach (var unit in Province.Units(p))
+                if (Division.IsLand(unit) && Game.AtWar(country, Division.Commander(unit))) theirs += Power(unit);
             var ratio = theirs * 100 / Math.Max(1, ours * contact[enemy] / border.Count);
             if (ratio >= StrongRatio || ratio >= PressedRatio && (lost >= 2 || thin)
                 || kept.Contains(enemy) && (ratio > EvenRatio || thin || young))
@@ -122,7 +122,7 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>A division's fighting power, 0-100: its strength, counted at half to full by its organisation.</summary>
-    private static long Power(nint unit) => Percent(unit, StrengthRatioSlot) * (50 + Percent(unit, OrgRatioSlot) / 2) / 100;
+    private static long Power(nint unit) => Percent(Division.Strength(unit)) * (50 + Percent(Division.Organisation(unit)) / 2) / 100;
 
     /// <summary>
     /// The grad: a minimum cut between the strong enemies' ground and the tag's core, through its own provinces up to
@@ -138,7 +138,7 @@ public unsafe partial class AiAssist
         var provinces = new List<nint> { 0, 0 };
         var ring = new List<nint>();
         foreach (var p in (border ?? []).Concat(old?.Want.Keys.Select(Game.Province) ?? []))
-            if (p != 0 && *(int*)(p + ControllerOfProvince) == tag && ids.TryAdd(Game.Id(p), provinces.Count))
+            if (p != 0 && Province.Controller(p) == tag && ids.TryAdd(Game.Id(p), provinces.Count))
             {
                 provinces.Add(p);
                 ring.Add(p);
@@ -148,7 +148,7 @@ public unsafe partial class AiAssist
             var next = new List<nint>();
             foreach (var p in ring)
             foreach (var id in Game.Neighbours(p))
-                if (Game.Province(id) is var q && q != 0 && *(int*)(q + ControllerOfProvince) == tag && ids.TryAdd(id, provinces.Count))
+                if (Game.Province(id) is var q && q != 0 && Province.Controller(q) == tag && ids.TryAdd(id, provinces.Count))
                 {
                     provinces.Add(q);
                     next.Add(q);
@@ -160,20 +160,20 @@ public unsafe partial class AiAssist
         for (var v = 2; v < provinces.Count; v++)
         {
             var p = provinces[v];
-            var state = *(nint*)(p + StateOfProvince);
-            var core = state != 0 && *(int*)(state + IdOfState) == capital;
+            var state = Province.State(p);
+            var core = state != 0 && State.Id(state) == capital;
             var attacked = 0;
             foreach (var id in Game.Neighbours(p))
             {
                 var q = Game.Province(id);
                 if (q == 0) continue;
-                var controller = *(int*)(q + ControllerOfProvince);
+                var controller = Province.Controller(q);
                 if (ids.TryGetValue(id, out var u)) edges.Add((u, v, Hold(q, p, old)));
                 else if (controller == tag) core = true;                           // our ground goes on past the explored area
                 else if (strong.Contains(controller)) attacked += Hold(q, p, old); // sea, neutrals, allies, weaker enemies: walls
             }
             if (attacked > 0) edges.Add((0, v, attacked));
-            edges.Add((v, 1, core ? Inf : AbandonBase + AbandonPerVp * Math.Min(*(int*)(p + VictoryPoints), 30)));
+            edges.Add((v, 1, core ? Inf : AbandonBase + AbandonPerVp * Math.Min(Province.VictoryPoints(p), 30)));
         }
         var given = MinCut.SourceSide(provinces.Count, edges, 0, 1);
         var want = new Dictionary<int, int>();
@@ -189,11 +189,10 @@ public unsafe partial class AiAssist
             var p = provinces[v];
             var sides = 0;
             foreach (var id in Game.Neighbours(p))
-                if (ids.TryGetValue(id, out var u) ? given[u] : Game.Province(id) is var q && q != 0 && strong.Contains(*(int*)(q + ControllerOfProvince)))
+                if (ids.TryGetValue(id, out var u) ? given[u] : Game.Province(id) is var q && q != 0 && strong.Contains(Province.Controller(q)))
                     sides++;
             if (sides == 0) continue;
-            var terrain = Terrain(p);
-            var fortress = *(int*)(p + VictoryPoints) >= FortressVp || terrain != 0 && (*(int*)(terrain + CategoryOfTerrain) & Urban) != 0;
+            var fortress = Province.VictoryPoints(p) >= FortressVp || (Province.TerrainCategory(p) & Province.Urban) != 0;
             if (fortress) fortresses.Add(Game.Id(p));
             want[Game.Id(p)] = 1 + (sides >= 3 ? 1 : 0) + (fortress ? 1 : 0);
         }
@@ -204,13 +203,12 @@ public unsafe partial class AiAssist
     private static int Hold(nint from, nint to, Grad? old)
     {
         var crossing = Game.AdjacencyType(from, Game.Id(to));
-        if (crossing == Impassable) return 0;
+        if (crossing == Province.Impassable) return 0;
         long cost = HoldCost;
-        if (crossing is River or LargeRiver)
-            cost = cost * Math.Max(20_000, Native.FixedPoint + *(long*)(crossing == LargeRiver ? _riverLarge : _riverSmall)) / Native.FixedPoint;
-        var terrain = Terrain(to);
-        cost = cost * (100 + (terrain == 0 ? 0 : TerrainAttack(*(int*)(terrain + CategoryOfTerrain)))) / 100;
-        cost = cost * 100 / (100 + 15 * _fortLevel(to));
+        if (crossing is Province.River or Province.LargeRiver)
+            cost = cost * Math.Max(20_000, Native.FixedPoint + *(long*)(crossing == Province.LargeRiver ? _riverLarge : _riverSmall)) / Native.FixedPoint;
+        cost = cost * (100 + TerrainAttack(Province.TerrainCategory(to))) / 100;
+        cost = cost * 100 / (100 + 15 * Province.FortLevel(to));
         if (old != null && old.Want.ContainsKey(Game.Id(to))) cost = cost * 4 / 5; // the standing grad: no wandering over a near tie
         return (int)Math.Max(10, cost);
     }
@@ -218,12 +216,12 @@ public unsafe partial class AiAssist
     /// <summary>Vanilla's attack penalty into the terrain category, % (common/terrain/00_terrain.txt).</summary>
     // ponytail: vanilla values by category bit; read the terrain's own unit modifier if a mod changes them.
     private static int TerrainAttack(int category) =>
-        (category & Mountain) != 0 ? -50 : (category & Marsh) != 0 ? -40 : (category & (Jungle | Urban)) != 0 ? -30
+        (category & Province.Mountain) != 0 ? -50 : (category & Province.Marsh) != 0 ? -40 : (category & (Province.Jungle | Province.Urban)) != 0 ? -30
         : (category & Hills) != 0 ? -25 : (category & Forest) != 0 ? -15 : 0;
 
     /// <summary>The grad's provinces the tag still holds.</summary>
     private static HashSet<nint> Held(Grad grad, int tag) =>
-        grad.Want.Keys.Select(Game.Province).Where(p => p != 0 && *(int*)(p + ControllerOfProvince) == tag).ToHashSet();
+        grad.Want.Keys.Select(Game.Province).Where(p => p != 0 && Province.Controller(p) == tag).ToHashSet();
 
     /// <summary>Whether the province is on the given-up side of the tag's grad: no reserves or resting divisions go there.</summary>
     private static bool GivenUp(int tag, int province) => Grads.TryGetValue(tag, out var grad) && grad.Given.Contains(province);
@@ -240,10 +238,10 @@ public unsafe partial class AiAssist
     /// <summary>The divisions there have fought themselves out: average organisation under ExhaustedOrg %. AI threads too (read only).</summary>
     private static bool Exhausted(nint province)
     {
-        var units = Native.PdxArray(province + UnitsInProvince);
+        var units = Province.Units(province);
         if (units.Length == 0) return false;
         long org = 0;
-        foreach (var unit in units) org += Percent(unit, OrgRatioSlot);
+        foreach (var unit in units) org += Percent(Division.Organisation(unit));
         return org < ExhaustedOrg * units.Length;
     }
 
@@ -265,7 +263,7 @@ public unsafe partial class AiAssist
             foreach (var n in Game.Neighbours(g))
             {
                 var e = Game.Province(n);
-                if (e == 0 || _gap.ContainsKey(n) || Divisions(e) == 0 || !Enemy(country, tag, e) || !Exhausted(e)) continue;
+                if (e == 0 || _gap.ContainsKey(n) || Province.Divisions(e) == 0 || !Province.Enemy(country, tag, e) || !Exhausted(e)) continue;
                 var attackers = new List<nint>();
                 foreach (var a in Game.Neighbours(e))
                     if (FreshSpare(country, tag, grad, a) is var unit and not 0) attackers.Add(unit);
@@ -279,7 +277,7 @@ public unsafe partial class AiAssist
                 foreach (var r in Game.Neighbours(e)) // pin its neighbours: they can't shift into the fight while under attack
                 {
                     var q = Game.Province(r);
-                    if (q == 0 || _gap.ContainsKey(r) || Divisions(q) == 0 || !Enemy(country, tag, q)) continue;
+                    if (q == 0 || _gap.ContainsKey(r) || Province.Divisions(q) == 0 || !Province.Enemy(country, tag, q)) continue;
                     foreach (var a in Game.Neighbours(q))
                     {
                         var from = Game.Province(a);
@@ -302,9 +300,9 @@ public unsafe partial class AiAssist
     private static nint FreshSpare(nint country, int tag, Grad grad, int province)
     {
         var p = Game.Province(province);
-        if (p == 0 || *(int*)(p + ControllerOfProvince) != tag || Standing(country, tag, p) <= grad.Want.GetValueOrDefault(province, 1)) return 0;
-        foreach (var unit in Native.PdxArray(p + UnitsInProvince))
-            if (Spare(unit, tag) && Percent(unit, OrgRatioSlot) >= FreshOrg && Percent(unit, StrengthRatioSlot) >= FreshStrength) return unit;
+        if (p == 0 || Province.Controller(p) != tag || Standing(country, tag, p) <= grad.Want.GetValueOrDefault(province, 1)) return 0;
+        foreach (var unit in Province.Units(p))
+            if (Spare(unit, tag) && Percent(Division.Organisation(unit)) >= FreshOrg && Percent(Division.Strength(unit)) >= FreshStrength) return unit;
         return 0;
     }
 
@@ -325,15 +323,15 @@ public unsafe partial class AiAssist
         foreach (var (unit, owner) in Attackers.ToArray())
         {
             if (owner != tag) continue;
-            if (Array.IndexOf(units, unit) < 0 || *(int*)(unit + CombatsOfUnit) == 0 && !_sent.ContainsKey(unit))
+            if (Array.IndexOf(units, unit) < 0 || !Division.Fighting(unit) && !_sent.ContainsKey(unit))
             {
                 Attackers.Remove(unit); // gone, or its attack is over
                 continue;
             }
-            if (*(int*)(unit + CombatsOfUnit) == 0 || Percent(unit, OrgRatioSlot) >= WornOrg) continue;
-            var location = *(nint*)(unit + LocationOfUnit);
+            if (!Division.Fighting(unit) || Percent(Division.Organisation(unit)) >= WornOrg) continue;
+            var location = Division.Location(unit);
             var rest = location == 0 ? -1 : RestProvince(country, tag, location);
-            if (rest < 0 || !Rest(unit, rest, tag, now, Hour)) continue; // nowhere safe nearby: it fights on
+            if (rest < 0 || !Rest(unit, rest, tag, now, Game.Hour)) continue; // nowhere safe nearby: it fights on
             Attackers.Remove(unit);
             Interlocked.Increment(ref _brokeOff);
         }

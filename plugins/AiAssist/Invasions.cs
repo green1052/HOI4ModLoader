@@ -75,9 +75,9 @@ public unsafe partial class AiAssist
     private static void TrackRoute(nint objective)
     {
         var country = *(nint*)(objective + CountryOfObjective);
-        var tag = country == 0 ? 0 : *(int*)(country + 8);
+        var tag = country == 0 ? 0 : Game.Tag(country);
         if (tag <= 0 || tag == Game.ControlledTag) return;
-        var hour = Hour;
+        var hour = Game.Hour;
         if (Routes.TryGetValue((tag, objective), out var kept))
         {
             if (kept.Hour == hour) return;
@@ -98,14 +98,14 @@ public unsafe partial class AiAssist
     /// </summary>
     private static void EscortInvasions(nint country, nint entries, nint totals)
     {
-        var tag = *(int*)(country + 8);
+        var tag = Game.Tag(country);
         if (tag <= 0 || tag == Game.ControlledTag) return; // no IsEmpty: it takes every lock
         var data = *(nint*)entries;
         var n = *(int*)(entries + 0xC);
         if (data == 0 || n <= 0) return;
         Span<byte> done = n <= 4096 ? stackalloc byte[n] : new byte[n]; // a region on two routes is raised once
         done.Clear();
-        var hour = Hour;
+        var hour = Game.Hour;
         long fighters = 0, bombers = 0;
         foreach (var (key, route) in Routes)
         {
@@ -143,7 +143,7 @@ public unsafe partial class AiAssist
         var takeFirst = *(byte**)(closure + TakeFirstOfClosure);
         if (found == null || takeFirst == null || *found != 0 || *takeFirst != 0) return; // no pick follows: the current target is kept, or the first one wins
         var country = *(nint*)(closure + CountryOfClosure);
-        var tag = country == 0 ? 0 : *(int*)(country + 8);
+        var tag = country == 0 ? 0 : Game.Tag(country);
         if (tag <= 0 || tag == Game.ControlledTag || Scale(closure, province, 1) < 0) return; // not kept: no path, not at war, excluded
         var factor = BeachFactor(country, tag, province);
         if (factor != 1 && Scale(closure, province, factor) >= 0) Interlocked.Increment(ref _rescored);
@@ -175,11 +175,11 @@ public unsafe partial class AiAssist
     // The beach's own garrison counts twice (TargetValue and the ring); drop the x2 for an empty beach if those dominate.
     private static double BeachFactor(nint country, int tag, nint beach)
     {
-        var hour = Hour;
+        var hour = Game.Hour;
         var id = Game.Id(beach);
         if (Beaches.TryGetValue((tag, id), out var kept) && hour - kept.Hour is >= 0 and < BeachHours) return kept.Factor;
         var held = Defenders(country, tag, id, out var value);
-        var factor = (1 + Math.Max(value, 0) / 50) * (held == 0 ? 2 : 1 / (1 + held / 2.0)) / (1 + _fortLevel(beach) + CoastalBunker(beach));
+        var factor = (1 + Math.Max(value, 0) / 50) * (held == 0 ? 2 : 1 / (1 + held / 2.0)) / (1 + Province.FortLevel(beach) + CoastalBunker(beach));
         Beaches[(tag, id)] = (hour, factor);
         return factor;
     }
@@ -192,8 +192,8 @@ public unsafe partial class AiAssist
         foreach (var id in Rings(beach))
         {
             var p = Game.Province(id);
-            if (p == 0 || !Enemy(country, tag, p)) continue;
-            held += Divisions(p);
+            if (p == 0 || !Province.Enemy(country, tag, p)) continue;
+            held += Province.Divisions(p);
             value = Math.Max(value, TargetValue(p) * (id == beach ? 1 : 0.5));
         }
         return held;
@@ -202,17 +202,16 @@ public unsafe partial class AiAssist
     /// <summary>The province's coastal bunker, working level (bombarded levels don't count).</summary>
     private static int CoastalBunker(nint province)
     {
-        var db = *(nint*)_buildingDb;
+        var db = Buildings.Db;
         var type = db == 0 ? 0 : _bunkerType(db); // the null type when undefined: Find gives 0 for it
-        var bunker = type == 0 ? 0 : _findBuilding(province + BuildingsOfProvince, type);
-        return bunker == 0 ? 0 : *(short*)(bunker + WorkingLevel);
+        return Buildings.WorkingLevel(Province.Buildings(province), type);
     }
 
     /// <summary>The group's invasion order that hasn't sailed yet, or 0.</summary>
     private static nint Unlaunched(nint group)
     {
-        foreach (var order in Native.PdxArray(group + OrdersOfGroup))
-            if (order != 0 && *(int*)(order + TypeOfOrder) == Invasion && *(byte*)(order + Executing) == 0) return order; // paradrops: never AI-launched with id 0
+        foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset))
+            if (order != 0 && Order.Type(order) == Order.Invasion && !Order.Executing(order)) return order; // paradrops: never AI-launched with id 0
         return 0;
     }
 
@@ -237,7 +236,7 @@ public unsafe partial class AiAssist
             Holds.TryRemove(group, out _);
             return true;
         }
-        var hour = Hour;
+        var hour = Game.Hour;
         var first = Holds.GetOrAdd(group, (hour, tag));
         if (first.Tag != tag || hour < first.Hour || hour - first.Hour >= 2 * BeachHoldHours + BeachHours)
             Holds[group] = first = (hour, tag); // a reused group pointer, a loaded save, or a new plan long after the last hold

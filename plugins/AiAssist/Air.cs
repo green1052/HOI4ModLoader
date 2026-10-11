@@ -20,16 +20,13 @@ public unsafe partial class AiAssist
     public delegate void PrioritiesFn(nint aiObj, nint country, nint scratch, nint buffer, nint entries, nint bases, nint totals, nint buffer2);
 
     private IHook<PrioritiesFn>? _priorities;
-    private int _holderOffset, _countOffset, _arrayOffset;
     private int _pulled;
     private static bool _airRetreat;
 
     /// <summary>The region scoring hook, shared by air retreat, bombing targets and invasion escorts; each runs only under its own setting.</summary>
     private void LoadRegionPriorities()
     {
-        var at = Sig.FindAll(Signatures.StrategicAir, 2)[0];
-        (_holderOffset, _countOffset, _arrayOffset) = (*(int*)(at + 3), *(byte*)(at + 14), *(byte*)(at + 36));
-        _ = Sig.Find(Signatures.RegionAirData) + Sig.Find(Signatures.RegionCombatData) // the offsets below are still where they were
+        _ = Sig.FindAll(Game.StrategicAirSig, 2)[0] + Sig.Find(Signatures.RegionAirData) + Sig.Find(Signatures.RegionCombatData) // the offsets below are still where they were
             + Sig.Find(Signatures.RegionNeighbours) + Sig.Find(Signatures.StrBombWishes);
         _priorities = Patches.Hook<PrioritiesFn>(Sig.Find(Signatures.UpdateRegionPriorities), (aiObj, country, scratch, buffer, entries, bases, totals, buffer2) =>
         {
@@ -46,12 +43,10 @@ public unsafe partial class AiAssist
     /// <summary>Scales down the score of regions where we hold under 35 % of air superiority, lost 20+ planes in a week and 1.5+ per kill; under 15 %: 0.</summary>
     private void AirRetreat(nint country, nint entries)
     {
-        var tag = *(int*)(country + 8);
-        var holder = tag == Game.ControlledTag ? 0 : *(nint*)(Game.State + _holderOffset);
-        if (holder == 0 || *(int*)(holder + _countOffset) == 0) return;
-        var air = *(nint*)(*(nint*)(holder + _arrayOffset) + 8 * Game.TagIndex(tag));
+        var tag = Game.Tag(country);
+        var air = tag == Game.ControlledTag ? 0 : Game.StrategicAir(tag);
         if (air == 0) return;
-        var since = Hour - WindowHours;
+        var since = Game.Hour - WindowHours;
         var records = Native.PdxArray<byte>(air + SuperiorityRecords); // only its size and data are used
         var combat = Native.PdxArray(air + CombatData);
         var data = *(nint*)entries;
@@ -112,7 +107,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private static void BombingTargets(nint country, nint entries, nint totals)
     {
-        var tag = *(int*)(country + 8);
+        var tag = Game.Tag(country);
         if (tag == 0 || tag == Game.ControlledTag) return;
         var data = *(nint*)entries;
         var n = *(int*)(entries + 0xC);

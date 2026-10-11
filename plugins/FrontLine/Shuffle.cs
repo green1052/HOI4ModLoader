@@ -27,25 +27,25 @@ public unsafe partial class FrontLine
     /// <summary>Each front's line and threat; a front that lost (or is losing) several provinces lately, or faces twice its divisions, is in a crisis.</summary>
     private void Survey(nint country, int tag, IEnumerable<Front> fronts)
     {
-        var hour = Hour;
+        var hour = Game.Hour;
         foreach (var front in fronts)
         {
             foreach (var unit in front.Units)
-                if (*(nint*)(unit + LocationOfUnit) is var at && at != 0 && NextToEnemy(country, tag, at)) front.Line.Add(at);
+                if (Division.Location(unit) is var at && at != 0 && NextToEnemy(country, tag, at)) front.Line.Add(at);
             var facing = new HashSet<nint>();
             foreach (var p in front.Line)
             {
-                _lastSeen[*(int*)(p + IdOfProvince)] = (hour, front.Key);
+                _lastSeen[Game.Id(p)] = (hour, front.Key);
                 foreach (var id in Game.Neighbours(p))
                     if (Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)) facing.Add(e);
             }
-            front.Threat = facing.Sum(e => *(int*)(e + DivisionsInProvince));
+            front.Threat = facing.Sum(Province.Divisions);
         }
         var lost = new Dictionary<(nint, int), int>();
         foreach (var (id, seen) in _lastSeen.ToArray())
         {
             if (hour - seen.Hour is < 0 or > LostHours) _lastSeen.Remove(id);
-            else if (Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) != tag) lost[seen.Front] = lost.GetValueOrDefault(seen.Front) + 1;
+            else if (Game.Province(id) is var p && p != 0 && Province.Controller(p) != tag) lost[seen.Front] = lost.GetValueOrDefault(seen.Front) + 1;
         }
         foreach (var (key, since) in _crisis.ToArray()) if (hour - since is < 0 or > 2 * CrisisHours) _crisis.Remove(key);
         foreach (var front in fronts)
@@ -54,7 +54,7 @@ public unsafe partial class FrontLine
                 _crisis[front.Key] = hour;
     }
 
-    private bool Crisis((nint, int) front) => _crisis.TryGetValue(front, out var hour) && Hour - hour is >= 0 and < CrisisHours;
+    private bool Crisis((nint, int) front) => _crisis.TryGetValue(front, out var hour) && Game.Hour - hour is >= 0 and < CrisisHours;
 
     /// <summary>
     /// A front in a crisis gets spare fresh divisions of quiet fronts (no enemy across, or three times the divisions it faces)
@@ -71,13 +71,13 @@ public unsafe partial class FrontLine
                 Log.Info("shuffle: the crisis is over, a division goes back to its own front");
 
         var fronts = all.ToList();
-        var crises = fronts.Where(f => f.Line.Count > 0 && _crisis.GetValueOrDefault(f.Key, int.MinValue) == Hour).ToList();
+        var crises = fronts.Where(f => f.Line.Count > 0 && _crisis.GetValueOrDefault(f.Key, int.MinValue) == Game.Hour).ToList();
         if (crises.Count == 0) return;
         Dictionary<nint, List<nint>>? pool = null;
         var sent = 0;
         var extra = new Dictionary<nint, int>(); // line province -> divisions on their way to it
         foreach (var (unit, held) in _held)
-            if (held.Job == Job.Shuffle && Game.Province(held.Post) is var post && post != 0 && *(nint*)(unit + LocationOfUnit) != post)
+            if (held.Job == Job.Shuffle && Game.Province(held.Post) is var post && post != 0 && Division.Location(unit) != post)
                 extra[post] = extra.GetValueOrDefault(post) + 1;
         foreach (var crisis in crises.OrderByDescending(f => f.Threat - f.Units.Count))
         {
@@ -102,7 +102,7 @@ public unsafe partial class FrontLine
                 if (target == 0 || Pressure(country, tag, target) - extra.GetValueOrDefault(target) <= 0) break;
                 var unit = Take(tag, target, ShuffleRadius, pool);
                 if (unit == 0) break; // nothing spare within reach of this crisis
-                var id = *(int*)(target + IdOfProvince);
+                var id = Game.Id(target);
                 Send(unit, id, Job.Shuffle, id, 0, crisis.Key);
                 extra[target] = extra.GetValueOrDefault(target) + 1;
                 sent++;
@@ -117,7 +117,7 @@ public unsafe partial class FrontLine
     {
         var enemy = 0;
         foreach (var id in Game.Neighbours(province))
-            if (Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)) enemy += *(int*)(e + DivisionsInProvince);
+            if (Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)) enemy += Province.Divisions(e);
         return enemy - (_at.TryGetValue(province, out var ours) ? ours.Count : 0);
     }
 
@@ -136,7 +136,7 @@ public unsafe partial class FrontLine
             var next = new List<nint>();
             foreach (var p in ring)
             foreach (var id in Game.Neighbours(p))
-                if (Game.Province(id) is var q && q != 0 && *(int*)(q + ControllerOfProvince) == tag && area.Add(q)) next.Add(q);
+                if (Game.Province(id) is var q && q != 0 && Province.Controller(q) == tag && area.Add(q)) next.Add(q);
             ring = next;
         }
         var pinned = 0;
@@ -149,11 +149,11 @@ public unsafe partial class FrontLine
                 if (_sent.ContainsKey(id) || here.Count < 2) continue;
                 var target = Game.Province(id);
                 if (target == 0 || !Enemy(country, tag, target)) continue;
-                var defenders = Native.PdxArray(target + UnitsInProvince).ToArray().Where(u => u != 0).ToArray();
-                if (defenders.Length == 0 || defenders.Length * (_fortLevel(target) / 2 + 1) > PinOdds || defenders.Any(Fighting)) continue; // empty: Attack's; busy already
-                var unit = here.Where(u => Free(u, tag, _now) && !Walking(u) && Org(u) >= PinOrg && Str(u) >= 70).OrderByDescending(Org).FirstOrDefault();
+                var defenders = Province.Units(target).ToArray().Where(u => u != 0).ToArray();
+                if (defenders.Length == 0 || defenders.Length * (Province.FortLevel(target) / 2 + 1) > PinOdds || defenders.Any(Division.Fighting)) continue; // empty: Attack's; busy already
+                var unit = here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= PinOrg && Str(u) >= 70).OrderByDescending(Org).FirstOrDefault();
                 if (unit == 0) break;
-                Send(unit, id, Job.Pin, *(int*)(from + IdOfProvince), id, crisis.Key);
+                Send(unit, id, Job.Pin, Game.Id(from), id, crisis.Key);
                 here.Remove(unit);
                 _sent[id] = ([unit], true);
                 pins++;
@@ -170,9 +170,9 @@ public unsafe partial class FrontLine
         foreach (var (unit, held) in _held.ToArray())
         {
             if (held.Job != Job.Pin || _pending.ContainsKey(unit)) continue;
-            if (!Fighting(unit))
+            if (!Division.Fighting(unit))
             {
-                if (!Walking(unit)) _held.Remove(unit); // won, or the attack ended: its front order takes it from here
+                if (!Division.Walking(unit)) _held.Remove(unit); // won, or the attack ended: its front order takes it from here
                 continue;
             }
             if (Org(unit) >= PinStopOrg && Crisis(held.Front)) continue;

@@ -90,13 +90,13 @@ public unsafe partial class AiAssist
     /// </summary>
     private void TrackFronts(nint general)
     {
-        var hour = Hour;
+        var hour = Game.Hour;
         (int Tag, nint Province, int Weight, HashSet<int> Line)? spot = null; // the thinnest enemy sector on the theatre's line, for the axis
         List<long>? armies = null; // CRef ids of the theatre's armies at war, for paradrops
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
-            var tag = country == 0 ? 0 : *(int*)(country + 8);
+            var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag == 0 || tag == Game.ControlledTag) continue;
             var reference = (int*)(front + FrontOfAiFront);
             if (reference[0] == 0 && reference[1] == 0) continue;
@@ -117,15 +117,15 @@ public unsafe partial class AiAssist
             {
                 nint ours = *(nint*)(pairs + 16 * i), theirs = *(nint*)(pairs + 16 * i + 8);
                 if (theirs == 0) continue;
-                if (!enemyHeld.TryGetValue(theirs, out var held)) held = enemyHeld[theirs] = Enemy(country, tag, theirs);
+                if (!enemyHeld.TryGetValue(theirs, out var held)) held = enemyHeld[theirs] = Province.Enemy(country, tag, theirs);
                 if (!held || ours == 0) continue;
                 contact.Add(ours);
-                if (Divisions(theirs) > 0) threatened.Add(ours);
+                if (Province.Divisions(theirs) > 0) threatened.Add(ours);
             }
             var hostile = enemyHeld.ContainsValue(true);
             if (_paradrops && hostile)
                 foreach (var army in Native.PdxArray(front + ArmiesOfAiFront))
-                    if (army != 0) (armies ??= []).Add(*(long*)(army + RefOfGroup));
+                    if (army != 0) (armies ??= []).Add(new OrdersGroup(army).Ref);
             // The attack gate and the backfill read this; a front with no threat left drops out at once.
             if (threatened.Count > 0) _line[front] = (hour, tag, threatened);
             else _line.TryRemove(front, out _);
@@ -135,8 +135,8 @@ public unsafe partial class AiAssist
                 foreach (var id in Game.Neighbours(our))
                 {
                     var p = Game.Province(id);
-                    if (p == 0 || !Enemy(country, tag, p)) continue;
-                    var weight = SpotWeight(p, our);
+                    if (p == 0 || !Province.Enemy(country, tag, p)) continue;
+                    var weight = Province.AttackWeight(p, our);
                     if (spot == null || spot.Value.Tag == tag && weight < spot.Value.Weight) spot = (tag, p, weight, spot?.Line ?? []);
                 }
                 if (spot?.Tag == tag) foreach (var our in threatened) spot.Value.Line.Add(Game.Id(our));
@@ -188,21 +188,11 @@ public unsafe partial class AiAssist
             var country = *(nint*)(front + CountryOfFront);
             if (country == 0 || *(int*)fc <= 0 || *(int*)(fc + UnitsOfConcentration) == 0 || *(nint*)(fc + ArmyOfConcentration) == 0
                 || *(byte*)(fc + HasTarget) == 0 || *(byte*)(fc + AttackOn) == 0 || *(nint*)(fc + PathOfConcentration) == 0 || *(nint*)(front + InvasionTarget) != 0) continue;
-            var tag = *(int*)(country + 8);
+            var tag = Game.Tag(country);
             foreach (var p in Native.PdxArray(fc + PathOfConcentration)) // path[0] ours (the source), path[n - 1] the target
-                if (p != 0 && Enemy(country, tag, p)) return Game.Id(p);
+                if (p != 0 && Province.Enemy(country, tag, p)) return Game.Id(p);
         }
         return 0;
-    }
-
-    /// <summary>How hard the enemy province is to take from ours: its divisions and forts, more for harsh terrain or a river in front of it.</summary>
-    private static int SpotWeight(nint target, nint from)
-    {
-        var weight = 2 * Divisions(target) + _fortLevel(target);
-        var terrain = Terrain(target);
-        if (terrain != 0 && (*(int*)(terrain + CategoryOfTerrain) & (Mountain | Urban | Marsh | Jungle)) != 0) weight += 3;
-        if (Game.AdjacencyType(from, Game.Id(target)) >= River) weight += 2;
-        return weight;
     }
 
     /// <summary>The province and the two rings of provinces around it (an axis' core, a beach's surroundings).</summary>
@@ -230,20 +220,20 @@ public unsafe partial class AiAssist
     private static bool OnAxis(int tag, nint from, nint to)
     {
         if (Grads.ContainsKey(tag)) return true; // on its grad: no breakthrough; the grad's own filter picks the targets
-        var hour = Hour;
+        var hour = Game.Hour;
         foreach (var axis in Axes.Values)
             if (axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours && axis.Line.Contains(Game.Id(from)))
-                return axis.Core.Contains(Game.Id(to)) || Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(axis.Core.Contains);
+                return axis.Core.Contains(Game.Id(to)) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(axis.Core.Contains);
         return true;
     }
 
     /// <summary>Our stack in <paramref name="from"/> passes vanilla's strength test for a local attack on <paramref name="to"/> (divisions, forts).</summary>
-    private static bool Strong(nint from, nint to) => Divisions(from) >= Divisions(to) * (_fortLevel(to) / 2 + 1);
+    private static bool Strong(nint from, nint to) => Province.Divisions(from) >= Province.Divisions(to) * (Province.FortLevel(to) / 2 + 1);
 
     /// <summary>Whether the province is on one of the tag's breakthrough axes of the last two days (CAS backs it).</summary>
     private static bool OnAnyAxis(int tag, int province)
     {
-        var hour = Hour;
+        var hour = Game.Hour;
         foreach (var axis in Axes.Values)
             if (axis.Tag == tag && hour - axis.Hour is >= 0 and < 2 * AxisHours && axis.Core.Contains(province)) return true;
         return false;

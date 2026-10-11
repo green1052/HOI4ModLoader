@@ -40,9 +40,8 @@ public static class OverlaySignatures
 public unsafe partial class AutoTrade
 {
     // Layouts for HOI4 1.19.3 (the map arrow manager's CreateArrow calling convention).
-    // CProvince+0xB8 -> its static data, whose {int x, y} at +0xB8 is the map arrow point's 1/100000 (the game's own arrows
-    // read it so, 0x141253BC0).
-    private const int StaticOfProvince = 0xB8, PositionOfStatic = 0xB8;
+    // A province's static data: {int x, y} at +0xB8 is the map arrow point's 1/100000 (the game's own arrows read it so, 0x141253BC0).
+    private const int PositionOfStatic = 0xB8;
     private const int RoutesOfResources = 0x788;   // CCountryResources: CResourceDeliveryRoute* per partner tag index; empty slots are 0
     private const int KindOfRoute = 8, TagAOfRoute = 48, TagBOfRoute = 52; // route: kind (0, 3: no live route), the two trading tags
     private const int StatesOfRoute = 72, RegionsOfRoute = 96; // route: the states (land) / regions (sea) it passes
@@ -112,14 +111,12 @@ public unsafe partial class AutoTrade
     private void Poll()
     {
         _map.Check();
-        var down = Gui.KeyHeld('C');
-        if (Gui.CtrlHeld && Gui.AltHeld && Gui.GameFocused && down && !_down)
+        if (Gui.HotkeyPressed('C', ref _down))
         {
             _on = !_on;
             _drawn = 0; // on: draw now, not on the next refresh
             if (!_on) foreach (var arrow in _arrows) _visible(arrow, 0);
         }
-        _down = down;
         if (!_on || !Game.HasStarted || Game.ControlledTag == 0) return;
         if (_manager == 0)
         {
@@ -196,7 +193,7 @@ public unsafe partial class AutoTrade
             var n = 0;
             foreach (var province in Native.PdxArray(holder + ProvincesOfHolder))
             {
-                var info = province == 0 ? 0 : *(nint*)(province + StaticOfProvince);
+                var info = province == 0 ? 0 : *(nint*)(province + Province.StaticOffset);
                 if (info == 0) continue;
                 x += *(int*)(info + PositionOfStatic);
                 y += *(int*)(info + PositionOfStatic + 4);

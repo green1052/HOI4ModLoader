@@ -63,7 +63,8 @@ public class MyPlugin : Plugin
 - `Config.Bind` settings in any section but `[General]` show in the Mods tab (true/false as checkboxes, numbers with arrows), in the order they're bound; clamp numbers to a sane range.
 - Bind every setting in `Load()`, unconditionally (even a switched-off feature's, before anything that can throw): after a successful load the loader deletes the entries the plugin didn't bind, as settings a newer version dropped. At startup it also deletes `config\com.green1052.*.cfg` files whose plugin is no longer in `plugins\`.
 - Register patches and `MainThread.Every` timers in `Load()`, so a reload cleans them up.
-- Send game actions with `Commands.New` / `TryPost`: they are the game's own commands, the same the UI sends, so multiplayer stays in sync.
+- Send game actions with `Commands.New` / `TryPost`: they are the game's own commands, the same the UI sends, so multiplayer stays in sync. Ready-made: `Commands.Move`, `Unassign`, `NewOrderCommand` (battle plan play/stop, order delete...).
+- Game structures more than one plugin reads live in the core, with their offsets and signatures: `Game` (countries, `Hour`, `AtWar`/`Allied`, `StrategicAir`, supply flow), `Province` (fields, terrain, forts, enemy/friendly, pockets, supply starvation), `State`, `Buildings`, `Division` (CArmy), `Order` (COrder), `OrdersGroup`, `ProductionLine`; `Gui.HotkeyPressed` (Ctrl+Alt+key) and `Gui.Selection`. Their game functions resolve on first use and are safe on the game's AI threads. Add a layout there once a second plugin needs it.
 - Plugin ids look like `com.green1052.<name>`.
 
 ### Translations

@@ -40,13 +40,12 @@ public unsafe partial class ArmySupport
 {
     private static class Org
     {
-        // CArmy (a land division), COrdersGroup, CCountry, provider (an orders group manager), CUnitLeader. Layouts for HOI4 1.19.3.
-        public const int Kind = 0x08, Group = 0xC0, Commander = 0x1D8, Location = 0x1F0, Provider = 0x2A0;
-        public const int SelfRef = 0x08, ProviderOfGroup = 0x40, MemberCount = 0x5C, Leader = 0x88;
-        public const int Units = 0x290, Providers = 0x168, LeaderHolder = 0xFF0, Leaders = 0x70, GroupsOfProvider = 0xB0;
-        public const int LeaderTag = 0x120, SkillLevel = 0xE60, LevelOfSkill = 0x1B8, LeaderType = 0xE7C, Attack = 0xF58, Defense = 0xF68, Planning = 0xF78, Logistics = 0xF88;
+        // CArmy, COrdersGroup, CCountry, CUnitLeader (the rest: the loader's Division and OrdersGroup). Layouts for HOI4 1.19.3.
+        public const int Provider = 0x2A0;                                    // CArmy: its provider (an orders group manager, one per theatre)
+        public const int ProviderOfGroup = 0x40, MemberCount = 0x5C, Leader = 0x88;
+        public const int LeaderHolder = 0xFF0, Leaders = 0x70;
+        public const int SelfRef = 0x08, LeaderTag = 0x120, SkillLevel = 0xE60, LevelOfSkill = 0x1B8, LeaderType = 0xE7C, Attack = 0xF58, Defense = 0xF68, Planning = 0xF78, Logistics = 0xF88;
         public const int FieldMarshal = 0, General = 1;
-        public const int FirstNode = 0x30, NextOfNode = 0x10;
         public const int NewArmySize = 0x60, NewArmyGroupSize = 0x80, JoinSize = 0x50, SetLeaderSize = 0x40;
         public const long TimeoutMs = 30_000; // multiplayer: a round trip
     }
@@ -67,17 +66,13 @@ public unsafe partial class ArmySupport
     private delegate* unmanaged<nint, nint, nint, nint> _newArmyGroup;
     private delegate* unmanaged<nint, nint, nint, int, nint> _joinArmyGroup;
     private int* _armyCap;
-    private nint _selectionUi;
-    private int _selectionOffset;
     private bool _organizeDown;
     private Organizing? _organizing;
     private PerGame _organizeGame = null!;
 
     private void LoadOrganize()
     {
-        var at = Sig.Find(Signatures.AirWingsSelected); // `mov rcx,[rip+ui]; ...; add rcx,538h`: the selection list
-        _selectionUi = at + 11 + *(int*)(at + 7);
-        _selectionOffset = *(int*)(at + 19);
+        _ = Sig.Find(Gui.AirWingsSelectedSig); // the selection list
         _newArmy = (delegate* unmanaged<nint, nint, nint, nint, nint>)Sig.Find(Signatures.NewArmyCommand);
         var call = Sig.Find(Signatures.NewArmyGroupCall) + 32;
         _newArmyGroup = (delegate* unmanaged<nint, nint, nint, nint>)(call + 5 + *(int*)(call + 1));
@@ -92,10 +87,7 @@ public unsafe partial class ArmySupport
 
     private void PollOrganizeKey()
     {
-        var down = Gui.KeyHeld('G');
-        var hit = down && !_organizeDown && Gui.CtrlHeld && Gui.AltHeld && Gui.GameFocused;
-        _organizeDown = down;
-        if (!hit || !Game.HasStarted) return;
+        if (!Gui.HotkeyPressed('G', ref _organizeDown) || !Game.HasStarted) return;
         _organizeGame.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
@@ -117,11 +109,11 @@ public unsafe partial class ArmySupport
     private void StartOrganize(List<nint> selected)
     {
         var cap = Math.Max(1, *_armyCap);
-        var byGroup = selected.GroupBy(u => *(nint*)(u + Org.Group)).ToList();
+        var byGroup = selected.GroupBy(Division.Group).ToList();
         // A whole army of a sensible size stays as it is: its general, plans and battle plans are kept.
         var keep = byGroup.Where(g => g.Key != 0 && g.Count() == *(int*)(g.Key + Org.MemberCount) && g.Count() * 2 >= cap && g.Count() <= cap)
             .Select(g => g.Key).ToList();
-        var pool = selected.Where(u => !keep.Contains(*(nint*)(u + Org.Group))).ToList();
+        var pool = selected.Where(u => !keep.Contains(Division.Group(u))).ToList();
         // Divisions of different providers (theatres) can't share an army.
         var chunks = pool.GroupBy(u => *(nint*)(u + Org.Provider)).SelectMany(p => Split([.. p], cap)).ToList();
         var parent = byGroup.Where(g => g.Key != 0 && *(nint*)(g.Key + OrdersGroup.ParentOffset) != 0)
@@ -163,11 +155,11 @@ public unsafe partial class ArmySupport
     /// <summary>Once every new army exists: generals for them, then into the army group (or a new one).</summary>
     private void Armies(Organizing job, nint country, int tag)
     {
-        var ours = Native.PdxArray(country + Org.Units).ToArray().ToHashSet();
+        var ours = Game.Units(country).ToArray().ToHashSet();
         var armies = new List<nint>();
         foreach (var chunk in job.Chunks)
         {
-            var groups = chunk.Where(ours.Contains).Select(u => *(nint*)(u + Org.Group)).Distinct().ToList();
+            var groups = chunk.Where(ours.Contains).Select(Division.Group).Distinct().ToList();
             if (groups.Count == 0) continue; // all gone
             if (groups.Count > 1 || groups[0] == 0 || job.OldGroups.Contains(Ref(groups[0]))) return; // not run yet
             armies.Add(groups[0]);
@@ -229,17 +221,10 @@ public unsafe partial class ArmySupport
     /// <summary>Our land divisions in the player's selection (checked against the country's own list before anything else is read).</summary>
     private List<nint> SelectedDivisions(nint country, int tag)
     {
-        var ui = *(nint*)_selectionUi;
         var result = new List<nint>();
-        if (ui == 0) return result;
-        var ours = Native.PdxArray(country + Org.Units).ToArray().ToHashSet();
-        var node = *(nint*)(ui + _selectionOffset + Org.FirstNode);
-        for (var n = 0; node != 0 && n < 5000; n++, node = *(nint*)(node + Org.NextOfNode))
-        {
-            var item = *(nint*)node;
-            if (ours.Remove(item) && *(int*)(item + Org.Kind) == 0 && *(int*)(item + Org.Commander) == tag && *(nint*)(item + Org.Location) != 0)
-                result.Add(item);
-        }
+        var ours = Game.Units(country).ToArray().ToHashSet();
+        foreach (var item in Gui.Selection())
+            if (ours.Remove(item) && Division.IsLand(item) && Division.Commander(item) == tag && Division.Location(item) != 0) result.Add(item);
         return result;
     }
 
@@ -267,7 +252,7 @@ public unsafe partial class ArmySupport
         return chunks;
     }
 
-    private static int ProvinceOf(nint unit) => Game.Id(*(nint*)(unit + Org.Location));
+    private static int ProvinceOf(nint unit) => Game.Id(Division.Location(unit));
 
     private static int Hop(Dictionary<int, int> hops, nint unit) => hops.GetValueOrDefault(ProvinceOf(unit), int.MaxValue);
 
@@ -297,7 +282,7 @@ public unsafe partial class ArmySupport
     {
         var holder = *(nint*)(country + Org.LeaderHolder);
         if (holder == 0) return [];
-        var busy = Groups(country).Select(g => *(nint*)(g + Org.Leader)).ToHashSet();
+        var busy = OrdersGroup.OfCountry(country).Select(g => *(nint*)(g + Org.Leader)).ToHashSet();
         return [.. Native.PdxArray(holder + Org.Leaders).ToArray()
             .Where(l => l != 0 && *(int*)(l + Org.LeaderTag) == tag && *(int*)(l + Org.LeaderType) == type && !busy.Contains(l))
             .OrderByDescending(Skill)
@@ -313,7 +298,7 @@ public unsafe partial class ArmySupport
     private static bool SetLeader(nint leader, nint group) => Post(Org.SetLeaderSize, cmd =>
     {
         *(long*)(cmd + 0x28) = *(long*)(leader + Org.SelfRef);
-        *(long*)(cmd + 0x30) = *(long*)(group + Org.SelfRef);
+        *(long*)(cmd + 0x30) = Ref(group);
         return cmd;
     }, Signatures.SetLeaderCommand);
 
@@ -324,18 +309,8 @@ public unsafe partial class ArmySupport
         return Commands.TryPost(make(cmd));
     }
 
-    private static IEnumerable<nint> Groups(nint country)
-    {
-        foreach (var provider in Native.PdxArray(country + Org.Providers).ToArray())
-        {
-            if (provider == 0) continue;
-            foreach (var group in Native.PdxArray(provider + Org.GroupsOfProvider).ToArray())
-                if (group != 0) yield return group;
-        }
-    }
-
     /// <summary>The country's army or army group with CRef <paramref name="cref"/>, or 0.</summary>
-    private static nint Group(nint country, long cref) => Groups(country).FirstOrDefault(g => Ref(g) == cref);
+    private static nint Group(nint country, long cref) => OrdersGroup.OfCountry(country).FirstOrDefault(g => Ref(g) == cref);
 
-    private static long Ref(nint group) => *(long*)(group + Org.SelfRef);
+    private static long Ref(nint group) => new OrdersGroup(group).Ref;
 }

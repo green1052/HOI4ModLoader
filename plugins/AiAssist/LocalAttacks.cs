@@ -7,9 +7,7 @@ public unsafe partial class AiAssist
 {
     // ---- Local attack targets: the micro attack candidate check, patched at its one call site ----
 
-    private const int ControllerOfProvince = 0x188, DivisionsInProvince = 0x11C;
-
-    private const int FlagsOfStatic = 0xD2, BlockedOfStateCategory = 0x15C, Impassable = 4; // what vanilla's candidate loop skips
+    private const int BlockedOfStateCategory = 0x15C; // what vanilla's candidate loop skips
 
     private static delegate* unmanaged<nint, nint, nint, byte> _cantMove;
     private static nint _pocketCrumb;
@@ -57,17 +55,17 @@ public unsafe partial class AiAssist
                 var c = Game.Province(id);
                 // The other targets this attack could take instead, as vanilla and the checks above would let them through;
                 // a strength test failure fails vanilla's candidate loop anyway.
-                if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || !Strong(from, c) || RuledOut(me, tag, from, c) != 0) continue;
-                pocket = Math.Max(pocket, Pocket(me, tag, c));
+                if (c == 0 || !Province.Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || !Strong(from, c) || RuledOut(me, tag, from, c) != 0) continue;
+                pocket = Math.Max(pocket, Province.Pocket(me, tag, c));
                 relief = Math.Max(relief, Relief(me, tag, c));
-                shortest = Math.Min(shortest, FrontChange(me, tag, c));
+                shortest = Math.Min(shortest, Province.FrontChange(me, tag, c));
                 valuable = Math.Max(valuable, TargetValue(c));
             }
             var skip = relief > 0 && relief >= pocket ? Relief(me, tag, to) == 0 // the corridor to our own pocket first
-                : pocket > 0 ? Pocket(me, tag, to) == 0                          // pocket targets only
+                : pocket > 0 ? Province.Pocket(me, tag, to) == 0                          // pocket targets only
                 : _axis && !OnAxis(tag, from, to) ? true                         // nothing off the breakthrough axis
                 : valuable >= MinTargetValue ? TargetValue(to) < valuable / 2    // worth at least half the best
-                : shortest < 0 && FrontChange(me, tag, to) > 0;                  // nothing that lengthens the front
+                : shortest < 0 && Province.FrontChange(me, tag, to) > 0;                  // nothing that lengthens the front
             if (skip) Interlocked.Increment(ref _steered);
             return skip ? (byte)1 : (byte)0;
         }
@@ -88,9 +86,9 @@ public unsafe partial class AiAssist
     /// </summary>
     private static int RuledOut(nint me, int tag, nint from, nint to)
     {
-        if (Grads.ContainsKey(tag) && !Exhausted(to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
+        if (Grads.ContainsKey(tag) && !Exhausted(to) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
         if (_armorTerrain && BadForArmor(tag, from, to)) return Steered;
-        if (_supplyAware && Starved(me, tag, from, to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Unsupplied;
+        if (_supplyAware && Province.Starved(me, tag, from, to, _supplyShare) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Unsupplied;
         return 0;
     }
 
@@ -98,45 +96,10 @@ public unsafe partial class AiAssist
     /// border, a province units can enter, in no blocked state. Others must not make the real targets look worse.</summary>
     private static bool Candidate(nint from, nint to)
     {
-        if (Game.AdjacencyType(from, Game.Id(to)) == Impassable) return false;
-        var info = *(nint*)(to + StaticOfProvince);
-        if (info == 0 || (*(byte*)(info + FlagsOfStatic) & 1) == 0) return false;
-        var state = *(nint*)(to + StateOfProvince);
+        if (Game.AdjacencyType(from, Game.Id(to)) == Province.Impassable || !Province.Enterable(to)) return false;
+        var state = Province.State(to);
         var category = state == 0 ? 0 : *(nint*)(state + ResourcesOfState);
         return category == 0 || *(byte*)(category + BlockedOfStateCategory) == 0;
-    }
-
-    /// <summary>Enemy divisions that taking <paramref name="target"/> cuts off: in enemy provinces next to it whose other land neighbours are all ours or allied.</summary>
-    // ponytail: one-province pockets only; a flood fill bounded by NAI.POCKET_DISTANCE_MAX if bigger encirclements are missed.
-    private static int Pocket(nint me, int tag, nint target)
-    {
-        var cut = 0;
-        var targetId = Game.Id(target);
-        foreach (var id in Game.Neighbours(target))
-        {
-            var e = Game.Province(id);
-            if (e == 0 || Divisions(e) == 0 || !Enemy(me, tag, e)) continue;
-            if (Game.Neighbours(e).All(n => n == targetId || Game.Province(n) is var q && (q == 0 || *(int*)(q + ControllerOfProvince) == 0 || Friendly(me, tag, q))))
-                cut += Divisions(e);
-        }
-        return cut;
-    }
-
-    /// <summary>
-    /// How the front's length changes when <paramref name="target"/> is taken: its enemy neighbours become new front, its
-    /// neighbours of ours stop being front. Negative = shorter.
-    /// </summary>
-    private static int FrontChange(nint me, int tag, nint target)
-    {
-        var change = 0;
-        foreach (var id in Game.Neighbours(target))
-        {
-            var n = Game.Province(id);
-            if (n == 0 || *(int*)(n + ControllerOfProvince) == 0) continue; // sea
-            if (Enemy(me, tag, n)) change++;
-            else if (Friendly(me, tag, n)) change--;
-        }
-        return change;
     }
 
     // ---- Relief: local attacks next to a pocket of ours open the corridor to it (part of AttackTargets) ----
@@ -160,7 +123,7 @@ public unsafe partial class AiAssist
         var (trapped, outside) = (0, false);
         foreach (var id in Game.Neighbours(target))
             if (pockets.TryGetValue(id, out var n)) trapped = Math.Max(trapped, n);
-            else if (Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) > 0 && Friendly(me, tag, p)) outside = true; // sea: controller 0
+            else if (Game.Province(id) is var p && p != 0 && Province.Controller(p) > 0 && Province.Friendly(me, tag, p)) outside = true; // sea: controller 0
         return outside ? trapped : 0;
     }
 
@@ -173,11 +136,11 @@ public unsafe partial class AiAssist
     // our divisions counts as "outside". A per-province pocket id if that ever links two pockets.
     private static Dictionary<int, int> OurPockets(nint me, int tag)
     {
-        var hour = Hour;
+        var hour = Game.Hour;
         if (Encircled.TryGetValue(tag, out var cached) && cached.Hour == hour) return cached.Pockets;
         var ours = new Dictionary<nint, int>();
-        foreach (var unit in Native.PdxArray(me + UnitsOfCountry))
-            if (unit != 0 && *(int*)(unit + KindOfUnit) == 0 && *(nint*)(unit + LocationOfUnit) is var at && at != 0)
+        foreach (var unit in Game.Units(me))
+            if (unit != 0 && Division.IsLand(unit) && Division.Location(unit) is var at && at != 0)
                 ours[at] = ours.GetValueOrDefault(at) + 1;
         Dictionary<int, int>? pockets = null;
         var fills = new Dictionary<int, int>(); // province id -> the fill that reached it
@@ -185,20 +148,20 @@ public unsafe partial class AiAssist
         foreach (var start in ours.Keys)
         {
             fill++;
-            if (*(int*)(start + ControllerOfProvince) <= 0 || !Friendly(me, tag, start) || !fills.TryAdd(Game.Id(start), fill)) continue;
+            if (Province.Controller(start) <= 0 || !Province.Friendly(me, tag, start) || !fills.TryAdd(Game.Id(start), fill)) continue;
             var region = new List<nint> { start };
             var (open, enemy) = (false, false);
             for (var i = 0; i < region.Count && !open && region.Count <= MaxPocketProvinces; i++)
                 foreach (var id in Game.Neighbours(region[i]))
                 {
                     var p = Game.Province(id);
-                    if (p == 0 || *(int*)(p + ControllerOfProvince) <= 0) continue; // sea, wasteland
-                    if (Friendly(me, tag, p))
+                    if (p == 0 || Province.Controller(p) <= 0) continue; // sea, wasteland
+                    if (Province.Friendly(me, tag, p))
                     {
                         if (fills.TryAdd(id, fill)) region.Add(p);
                         else if (fills[id] != fill) open = true; // joins a region an earlier fill gave up on: too big
                     }
-                    else if (Enemy(me, tag, p)) enemy = true;
+                    else if (Province.Enemy(me, tag, p)) enemy = true;
                     else open = true; // neutral land: a way out
                 }
             if (open || !enemy || region.Count > MaxPocketProvinces) continue;
@@ -213,13 +176,9 @@ public unsafe partial class AiAssist
 
     // ---- Armor and terrain: the divisions' own terrain attack (unit data: modded games too) plus the river crossing ----
 
-    private const int UnitsInProvince = 0x110, StaticOfProvince = 0xB8, TerrainOfStatic = 0xA8;
-    private const int IndexOfTerrain = 0x88, CategoryOfTerrain = 0x8C;
-    private const int CommanderOfUnit = 0x1D8, StatsOfUnit = 0x138;
-    private const int Hardness = 0xB8, Armor = 0x298, RiverAttack = 0x390, TerrainModifiers = 0x3F8, TerrainModifierSize = 0x28, AttackOfModifier = 0x10;
-    private const int Mountain = 0x8, Urban = 0x10, Marsh = 0x2000, Jungle = 0x10000;
-    private const int River = 2, LargeRiver = 3;
-    private const long Armored = 40_000, Crippling = -25_000; // hardness 0.4; -25 % attack
+    private const int IndexOfTerrain = 0x88;
+    private const int RiverAttack = 0x390, TerrainModifiers = 0x3F8, TerrainModifierSize = 0x28, AttackOfModifier = 0x10; // CArmy stats
+    private const long Crippling = -25_000; // -25 % attack
 
     private static nint _riverSmall, _riverLarge; // the RIVER_CROSSING_PENALTY(_LARGE) defines
     private static bool _armorTerrain;
@@ -231,36 +190,31 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool BadForArmor(int tag, nint from, nint to)
     {
-        var terrain = Terrain(to);
+        var terrain = Province.Terrain(to);
         var index = terrain == 0 ? 0 : *(int*)(terrain + IndexOfTerrain);
         if (index <= 0) return false;
         var river = Game.AdjacencyType(from, Game.Id(to));
-        var crossing = river == LargeRiver ? *(long*)_riverLarge : river == River ? *(long*)_riverSmall : 0;
+        var crossing = river == Province.LargeRiver ? *(long*)_riverLarge : river == Province.River ? *(long*)_riverSmall : 0;
         int ours = 0, mobile = 0;
         long attack = 0;
-        foreach (var unit in Native.PdxArray(from + UnitsInProvince))
+        foreach (var unit in Province.Units(from))
         {
-            if (*(int*)(unit + CommanderOfUnit) != tag) continue;
+            if (Division.Commander(unit) != tag) continue;
             ours++;
-            var stats = *(nint*)(unit + StatsOfUnit);
-            if (stats == 0 || *(long*)(stats + Hardness) < Armored && *(long*)(stats + Armor) <= 0) continue;
+            if (!Division.Motorized(unit)) continue;
+            var stats = Division.Stats(unit);
             var modifiers = *(nint*)(stats + TerrainModifiers);
             if (modifiers == 0) continue;
             mobile++;
-            attack += *(long*)(modifiers + (long)TerrainModifierSize * (index - 1) + AttackOfModifier) + (river >= River ? crossing + *(long*)(stats + RiverAttack) : 0);
+            attack += *(long*)(modifiers + (long)TerrainModifierSize * (index - 1) + AttackOfModifier) + (river >= Province.River ? crossing + *(long*)(stats + RiverAttack) : 0);
         }
         if (mobile == 0 || mobile * 2 < ours) return false;
-        return attack / mobile <= Crippling || river >= River && (*(int*)(terrain + CategoryOfTerrain) & (Mountain | Marsh | Jungle | Urban)) != 0;
+        return attack / mobile <= Crippling || river >= Province.River && (Province.TerrainCategory(to) & (Province.Mountain | Province.Marsh | Province.Jungle | Province.Urban)) != 0;
     }
 
     // ---- Target value: victory points, capitals, supply hubs, airfields, resources, and how well it is held ----
 
-    private const int VictoryPoints = 0x38, StateOfProvince = 0xC0, BuildingsOfProvince = 0x190;
-    private const int ProvincesOfState = 0x18, IdOfState = 0x58, BestVictoryPoints = 0x85C, BuildingsOfState = 0x120, ResourcesOfState = 0x30;
-    // CBuildingDatabase (0x3F0 bytes): 0x3A0 supply_node, 0x3A8 rail_way, 0x3B0 infrastructure, 0x3B8 naval_base (the slot
-    // Signatures.BuildingDbCall reads), 0x3C0 arms_factory, 0x3C8 industrial_complex; 0x298 the air base types.
-    private const int ResourceEntries = 0xF8, SupplyNodeType = 0x3A0, AirBaseTypes = 0x298, CapitalOfCountry = 0x1018;
-    private const int LevelOfBuilding = 0x40, WorkingLevel = 0x42; // CBuilding: short levels, built and working (bombed-out ones don't count)
+    private const int ResourcesOfState = 0x30, ResourceEntries = 0xF8, CapitalOfCountry = 0x1018;
     private const int EntrenchOfUnit = 0x458, MaxEntrenchOfUnit = 0x460; // CArmy: dig-in now and at most (1e5)
     private const int MinTargetValue = 30, FreshStrength = 70;
     private const long CapitalsCacheMs = 60_000;
@@ -275,22 +229,16 @@ public unsafe partial class AiAssist
     /// </summary>
     private static double TargetValue(nint target)
     {
-        var db = *(nint*)_buildingDb;
-        var state = *(nint*)(target + StateOfProvince);
-        if (db == 0 || state == 0) return 0;
-        var index = *(int*)(state + BestVictoryPoints);
-        var main = index >= 0 && index < *(int*)(state + ProvincesOfState + 0xC) && ((nint*)*(nint*)(state + ProvincesOfState))[index] == target;
+        var state = Province.State(target);
+        if (Buildings.Db == 0 || state == 0) return 0;
+        var main = State.MainProvince(state) == target;
 
-        double value = 3 * Math.Min(*(int*)(target + VictoryPoints), 30);
-        if (Capitals().Contains(*(int*)(state + IdOfState))) value += main ? 60 : 15;
-        var node = *(nint*)(db + SupplyNodeType); // FindBuilding reads the type at once: never a null one
-        var hub = node == 0 ? 0 : _findBuilding(target + BuildingsOfProvince, node);
-        if (hub != 0 && *(short*)(hub + LevelOfBuilding) > 0) value += 20;
+        double value = 3 * Math.Min(Province.VictoryPoints(target), 30);
+        if (Capitals().Contains(State.Id(state))) value += main ? 60 : 15;
+        if (Province.BuildingLevel(target, Buildings.SupplyNodeSlot) > 0) value += 20;
 
         var air = 0;
-        var types = (nint*)*(nint*)(db + AirBaseTypes);
-        for (int i = 0, n = *(int*)(db + AirBaseTypes + 0xC); i < n; i++)
-            if (types[i] != 0 && _findBuilding(state + BuildingsOfState, types[i]) is var b && b != 0) air += *(short*)(b + WorkingLevel);
+        foreach (var type in Buildings.AirBaseTypes) air += Buildings.WorkingLevel(State.Buildings(state), type);
         long resources = 0;
         var definition = *(nint*)(state + ResourcesOfState);
         if (definition != 0)
@@ -299,18 +247,18 @@ public unsafe partial class AiAssist
         value += (main ? 1 : 0.25) * (2 * air + Math.Min(resources / Native.FixedPoint, 40));
 
         // How it is held.
-        var defenders = Native.PdxArray(target + UnitsInProvince);
+        var defenders = Province.Units(target);
         if (defenders.Length == 0) return value + MinTargetValue; // free for the taking: always a target worth going for
         long org = 0, strength = 0;
         var dugIn = 0;
         foreach (var unit in defenders)
         {
-            org += Ratio(unit, OrgRatioSlot);
-            strength += Ratio(unit, StrengthRatioSlot);
+            org += Division.Organisation(unit);
+            strength += Division.Strength(unit);
             if (*(long*)(unit + MaxEntrenchOfUnit) > 0 && *(long*)(unit + EntrenchOfUnit) * 100 >= 60 * *(long*)(unit + MaxEntrenchOfUnit)) dugIn++;
         }
         if (org / defenders.Length < 30_000 || strength / defenders.Length < 50_000) return value + 10;
-        return value - 5 * defenders.Length * (1 + _fortLevel(target) / 2.0) - 4 * dugIn;
+        return value - 5 * defenders.Length * (1 + Province.FortLevel(target) / 2.0) - 4 * dugIn;
     }
 
     /// <summary>Every country's capital state id (cached a minute).</summary>
@@ -333,17 +281,17 @@ public unsafe partial class AiAssist
     private static void TakeEmpty(nint country, int tag, nint[] units, long now)
     {
         var taken = 0;
-        foreach (var here in units.Where(u => *(int*)(u + KindOfUnit) == 0 && *(int*)(u + CommanderOfUnit) == tag && *(nint*)(u + LocationOfUnit) != 0)
-                     .GroupBy(u => *(nint*)(u + LocationOfUnit)))
+        foreach (var here in units.Where(u => Division.IsLand(u) && Division.Commander(u) == tag && Division.Location(u) != 0)
+                     .GroupBy(Division.Location))
         {
-            var fresh = here.Where(u => Spare(u, tag) && Percent(u, StrengthRatioSlot) >= FreshStrength).ToList();
+            var fresh = here.Where(u => Spare(u, tag) && Percent(Division.Strength(u)) >= FreshStrength).ToList();
             var spare = Math.Min(here.Count() - 1, fresh.Count); // one stays
             foreach (var id in Game.Neighbours(here.Key))
             {
                 if (spare == 0) break;
                 var target = Game.Province(id);
-                if (target == 0 || _gap.ContainsKey(id) || Divisions(target) > 0 || !Enemy(country, tag, target)
-                    || _supplyAware && Starved(country, tag, here.Key, target)) continue; // supply must follow it there, as with local attacks
+                if (target == 0 || _gap.ContainsKey(id) || Province.Divisions(target) > 0 || !Province.Enemy(country, tag, target)
+                    || _supplyAware && Province.Starved(country, tag, here.Key, target, _supplyShare)) continue; // supply must follow it there, as with local attacks
                 if (!Send(fresh[--spare], id, now, SentMs)) continue;
                 Interlocked.Increment(ref _taken);
                 if (++taken == MaxMoves) return;
@@ -353,41 +301,6 @@ public unsafe partial class AiAssist
 
     // ---- Supply-aware attacks: no local attacks the attackers' supply can't follow ----
 
-    // CSupplySystem (gamestate+0x3D8): per-province records by id at +0x138 (0xD8 bytes, count at +0x144).
-    // Record +0 _TotalNeed (left after local nodes), +8 supply flowing in (all entries); zeroed and rebuilt each UpdateSupply.
-    private const int SupplyOfGameState = 0x3D8, FlowOfSupply = 0x138, FlowSize = 0xD8;
-    private const int NeedOfFlow = 0, SuppliedOfFlow = 8;
-
     private static bool _supplyAware;
     private static int _supplyShare, _unsupplied;
-
-    /// <summary>
-    /// Supply only flows through our side's provinces, so once <paramref name="to"/> is taken its supply comes over its land
-    /// neighbours held by us or allies. Starved: <paramref name="from"/> gets less than SupplyAwareMinPercent % of what it
-    /// needs and no other friendly neighbour of the target has that much spare (flow in minus its own need).
-    /// Local attacks exempt pocket-closing and relief targets. AI threads (and the main thread), read only: the game rebuilds
-    /// the flow on the main thread each hour, before the AI pass.
-    /// </summary>
-    private static bool Starved(nint me, int tag, nint from, nint to)
-    {
-        var state = Game.State;
-        var supply = state == 0 ? 0 : *(nint*)(state + SupplyOfGameState);
-        if (supply == 0) return false;
-        var flows = *(nint*)(supply + FlowOfSupply);
-        var count = *(int*)(supply + FlowOfSupply + 0xC);
-        var fromId = Game.Id(from);
-        if (flows == 0 || (uint)fromId >= (uint)count) return false;
-        var at = flows + (nint)FlowSize * fromId;
-        var need = *(long*)(at + NeedOfFlow); // the attackers and whatever else draws supply there
-        var wanted = need * _supplyShare / 100;
-        if (need <= 0 || *(long*)(at + SuppliedOfFlow) >= wanted) return false;
-        foreach (var id in Game.Neighbours(to))
-        {
-            var n = Game.Province(id);
-            if (n == 0 || n == from || (uint)id >= (uint)count || *(int*)(n + ControllerOfProvince) <= 0 || !Friendly(me, tag, n)) continue; // sea: controller 0
-            var flow = flows + (nint)FlowSize * id;
-            if (*(long*)(flow + SuppliedOfFlow) - *(long*)(flow + NeedOfFlow) >= wanted) return false;
-        }
-        return true;
-    }
 }

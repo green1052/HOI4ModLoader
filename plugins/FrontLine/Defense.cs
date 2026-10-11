@@ -17,7 +17,7 @@ public unsafe partial class FrontLine
         {
             if (escapes == MaxEscapesPerTurn) break;
             if (!_orders.TryGetValue(unit + MemberOfUnit, out var order) || !IsFront(order) || !Free(unit, tag, _now)) continue;
-            var location = *(nint*)(unit + LocationOfUnit);
+            var location = Division.Location(unit);
             if (location == 0) continue;
             if (_holding.GetValueOrDefault((order, location)) < 2) continue; // alone there: pulling it out opens the line
             if (!necks.TryGetValue(location, out var to)) necks[location] = to = Neck(country, tag, location);
@@ -38,7 +38,7 @@ public unsafe partial class FrontLine
     private int Neck(nint country, int tag, nint from)
     {
         if (!NextToEnemy(country, tag, from)) return -1;
-        var seen = new HashSet<int> { *(int*)(from + IdOfProvince) };
+        var seen = new HashSet<int> { Game.Id(from) };
         var ring = new List<nint> { from };
         var (inside, neck) = (1, 0);
         for (var depth = 1; ; depth++)
@@ -46,14 +46,14 @@ public unsafe partial class FrontLine
             var next = new List<nint>();
             foreach (var province in ring)
             foreach (var id in Game.Neighbours(province))
-                if (seen.Add(id) && Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) == tag) next.Add(p);
+                if (seen.Add(id) && Game.Province(id) is var p && p != 0 && Province.Controller(p) == tag) next.Add(p);
             if (next.Count == 0) return -1; // cut off already, an island, or a dead end behind the neck
             if (neck == 0)
             {
-                if (next.Count <= NeckWidth && next.All(p => NextToEnemy(country, tag, p)) && next.Any(p => EnemyDivisionsNext(country, tag, p))) neck = depth;
+                if (next.Count <= NeckWidth && next.All(p => NextToEnemy(country, tag, p)) && next.Any(p => Province.EnemyDivisionsNext(country, tag, p))) neck = depth;
                 else if ((inside += next.Count) > MaxSalient || depth == MaxNeckSearch) return -1; // too big for a salient, or no neck near
             }
-            else if (next.FirstOrDefault(p => !NextToEnemy(country, tag, p)) is var safe && safe != 0) return *(int*)(safe + IdOfProvince);
+            else if (next.FirstOrDefault(p => !NextToEnemy(country, tag, p)) is var safe && safe != 0) return Game.Id(safe);
             else if (depth - neck == MaxRestSearch) return -1;
             ring = next;
         }
@@ -61,15 +61,7 @@ public unsafe partial class FrontLine
 
     // ---- Fire brigade: mobile reserves a province behind the line counterattack break-ins ----
 
-    private const int StatsOfUnit = 0x138, Hardness = 0xB8, Armor = 0x298; // CArmy stats: hardness 1e5 = 1, armor
-    private const long Armored = 40_000;                                    // hardness 0.4: armored or motorized
     private const int ReserveLine = 6, MaxReserves = 3, MinReserveLine = 3, MaxPostsPerTurn = 1, FireRadius = 3, MaxCountersPerTurn = 2;
-
-    private static bool Motorized(nint unit)
-    {
-        var stats = *(nint*)(unit + StatsOfUnit);
-        return stats != 0 && (*(long*)(stats + Hardness) >= Armored || *(long*)(stats + Armor) > 0);
-    }
 
     /// <summary>
     /// Reserves back from a counterattack return to their post; ones whose post the line moved away from (or onto) go back to
@@ -81,15 +73,15 @@ public unsafe partial class FrontLine
         var ready = new Dictionary<nint, List<nint>>(); // province -> reserves there ready to strike
         foreach (var (unit, held) in _held.ToArray())
         {
-            if (held.Job is not (Job.Reserve or Job.Counter) || !Ready(unit, tag, _now) || Walking(unit)) continue;
+            if (held.Job is not (Job.Reserve or Job.Counter) || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
             var front = fronts.FirstOrDefault(f => f.Key == held.Front);
             var post = Game.Province(held.Post);
-            if (front == null || post == 0 || *(int*)(post + ControllerOfProvince) != tag || NextToEnemy(country, tag, post) || !Near(post, front.Line))
+            if (front == null || post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post) || !Near(post, front.Line))
             {
                 if (Release(unit, tag)) Log.Info("fire brigade: the line moved, a reserve goes back to its front");
                 continue;
             }
-            var location = *(nint*)(unit + LocationOfUnit);
+            var location = Division.Location(unit);
             if (location != post)
             {
                 Commands.Move(unit, held.Post); // back from a counterattack, or pushed off its post
@@ -114,8 +106,8 @@ public unsafe partial class FrontLine
             if (target == 0) continue;
             var province = Game.Province(target);
             if (province == 0) continue;
-            var defenders = Enemy(country, tag, province) ? *(int*)(province + DivisionsInProvince) : Hostiles(country, province);
-            var need = Math.Max(1, (defenders * (_fortLevel(province) / 2 + 1) + 1) / 2); // mobile divisions count double
+            var defenders = Enemy(country, tag, province) ? Province.Divisions(province) : Hostiles(country, province);
+            var need = Math.Max(1, (defenders * (Province.FortLevel(province) / 2 + 1) + 1) / 2); // mobile divisions count double
             var team = new List<nint>(here);
             Search(tag, province, FireRadius, (p, _) =>
             {
@@ -128,7 +120,7 @@ public unsafe partial class FrontLine
             {
                 var held = _held[unit];
                 Send(unit, target, Job.Counter, held.Post, target, held.Front);
-                ready[*(nint*)(unit + LocationOfUnit)].Remove(unit);
+                ready[Division.Location(unit)].Remove(unit);
             }
             _sent[target] = ([.. team], true);
             counters++;
@@ -143,7 +135,7 @@ public unsafe partial class FrontLine
     /// </summary>
     private int BreakIn(nint country, int tag, nint p)
     {
-        var self = *(int*)(p + IdOfProvince);
+        var self = Game.Id(p);
         if (!_sent.ContainsKey(self) && Hostiles(country, p) > 0) return self;
         foreach (var id in Game.Neighbours(p))
         {
@@ -155,7 +147,7 @@ public unsafe partial class FrontLine
             {
                 var q = Game.Province(n);
                 if (q == 0) continue;
-                if (*(int*)(q + ControllerOfProvince) == tag) ours++;
+                if (Province.Controller(q) == tag) ours++;
                 else if (Enemy(country, tag, q)) theirs++;
             }
             if (ours >= 2 && ours >= 2 * theirs && (theirs == 0 || _lastSeen.ContainsKey(id))) return id;
@@ -167,8 +159,8 @@ public unsafe partial class FrontLine
     private int Hostiles(nint country, nint province)
     {
         var n = 0;
-        foreach (var unit in Native.PdxArray(province + UnitsInProvince))
-            if (unit != 0 && AtWar(country, *(int*)(unit + CommanderTag))) n++;
+        foreach (var unit in Province.Units(province))
+            if (unit != 0 && AtWar(country, Division.Commander(unit))) n++;
         return n;
     }
 
@@ -189,10 +181,10 @@ public unsafe partial class FrontLine
             if (_held.Values.Count(h => h.Job is Job.Reserve or Job.Counter && h.Front == front.Key) >= want) continue;
             var post = Post(country, tag, front.Line, posts);
             if (post == 0) continue;
-            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Motorized(u) && Org(u) >= 80 && Str(u) >= 70);
+            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Division.Motorized(u) && Org(u) >= 80 && Str(u) >= 70);
             var unit = Take(tag, post, FireRadius + 3, pool);
             if (unit == 0) continue;
-            var id = *(int*)(post + IdOfProvince);
+            var id = Game.Id(post);
             Send(unit, id, Job.Reserve, id, 0, front.Key);
             posts.Add(id);
             posted++;
@@ -211,7 +203,7 @@ public unsafe partial class FrontLine
         foreach (var id in Game.Neighbours(p))
         {
             var q = Game.Province(id);
-            if (q == 0 || taken.Contains(id) || line.Contains(q) || *(int*)(q + ControllerOfProvince) != tag || NextToEnemy(country, tag, q)) continue;
+            if (q == 0 || taken.Contains(id) || line.Contains(q) || Province.Controller(q) != tag || NextToEnemy(country, tag, q)) continue;
             var covers = Game.Neighbours(q).Count(n => Game.Province(n) is var r && r != 0 && line.Contains(r));
             if (covers > cover) (best, cover) = (q, covers);
         }
@@ -225,7 +217,6 @@ public unsafe partial class FrontLine
     // ---- Depth defence: key line provinces get a second division right behind them ----
 
     private const int MinKey = 25, MaxDepthPerTurn = 2, DepthRadius = 4;
-    private const int VictoryPoints = 0x38, StaticOfProvince = 0xB8, TerrainOfStatic = 0xA8, CategoryOfTerrain = 0x8C, Mountain = 0x8, Urban = 0x10, River = 2;
 
     /// <summary>
     /// Second-line divisions stay while their key province is ours and on the line and their post behind it is safe, else
@@ -237,15 +228,15 @@ public unsafe partial class FrontLine
         var fronts = all.ToList();
         foreach (var (unit, held) in _held.ToArray())
         {
-            if (held.Job != Job.Depth || !Ready(unit, tag, _now) || Walking(unit)) continue;
+            if (held.Job != Job.Depth || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
             var key = Game.Province(held.Target);
             var post = Game.Province(held.Post);
-            if (key == 0 || post == 0 || *(int*)(key + ControllerOfProvince) != tag || !NextToEnemy(country, tag, key)
-                || *(int*)(post + ControllerOfProvince) != tag || NextToEnemy(country, tag, post))
+            if (key == 0 || post == 0 || Province.Controller(key) != tag || !NextToEnemy(country, tag, key)
+                || Province.Controller(post) != tag || NextToEnemy(country, tag, post))
             {
                 if (Release(unit, tag)) Log.Info("depth defence: the line moved, a second-line division goes back to its front");
             }
-            else if (*(nint*)(unit + LocationOfUnit) != post)
+            else if (Division.Location(unit) != post)
             {
                 Commands.Move(unit, held.Post);
                 _pending[unit] = _now + PendingMs;
@@ -256,17 +247,17 @@ public unsafe partial class FrontLine
         var posts = Posts();
         Dictionary<nint, List<nint>>? pool = null;
         var posted = 0;
-        foreach (var (province, _) in fronts.SelectMany(f => f.Line).Distinct().Where(p => !backed.Contains(*(int*)(p + IdOfProvince)))
+        foreach (var (province, _) in fronts.SelectMany(f => f.Line).Distinct().Where(p => !backed.Contains(Game.Id(p)))
                      .Select(p => (Province: p, Key: Key(country, tag, p))).Where(k => k.Key >= MinKey).OrderByDescending(k => k.Key).ToList())
         {
             if (posted == MaxDepthPerTurn) return;
             var post = Post(country, tag, [province], posts);
             if (post == 0) continue;
-            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => !(_fireBrigade && Motorized(u)) && Org(u) >= 70 && Str(u) >= 60);
+            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => !(_fireBrigade && Division.Motorized(u)) && Org(u) >= 70 && Str(u) >= 60);
             var unit = Take(tag, post, DepthRadius, pool);
             if (unit == 0) continue;
-            var id = *(int*)(post + IdOfProvince);
-            Send(unit, id, Job.Depth, id, *(int*)(province + IdOfProvince));
+            var id = Game.Id(post);
+            Send(unit, id, Job.Depth, id, Game.Id(province));
             posts.Add(id);
             posted++;
             Log.Info("depth defence: a spare division takes up a second-line post behind a key province");
@@ -276,16 +267,14 @@ public unsafe partial class FrontLine
     /// <summary>What holding this province of ours is worth: a port (the fleet and supply), victory points, a river in front of it, city or mountain ground.</summary>
     private int Key(nint country, int tag, nint province)
     {
-        var port = Level(province, _navalBaseSlot);
+        var port = Province.BuildingLevel(province, Buildings.NavalBaseSlot);
         if (port > 0) return 1000 + port;
-        var key = 3 * Math.Min(*(int*)(province + VictoryPoints), 30);
-        var info = *(nint*)(province + StaticOfProvince);
-        var terrain = info == 0 ? 0 : *(nint*)(info + TerrainOfStatic);
-        if (terrain != 0 && (*(int*)(terrain + CategoryOfTerrain) & (Mountain | Urban)) != 0) key += 25;
+        var key = 3 * Math.Min(Province.VictoryPoints(province), 30);
+        if ((Province.TerrainCategory(province) & (Province.Mountain | Province.Urban)) != 0) key += 25;
         foreach (var id in Game.Neighbours(province))
         {
             var p = Game.Province(id);
-            if (p == 0 || !Enemy(country, tag, p) || Game.AdjacencyType(province, id) < River) continue;
+            if (p == 0 || !Enemy(country, tag, p) || Game.AdjacencyType(province, id) < Province.River) continue;
             key += 40; // the enemy has to cross a river to take it
             break;
         }

@@ -7,12 +7,11 @@ public unsafe partial class AiAssist
 {
     // ---- Strategic paradrops: the vanilla AI never makes a paradrop order (only the map UI posts the source command) ----
 
-    private const int RefOfGroup = 0x08, TagOfGroup = 0x3C, OrdersOfGroup = 0x98;            // COrdersGroup: CRef id; owner tag; CPdxArray<COrder*> root orders
-    private const int RefOfUnit = 0x18, CanParadrop = 0x5B5, UnitOfMemberSlot = 4;           // CArmy: CRef id; its stats' can-paradrop flag; COrdersGroupMember vtable: -> CArmy*
-    private const int SourceOfOrder = 0xB8, UnitsOfOrder = 0x210, IdOfOrder = 0x244;         // COrder: source province, CPdxArray<COrdersGroupMember*>, id
-    private const int ArgOfOrderCommand = 0x34;                                               // after GroupOfCommand/OrderOfCommand: Execute on (byte), SetParadropTarget province (int)
+    private const int TagOfGroup = 0x3C;                                                      // COrdersGroup: owner tag
+    private const int CanParadrop = 0x5B5, UnitOfMemberSlot = 4;                             // CArmy stats: can-paradrop flag; COrdersGroupMember vtable: -> CArmy*
+    private const int SourceOfOrder = 0xB8;                                                   // COrder: source province
     private const int UnitsOfAssign = 0x28;                                                   // COrderAssign/UnassignCommand: CPdxArray<CRef id>
-    private const int OrderCommandSize = 0x38, SourceCommandSize = 0x50;
+    private const int SourceCommandSize = 0x50;
     private const int MaxParatroopers = 4, ParadropMaxDefenders = 0, NearbyDefendersMax = 4, PocketBonus = 15, SourceSearchDepth = 12;
     private const int FindOrderHours = 3, GiveUpHours = 14 * 24, LaunchHours = 48, RetryHours = 24, CooldownHours = 7 * 24;
 
@@ -61,7 +60,7 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>A division on one of our drops: the front AI and our own movers leave it alone. AI threads too.</summary>
-    private static bool Paratrooper(nint unit) => Volatile.Read(ref _activeDrops) != 0 && Paratroopers.ContainsKey(*(long*)(unit + RefOfUnit));
+    private static bool Paratrooper(nint unit) => Volatile.Read(ref _activeDrops) != 0 && Paratroopers.ContainsKey(Division.Ref(unit));
 
     /// <summary>
     /// AI order commands that would undo one of our drops: its order deleted, its divisions assigned back to the front.
@@ -71,7 +70,7 @@ public unsafe partial class AiAssist
     {
         if (Volatile.Read(ref _activeDrops) == 0) return true;
         var vtable = *(nint*)cmd;
-        if (vtable == _deleteVTable) return !ParadropOrders.ContainsKey((*(long*)(cmd + GroupOfCommand), *(int*)(cmd + OrderOfCommand)));
+        if (vtable == _deleteVTable) return !ParadropOrders.ContainsKey((*(long*)(cmd + Commands.GroupOfOrderCommand), *(int*)(cmd + Commands.OrderOfOrderCommand)));
         if (vtable != _assignVTable && vtable != _unassignVTable) return true;
         var units = Native.PdxArray<long>(cmd + UnitsOfAssign);
         var kept = 0;
@@ -87,13 +86,13 @@ public unsafe partial class AiAssist
     {
         if (!Game.HasStarted || !SheepMod.Active) return; // menus, lobby, loading: no AI commands (and Sheep Mod is asked once a game runs)
         _game.Check(); // CRef ids of an old game must not resolve into this one
-        var hour = Hour;
+        var hour = Game.Hour;
         var player = Game.ControlledTag;
         try
         {
             foreach (var country in Game.Countries)
             {
-                var tag = country == 0 ? 0 : *(int*)(country + 8);
+                var tag = country == 0 ? 0 : Game.Tag(country);
                 if (tag <= 0 || tag == player) continue;
                 if (Drops.TryGetValue(tag, out var drop))
                 {
@@ -121,7 +120,7 @@ public unsafe partial class AiAssist
     /// <summary>A division that can paradrop (its template's paratrooper flag).</summary>
     private static bool CanDrop(nint unit)
     {
-        var stats = unit == 0 ? 0 : *(nint*)(unit + StatsOfUnit);
+        var stats = unit == 0 ? 0 : Division.Stats(unit);
         return stats != 0 && *(byte*)(stats + CanParadrop) != 0;
     }
 
@@ -160,7 +159,7 @@ public unsafe partial class AiAssist
                 return;
             }
             if (!Commands.Post(cmd, true)) return;
-            var drop = new Drop { General = general, Group = *(long*)(group + RefOfGroup), Source = source, Hour = hour, Units = units.Select(u => *(long*)(u + RefOfUnit)).ToArray() };
+            var drop = new Drop { General = general, Group = new OrdersGroup(group).Ref, Source = source, Hour = hour, Units = units.Select(Division.Ref).ToArray() };
             Drops[tag] = drop;
             foreach (var u in drop.Units) Paratroopers[u] = tag;
             return;
@@ -174,10 +173,10 @@ public unsafe partial class AiAssist
         if (group == 0) return false;
         if (drop.Order == 0) // the source command has run by now: find the order it made
         {
-            foreach (var o in Native.PdxArray(group + OrdersOfGroup))
-                if (o != 0 && *(int*)(o + TypeOfOrder) == Paradrop && *(int*)(o + SourceOfOrder) == drop.Source && !ParadropOrders.ContainsKey((drop.Group, *(int*)(o + IdOfOrder))))
+            foreach (var o in Native.PdxArray(group + OrdersGroup.RootOrdersOffset))
+                if (o != 0 && Order.Type(o) == Order.Paradrop && *(int*)(o + SourceOfOrder) == drop.Source && !ParadropOrders.ContainsKey((drop.Group, Order.Id(o))))
                 {
-                    drop.Order = *(int*)(o + IdOfOrder);
+                    drop.Order = Order.Id(o);
                     ParadropOrders[(drop.Group, drop.Order)] = tag;
                     break;
                 }
@@ -187,12 +186,12 @@ public unsafe partial class AiAssist
         if (order == 0) return false;
         // A standalone paradrop order is not deleted by vanilla when it empties (it deletes only ones tied to a front order):
         // delete it ourselves, and after a launch release whoever is left to the front AI.
-        if (*(int*)(order + UnitsOfOrder + 0xC) == 0 || drop.Launched >= 0 && hour - drop.Launched >= LaunchHours || hour - drop.Hour >= GiveUpHours)
+        if (Order.Members(order).Length == 0 || drop.Launched >= 0 && hour - drop.Launched >= LaunchHours || hour - drop.Hour >= GiveUpHours)
         {
             PostOrderCommand(Signatures.DeleteOrderCommand, drop.Group, drop.Order, 0);
             return false;
         }
-        var executing = *(byte*)(order + Executing) != 0;
+        var executing = Order.Executing(order);
         if (executing && drop.Launched >= 0 && hour > drop.Launched) return true; // jumped: its target fills with our paratroopers, vanilla finishes it
         var target = drop.Target == 0 ? 0 : Game.Province(drop.Target);
         if (target == 0 || !DropTarget(country, tag, target) || _isParadropTarget(order, target) == 0)
@@ -201,13 +200,13 @@ public unsafe partial class AiAssist
             var core = Axes.TryGetValue(drop.General, out var axis) && axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours ? axis.Core : null;
             var next = core == null ? 0 : BestTarget(country, tag, core, order);
             if (next != 0 && PostOrderCommand(Signatures.ParadropTargetCommand, drop.Group, drop.Order, next)) drop.Target = next; // vanilla re-checks the route's air on it
-            else if (executing) PostOrderCommand(Signatures.ExecuteCommand, drop.Group, drop.Order, 0); // nothing safe to land on: hold
+            else if (executing) PostOrderCommand(Commands.ExecuteOrder, drop.Group, drop.Order, 0); // nothing safe to land on: hold
             return true;
         }
         if (executing) return true; // vanilla launches on its next hourly update
         // Vanilla's check counts only the paratroopers standing at the source: with nobody there it passes, and nobody jumps.
         if (!AtSource(order, drop.Source, tag)) return true;
-        if (_orderReady(order, 0) != 0 && PostOrderCommand(Signatures.ExecuteCommand, drop.Group, drop.Order, 1)) // prepared, planes, route air superiority
+        if (_orderReady(order, 0) != 0 && PostOrderCommand(Commands.ExecuteOrder, drop.Group, drop.Order, 1)) // prepared, planes, route air superiority
         {
             drop.Launched = hour;
             Interlocked.Increment(ref _paradropped);
@@ -223,13 +222,13 @@ public unsafe partial class AiAssist
     private static bool AtSource(nint order, int source, int tag)
     {
         var there = false;
-        foreach (var member in Native.PdxArray(order + UnitsOfOrder))
+        foreach (var member in Order.Members(order))
         {
             var unit = UnitOf(member);
-            var location = unit == 0 ? 0 : *(nint*)(unit + LocationOfUnit);
-            if (location == 0 || *(int*)(unit + CommanderOfUnit) != tag || !CanDrop(unit)) continue;
+            var location = unit == 0 ? 0 : Division.Location(unit);
+            if (location == 0 || Division.Commander(unit) != tag || !CanDrop(unit)) continue;
             if (Game.Id(location) == source) there = true;
-            else if (*(int*)(unit + Path + 0xC) == 0 && *(int*)(unit + CombatsOfUnit) == 0 && *(byte*)(unit + Retreating) == 0 && *(nint*)(unit + Busy) == 0)
+            else if (!Division.Walking(unit) && !Division.Fighting(unit) && !Division.Retreating(unit) && !Division.Busy(unit))
                 Commands.Move(unit, source, true);
         }
         return there;
@@ -243,15 +242,9 @@ public unsafe partial class AiAssist
         NextParadrop[tag] = hour + CooldownHours;
     }
 
-    /// <summary>A 0x38-byte order command {group CRef @0x28, order id @0x30, argument @0x34}: Execute (on), Delete, SetParadropTarget (province).</summary>
-    private static bool PostOrderCommand(string className, long group, int order, int argument)
-    {
-        var cmd = Commands.New(className, OrderCommandSize, 0, 0);
-        *(long*)(cmd + GroupOfCommand) = group;
-        *(int*)(cmd + OrderOfCommand) = order;
-        *(int*)(cmd + ArgOfOrderCommand) = argument;
-        return Commands.TryPost(cmd, true);
-    }
+    /// <summary>An order command posted as the AI posts: Execute (on), Delete, SetParadropTarget (province).</summary>
+    private static bool PostOrderCommand(string className, long group, int order, int argument) =>
+        Commands.TryPost(Commands.NewOrderCommand(className, group, order, argument), true);
 
     /// <summary>
     /// The best drop target behind the enemy line around the axis (its core and one more ring): worth taking or cutting off
@@ -268,7 +261,7 @@ public unsafe partial class AiAssist
         {
             var p = Game.Province(id);
             if (p == 0 || !DropTarget(country, tag, p) || order != 0 && _isParadropTarget(order, p) == 0) continue;
-            var score = TargetValue(p) + PocketBonus * Pocket(country, tag, p);
+            var score = TargetValue(p) + PocketBonus * Province.Pocket(country, tag, p);
             if (score > bestScore) (best, bestScore) = (id, score);
         }
         return best;
@@ -277,14 +270,14 @@ public unsafe partial class AiAssist
     /// <summary>An empty enemy province behind its line (no neighbour of ours or our allies'), with few enemy divisions next to it.</summary>
     private static bool DropTarget(nint country, int tag, nint p)
     {
-        if (!Enemy(country, tag, p) || Divisions(p) > ParadropMaxDefenders) return false; // sea: never an enemy's
+        if (!Province.Enemy(country, tag, p) || Province.Divisions(p) > ParadropMaxDefenders) return false; // sea: never an enemy's
         var nearby = 0;
         foreach (var n in Game.Neighbours(p))
         {
             var q = Game.Province(n);
-            if (q == 0 || *(int*)(q + ControllerOfProvince) == 0) continue; // sea
-            if (Friendly(country, tag, q)) return false;                  // on the line: a local attack's job
-            if (Enemy(country, tag, q)) nearby += Divisions(q);
+            if (q == 0 || Province.Controller(q) == 0) continue; // sea
+            if (Province.Friendly(country, tag, q)) return false; // on the line: a local attack's job
+            if (Province.Enemy(country, tag, q)) nearby += Province.Divisions(q);
         }
         return nearby <= NearbyDefendersMax;
     }
@@ -300,7 +293,7 @@ public unsafe partial class AiAssist
             foreach (var id in ring)
             {
                 var p = Game.Province(id);
-                if (p == 0 || *(int*)(p + ControllerOfProvince) != tag) continue;
+                if (p == 0 || Province.Controller(p) != tag) continue;
                 if (_isParadropSource(p, group) != 0) return id;
                 foreach (var n in Game.Neighbours(p)) if (seen.Add(n)) next.Add(n);
             }

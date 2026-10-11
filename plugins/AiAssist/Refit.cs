@@ -43,7 +43,7 @@ public unsafe partial class AiAssist
             if (*(long*)score <= 0) return;
             var army = *(nint*)(requests + ArmyOfRequests);
             if (army == 0) return;
-            var tag = *(int*)(army + CommanderOfUnit);
+            var tag = Division.Commander(army);
             if (tag <= 0 || tag == Game.ControlledTag || !SheepMod.Active || !FrontLine(army, tag)) return;
             *(long*)score *= FrontFactor; // keeps the (1 - fill) factor: a nearly full front division still yields to empty ones
         }
@@ -53,17 +53,17 @@ public unsafe partial class AiAssist
     /// <summary>The division is fighting, or stands next to ground held by a country its own is at war with (cached for the day).</summary>
     private static bool FrontLine(nint army, int tag)
     {
-        var day = Hour / 24;
+        var day = Game.Hour / 24;
         if (day != _frontDay) { FrontCache.Clear(); _frontDay = day; }
         if (FrontCache.TryGetValue(army, out var cached)) return cached.Front;
-        var front = *(int*)(army + CombatsOfUnit) > 0;
-        var location = *(nint*)(army + LocationOfUnit);
+        var front = Division.Fighting(army);
+        var location = Division.Location(army);
         var country = Game.Country(tag);
         if (!front && location != 0 && country != 0)
             foreach (var id in Game.Neighbours(location))
             {
                 var p = Game.Province(id);
-                if (p != 0 && Enemy(country, tag, p)) { front = true; break; }
+                if (p != 0 && Province.Enemy(country, tag, p)) { front = true; break; }
             }
         FrontCache[army] = (day, front);
         if (front) Interlocked.Increment(ref _refitted);

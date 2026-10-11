@@ -5,13 +5,6 @@ namespace FrontLine;
 /// <summary>Byte patterns for the operations (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class OperationSignatures
 {
-    /// <summary>
-    /// UI_AreAirWingsSelected: `mov rcx,[rip+ui]; test rcx,rcx; jz; add rcx,538h`: the player's selection list (CSelectionList)
-    /// inside the UI object. List +0x30 first node {item, ?, next at +0x10}, +0x40 count; an item's kind at +8 (0 = a land
-    /// division, the CArmy itself; 1 ship, 2 air wing).
-    /// </summary>
-    [Signature] public const string SelectionList = "48 83 EC 28 48 8B 0D ? ? ? ? 48 85 C9 74 ? 48 81 C1 38 05 00 00";
-
     /// <summary>The map's support attack: +0x28 the division's CRef (CArmy+0x18), +0x30 the province id; it attacks from where it stands and doesn't move in.</summary>
     [VTable] public const string SupportAttack = "CSupportAttackCommand";
 
@@ -40,9 +33,8 @@ public unsafe partial class FrontLine
 {
     private static class Op
     {
-        public const int SupportTarget = 0x1E8, Ref = 0x18;                                 // CArmy: support attack province, CRef
-        public const int FlagsOfStatic = 0xD2, Harsh = Mountain | Urban | 0x2000 | 0x10000, Impassable = 4; // + marsh, jungle
-        public const int FirstNode = 0x30, NextOfNode = 0x10, SupportAttackSize = 0x38, CancelSize = 0x48;
+        public const int SupportTarget = 0x1E8;                                             // CArmy: support attack province
+        public const int SupportAttackSize = 0x38, CancelSize = 0x48;
         public const int StartOrg = 70, HoldOrg = 50, PinOrg = 60, BreakOffOrg = 25;
         public const int MaxHoldsPerStep = 2, MaxPins = 6, MaxPinsPerStep = 2, MaxRefused = 3, Radius = 8, RingHoldHours = 7 * 24;
         public static readonly int[] Keys = ['B', 'P']; // with Ctrl+Alt: blitz, pincer
@@ -70,8 +62,7 @@ public unsafe partial class FrontLine
     private readonly Dictionary<nint, int> _opOrdered = []; // unit -> game hour we last ordered it
     private readonly bool[] _opDown = new bool[Op.Keys.Length];
     private delegate* unmanaged<nint, nint, byte, nint> _cancelMovement;
-    private nint _selectionUi;
-    private int _selectionOffset, _opDepth, _opLastHour = -1;
+    private int _opDepth, _opLastHour = -1;
     private double _stopOrg;
 
     /// <summary>The operations' settings; true when their keys are on.</summary>
@@ -89,10 +80,7 @@ public unsafe partial class FrontLine
     /// <summary>The operations' own game functions and timers (FrontLine.Load resolved the shared ones).</summary>
     private void LoadOperations()
     {
-        var at = Sig.Find(OperationSignatures.SelectionList);
-        _selectionUi = at + 11 + *(int*)(at + 7);
-        _selectionOffset = *(int*)(at + 19);
-        _ = Sig.VTable(OperationSignatures.SupportAttack);
+        _ = Sig.Find(Gui.AirWingsSelectedSig) + Sig.VTable(OperationSignatures.SupportAttack);
         var cancel = Sig.Find(OperationSignatures.CancelMovement) + 28;
         _cancelMovement = (delegate* unmanaged<nint, nint, byte, nint>)(cancel + 5 + *(int*)(cancel + 1));
         MainThread.Every(TimeSpan.FromMilliseconds(30), PollOperationKeys);
@@ -131,15 +119,9 @@ public unsafe partial class FrontLine
     /// <summary>Our land divisions in the player's selection (checked against the country's own list before anything else is read).</summary>
     private HashSet<nint> Selected(int tag)
     {
-        var ui = *(nint*)_selectionUi;
         var result = new HashSet<nint>();
-        if (ui == 0) return result;
-        var node = *(nint*)(ui + _selectionOffset + Op.FirstNode);
-        for (var n = 0; node != 0 && n < 5000; n++, node = *(nint*)(node + Op.NextOfNode))
-        {
-            var item = *(nint*)node;
-            if (_alive.Contains(item) && *(int*)(item + CommanderTag) == tag && *(nint*)(item + LocationOfUnit) != 0) result.Add(item);
-        }
+        foreach (var item in Gui.Selection())
+            if (_alive.Contains(item) && Division.Commander(item) == tag && Division.Location(item) != 0) result.Add(item);
         return result;
     }
 
@@ -194,7 +176,7 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>The fresh armored and motorized divisions among <paramref name="force"/> that can move now.</summary>
-    private List<nint> Spearhead(IEnumerable<nint> force, int tag) => force.Where(u => Ready(u, tag, _now) && Motorized(u) && Org(u) >= Op.StartOrg).ToList();
+    private List<nint> Spearhead(IEnumerable<nint> force, int tag) => force.Where(u => Ready(u, tag, _now) && Division.Motorized(u) && Org(u) >= Op.StartOrg).ToList();
 
     private Operation? Fail(string name, string why)
     {
@@ -202,7 +184,7 @@ public unsafe partial class FrontLine
         return null;
     }
 
-    private static HashSet<nint> Armies(IEnumerable<nint> units) => units.Select(u => *(nint*)(u + GroupOfUnit)).Where(g => g != 0).ToHashSet();
+    private static HashSet<nint> Armies(IEnumerable<nint> units) => units.Select(Division.Group).Where(g => g != 0).ToHashSet();
 
     /// <summary>
     /// Two wings: two armies or more go whole to the nearer of the two farthest-apart divisions; one army's divisions each.
@@ -210,26 +192,25 @@ public unsafe partial class FrontLine
     // ponytail: hop distance over land from two seeds, no real geometry; an L-shaped front may pair the wrong flanks.
     private static (List<nint> A, List<nint> B) Wings(HashSet<nint> force)
     {
-        nint Location(nint u) => *(nint*)(u + LocationOfUnit);
         var units = force.ToList();
-        var fromFirst = Hops(Location(units[0]));
+        var fromFirst = Hops(Division.Location(units[0]));
         var seedB = units.MaxBy(u => Hop(fromFirst, u));
-        var fromB = Hops(Location(seedB));
-        var fromA = Hops(Location(units.MaxBy(u => Hop(fromB, u))));
+        var fromB = Hops(Division.Location(seedB));
+        var fromA = Hops(Division.Location(units.MaxBy(u => Hop(fromB, u))));
         var lean = units.ToDictionary(u => u, u => Hop(fromA, u) - Hop(fromB, u)); // <= 0: wing A
-        var armies = units.GroupBy(u => *(nint*)(u + GroupOfUnit)).ToList();
+        var armies = units.GroupBy(Division.Group).ToList();
         var toA = armies.Count >= 2
             ? armies.Where(g => g.Sum(u => lean[u]) <= 0).SelectMany(g => g).ToHashSet()
             : units.Where(u => lean[u] <= 0).ToHashSet();
         return (units.Where(toA.Contains).ToList(), units.Where(u => !toA.Contains(u)).ToList());
     }
 
-    private static int Hop(Dictionary<int, int> hops, nint unit) => hops.GetValueOrDefault(*(int*)(*(nint*)(unit + LocationOfUnit) + IdOfProvince), 99);
+    private static int Hop(Dictionary<int, int> hops, nint unit) => hops.GetValueOrDefault(Game.Id(Division.Location(unit)), 99);
 
     /// <summary>Hops over land from <paramref name="from"/>, up to 40.</summary>
     private static Dictionary<int, int> Hops(nint from)
     {
-        var hops = new Dictionary<int, int> { [*(int*)(from + IdOfProvince)] = 0 };
+        var hops = new Dictionary<int, int> { [Game.Id(from)] = 0 };
         var ring = new List<nint> { from };
         for (var depth = 1; depth <= 40 && ring.Count > 0; depth++)
         {
@@ -239,7 +220,7 @@ public unsafe partial class FrontLine
             {
                 if (hops.ContainsKey(id)) continue;
                 var q = Game.Province(id);
-                if (q == 0 || *(int*)(q + ControllerOfProvince) <= 0) continue; // sea
+                if (q == 0 || Province.Controller(q) <= 0) continue; // sea
                 hops[id] = depth;
                 next.Add(q);
             }
@@ -256,16 +237,16 @@ public unsafe partial class FrontLine
     {
         var best = new Dictionary<int, (int Cost, int Prev, int Depth)>();
         var queue = new PriorityQueue<(int Id, int Prev, int Depth), int>();
-        foreach (var location in from.Select(u => *(nint*)(u + LocationOfUnit)).Distinct())
+        foreach (var location in from.Select(Division.Location).Distinct())
         foreach (var id in Game.Neighbours(location))
-            if (Game.Province(id) is var p && p != 0 && Enemy(country, tag, p) && Enterable(location, p)) queue.Enqueue((id, -1, 0), 1 + Weight(p, location));
+            if (Game.Province(id) is var p && p != 0 && Enemy(country, tag, p) && Enterable(location, p)) queue.Enqueue((id, -1, 0), 1 + Province.AttackWeight(p, location));
         while (queue.TryDequeue(out var at, out var cost))
         {
             if (!best.TryAdd(at.Id, (cost, at.Prev, at.Depth)) || at.Depth >= _opDepth - 1) continue;
             var here = Game.Province(at.Id);
             foreach (var id in Game.Neighbours(here))
                 if (!best.ContainsKey(id) && Game.Province(id) is var p && p != 0 && Enemy(country, tag, p) && Enterable(here, p))
-                    queue.Enqueue((id, at.Id, at.Depth + 1), cost + 1 + Weight(p, here));
+                    queue.Enqueue((id, at.Id, at.Depth + 1), cost + 1 + Province.AttackWeight(p, here));
         }
         return best;
     }
@@ -278,23 +259,8 @@ public unsafe partial class FrontLine
         return path;
     }
 
-    /// <summary>How hard <paramref name="target"/> is to take from <paramref name="from"/> (AiAssist's SpotWeight).</summary>
-    private int Weight(nint target, nint from)
-    {
-        var weight = 2 * *(int*)(target + DivisionsInProvince) + _fortLevel(target);
-        var info = *(nint*)(target + StaticOfProvince);
-        var terrain = info == 0 ? 0 : *(nint*)(info + TerrainOfStatic);
-        if (terrain != 0 && (*(int*)(terrain + CategoryOfTerrain) & Op.Harsh) != 0) weight += 3;
-        if (Game.AdjacencyType(from, *(int*)(target + IdOfProvince)) >= River) weight += 2;
-        return weight;
-    }
-
     /// <summary>Units can walk from <paramref name="from"/> into <paramref name="to"/>: no impassable border, a province units may enter.</summary>
-    private static bool Enterable(nint from, nint to)
-    {
-        var info = *(nint*)(to + StaticOfProvince);
-        return info != 0 && (*(byte*)(info + Op.FlagsOfStatic) & 1) != 0 && Game.AdjacencyType(from, *(int*)(to + IdOfProvince)) != Op.Impassable;
-    }
+    private static bool Enterable(nint from, nint to) => Province.Enterable(to) && Game.AdjacencyType(from, Game.Id(to)) != Province.Impassable;
 
     /// <summary>
     /// What reaching <paramref name="objective"/> along <paramref name="path"/> is worth: what taking it is worth (Attack's
@@ -308,7 +274,7 @@ public unsafe partial class FrontLine
         foreach (var id in on)
         foreach (var n in Around(id))
             if (!on.Contains(n) && seen.Add(n) && Game.Province(n) is var p && p != 0 && Enemy(country, tag, p))
-                value += 2 * *(int*)(p + DivisionsInProvince);
+                value += 2 * Province.Divisions(p);
         return value;
     }
 
@@ -321,7 +287,7 @@ public unsafe partial class FrontLine
         var country = Begin(out var tag, out _);
         if (country == 0) return;
         Return(tag);
-        var hour = Hour;
+        var hour = Game.Hour;
         if (hour == _opLastHour) return;
         _opLastHour = hour;
         foreach (var unit in _opOrdered.Keys.Where(u => !Ordered(u)).ToList()) _opOrdered.Remove(unit);
@@ -341,21 +307,21 @@ public unsafe partial class FrontLine
                 if (Game.Province(arm.Corridor[i]) is var p && p != 0 && Enemy(country, tag, p)) return $"the corridor was cut at province {arm.Corridor[i]}";
         }
         var held = op.Arms.SelectMany(a => a.Corridor.Take(a.Head + 1)).ToHashSet();
-        if (LosingDefences(tag).Keys.Select(p => *(int*)(p + IdOfProvince)).FirstOrDefault(held.Contains) is var lost && lost != 0)
+        if (LosingDefences(tag).Keys.Select(Game.Id).FirstOrDefault(held.Contains) is var lost && lost != 0)
             return $"the corridor's defence at province {lost} is being lost";
 
         var reached = op.Arms.All(a => a.Head == a.Corridor.Count - 1);
         if (reached && !op.Pincer) return $"objective province {op.Arms[0].Corridor[^1]} taken";
         if (reached && op.Closed < 0)
         {
-            op.Closed = Hour;
+            op.Closed = Game.Hour;
             foreach (var unit in op.Arms.SelectMany(a => a.Spearhead).ToList()) GiveBack(op, unit, tag);
             Log.Info($"pincer: the ring closed at province {op.Arms[0].Corridor[^1]}; the spearheads go back, infantry holds the ring");
         }
         if (op.Closed >= 0)
         {
-            if (Hour - op.Closed >= Op.RingHoldHours) return "the ring was held a week";
-            if (!held.Any(id => Around(id).Any(n => Game.Province(n) is var p && p != 0 && *(int*)(p + DivisionsInProvince) > 0 && Enemy(country, tag, p))))
+            if (Game.Hour - op.Closed >= Op.RingHoldHours) return "the ring was held a week";
+            if (!held.Any(id => Around(id).Any(n => Game.Province(n) is var p && p != 0 && Province.Divisions(p) > 0 && Enemy(country, tag, p))))
                 return "no enemy division left next to the ring";
         }
         else
@@ -364,9 +330,9 @@ public unsafe partial class FrontLine
             {
                 if (arm.Spearhead.All(u => Org(u) < _stopOrg)) return "the spearhead is worn out";
                 var next = arm.Corridor[arm.Head + 1];
-                foreach (var unit in arm.Spearhead.Where(u => Ready(u, tag, _now) && !Walking(u) && Org(u) >= _stopOrg && !Ordered(u)))
+                foreach (var unit in arm.Spearhead.Where(u => Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= _stopOrg && !Ordered(u)))
                 {
-                    if (Order(unit, () => Commands.Move(unit, next))) op.Refused = 0;
+                    if (Issue(unit, () => Commands.Move(unit, next))) op.Refused = 0;
                     else if (++op.Refused >= Op.MaxRefused) return $"province {next} can't be reached";
                 }
             }
@@ -389,11 +355,11 @@ public unsafe partial class FrontLine
             // A spare one: where another of ours stays, or away from the enemy.
             nint unit = 0;
             Search(tag, province, Op.Radius, (p, _) => _at.TryGetValue(p, out var here) && (here.Count >= 2 || !NextToEnemy(country, tag, p))
-                && (unit = Freshest(here.Where(u => Candidate(op, u, tag) && !Motorized(u) && Org(u) >= Op.HoldOrg))) != 0);
+                && (unit = Freshest(here.Where(u => Candidate(op, u, tag) && !Division.Motorized(u) && Org(u) >= Op.HoldOrg))) != 0);
             if (unit == 0) continue;
-            var location = *(nint*)(unit + LocationOfUnit);
+            var location = Division.Location(unit);
             Enlist(op, unit, id, 0, true);
-            if (!Order(unit, () => Commands.Move(unit, id)))
+            if (!Issue(unit, () => Commands.Move(unit, id)))
             {
                 GiveBack(op, unit, tag);
                 continue;
@@ -416,7 +382,7 @@ public unsafe partial class FrontLine
         {
             var pin = _held[unit];
             var target = Game.Province(pin.Target);
-            var over = target == 0 || EnemyUnits(country, tag, target) == 0 || !Fighting(unit) && *(nint*)(unit + Op.SupportTarget) == 0 && Hour - pin.Since >= 4;
+            var over = target == 0 || EnemyUnits(country, tag, target) == 0 || !Division.Fighting(unit) && *(nint*)(unit + Op.SupportTarget) == 0 && Game.Hour - pin.Since >= 4;
             if (!over && Org(unit) >= Op.BreakOffOrg) continue;
             if (!over) BreakOff(unit);
             GiveBack(op, unit, tag);
@@ -428,26 +394,26 @@ public unsafe partial class FrontLine
         var pinned = pins.Select(u => _held[u].Target).ToHashSet();
         var targets = front.SelectMany(Around).Distinct()
             .Where(id => !corridor.Contains(id) && !pinned.Contains(id))
-            .Select(Game.Province).Where(p => p != 0 && EnemyUnits(country, tag, p) > 0 && !Native.PdxArray(p + UnitsInProvince).ToArray().Any(u => u != 0 && Fighting(u))) // fighting: locked already
-            .OrderByDescending(p => *(int*)(p + DivisionsInProvince)).ToList();
+            .Select(Game.Province).Where(p => p != 0 && EnemyUnits(country, tag, p) > 0 && !Province.Units(p).ToArray().Any(u => u != 0 && Division.Fighting(u))) // fighting: locked already
+            .OrderByDescending(Province.Divisions).ToList();
         var started = 0;
         foreach (var target in targets)
         {
             if (pins.Count >= Op.MaxPins || started == Op.MaxPinsPerStep) return;
-            var id = *(int*)(target + IdOfProvince);
+            var id = Game.Id(target);
             var unit = Freshest(Game.Neighbours(target).Select(Game.Province).Where(p => p != 0 && _at.ContainsKey(p)).SelectMany(p => _at[p])
                 .Where(u => Candidate(op, u, tag) && Org(u) >= Op.PinOrg));
-            if (unit == 0 || !Order(unit, () => SupportAttack(tag, unit, id))) continue;
+            if (unit == 0 || !Issue(unit, () => SupportAttack(tag, unit, id))) continue;
             Enlist(op, unit, 0, id, false); // stays on its order: a support attack doesn't move it
             pins.Add(unit);
             started++;
-            Log.Info($"{op.Name}: a division pins {*(int*)(target + DivisionsInProvince)} enemy division(s) at province {id} with a support attack");
+            Log.Info($"{op.Name}: a division pins {Province.Divisions(target)} enemy division(s) at province {id} with a support attack");
         }
     }
 
     /// <summary>A division of the operation's armies doing no job (for us or any other feature) that can move now.</summary>
     private bool Candidate(Operation op, nint unit, int tag) =>
-        op.Armies.Contains(*(nint*)(unit + GroupOfUnit)) && Free(unit, tag, _now) && !Walking(unit) && !Ordered(unit);
+        op.Armies.Contains(Division.Group(unit)) && Free(unit, tag, _now) && !Division.Walking(unit) && !Ordered(unit);
 
     private static nint Freshest(IEnumerable<nint> units) => units.DefaultIfEmpty().MaxBy(u => u == 0 ? -1 : Org(u));
 
@@ -466,7 +432,7 @@ public unsafe partial class FrontLine
     /// <summary>Booked for the operation (FrontLine's bookkeeping: no other feature takes it); with <paramref name="offOrder"/> off its order first.</summary>
     private void Enlist(Operation op, nint unit, int post, int target, bool offOrder)
     {
-        var group = *(nint*)(unit + GroupOfUnit);
+        var group = Division.Group(unit);
         Book(unit, Job.Operation, offOrder && group != 0 ? OrderOf(unit, group) : 0, post, target);
         op.Units.Add(unit);
     }
@@ -500,7 +466,7 @@ public unsafe partial class FrontLine
         foreach (var owner in owners)
         foreach (var list in OrderLists)
         foreach (var order in Native.PdxArray(owner + list))
-            if (order != 0 && Native.PdxArray(order + MembersOfOrder).Contains(member)) return order;
+            if (order != 0 && Order.Members(order).Contains(member)) return order;
         return 0;
     }
 
@@ -508,7 +474,7 @@ public unsafe partial class FrontLine
     private static bool SupportAttack(int tag, nint unit, int province)
     {
         var cmd = Commands.New(OperationSignatures.SupportAttack, Op.SupportAttackSize, tag, 0);
-        *(long*)(cmd + 0x28) = *(long*)(unit + Op.Ref); // the ctor's layout: unit CRef at +0x28 (over New's tag), province at +0x30
+        *(long*)(cmd + 0x28) = Division.Ref(unit); // the ctor's layout: unit CRef at +0x28 (over New's tag), province at +0x30
         *(long*)(cmd + 0x30) = province;
         return Commands.TryPost(cmd);
     }
@@ -516,24 +482,24 @@ public unsafe partial class FrontLine
     /// <summary>Stops an attack, as a right-click on the province it stands in does.</summary>
     private void BreakOff(nint unit)
     {
-        if (!Fighting(unit) && *(nint*)(unit + Op.SupportTarget) == 0) return;
+        if (!Division.Fighting(unit) && *(nint*)(unit + Op.SupportTarget) == 0) return;
         var cmd = Allocator.AllocZeroed(Op.CancelSize);
         _cancelMovement(cmd, unit, 1);
         Commands.TryPost(cmd);
     }
 
-    private bool Order(nint unit, Func<bool> command)
+    private bool Issue(nint unit, Func<bool> command)
     {
         if (!command()) return false;
-        _opOrdered[unit] = Hour;
+        _opOrdered[unit] = Game.Hour;
         return true;
     }
 
     /// <summary>We ordered it in the last two game hours: that order is still being carried out.</summary>
-    private bool Ordered(nint unit) => _opOrdered.TryGetValue(unit, out var hour) && Hour - hour is >= 0 and < 2;
+    private bool Ordered(nint unit) => _opOrdered.TryGetValue(unit, out var hour) && Game.Hour - hour is >= 0 and < 2;
 
     private static List<int> Around(int id) => Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [];
 
     private int EnemyUnits(nint country, int tag, nint province) =>
-        Enemy(country, tag, province) ? *(int*)(province + DivisionsInProvince) : 0;
+        Enemy(country, tag, province) ? Province.Divisions(province) : 0;
 }

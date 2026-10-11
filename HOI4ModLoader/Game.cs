@@ -130,6 +130,87 @@ public static unsafe class Game
     /// <summary>Every CCountry, empty before a game is loaded.</summary>
     public static ReadOnlySpan<nint> Countries => State == 0 ? default : Native.PdxArray(State + _countries);
 
+    private const int HourOfGameState = 0x468, TagOfCountry = 8, UnitsOfCountry = 0x290;
+
+    /// <summary>The game's clock in hours since its start date (0 without a game).</summary>
+    public static int Hour => State is var gs && gs != 0 ? *(int*)(gs + HourOfGameState) : 0;
+
+    /// <summary>The country's tag.</summary>
+    public static int Tag(nint country) => *(int*)(country + TagOfCountry);
+
+    /// <summary>The country's units (CArmy*: land divisions are <see cref="Division.IsLand"/>; there may be nulls).</summary>
+    public static ReadOnlySpan<nint> Units(nint country) => Native.PdxArray(country + UnitsOfCountry);
+
+    /// <summary>{tag, <see cref="TagIndex"/>} as the game's TagIdx pair (int[2]) that many game functions take by pointer.</summary>
+    public static long TagIdx(int tag) => (uint)tag | (long)TagIndex(tag) << 32;
+
+    /// <summary>CCountry::IsAtWarWith(country, int* {tag, tag index}) -> bool.</summary>
+    [Signature] public const string IsAtWarWithSig = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 08 48 8B FA 8B 12 48 8B F1 3B D0 74 ? 85 D2 74 ? 85 C0 74 ? 48 83 C1 08 E8 ? ? ? ? 39 47 04 74 ? 83 7E 08 00 7E ? 48 8B 86 ? ? ? ?";
+
+    /// <summary>CCountry: the same country or an ally (country, int* {tag, tag index}, 0, 0) -> bool.</summary>
+    [Signature] public const string SameOrAlliedSig = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 08 48 8B F9 48 83 C1 08 48 8B DA 8B 12 41 0F B6 F1";
+
+    /// <summary>Game functions resolved on first use: type initialisation runs once even when AI threads race to it.</summary>
+    private static class Relations
+    {
+        public static readonly delegate* unmanaged<nint, int*, byte> AtWar = (delegate* unmanaged<nint, int*, byte>)Sig.Find(IsAtWarWithSig);
+        public static readonly delegate* unmanaged<nint, int*, byte, byte, byte> Allied = (delegate* unmanaged<nint, int*, byte, byte, byte>)Sig.Find(SameOrAlliedSig);
+    }
+
+    /// <summary>The country is at war with <paramref name="tag"/> (false for 0: sea, no one). Any thread.</summary>
+    public static bool AtWar(nint country, int tag)
+    {
+        if (tag <= 0) return false;
+        var other = TagIdx(tag);
+        return Relations.AtWar(country, (int*)&other) != 0;
+    }
+
+    /// <summary><paramref name="tag"/> is the country itself or an ally (false for 0). Any thread.</summary>
+    public static bool Allied(nint country, int tag)
+    {
+        if (tag <= 0) return false;
+        var other = TagIdx(tag);
+        return Relations.Allied(country, (int*)&other, 0, 0) != 0;
+    }
+
+    /// <summary>
+    /// GetStrategicAirForCountry (twice, identical): `mov rbx,[rax+690h]; ...; cmp dword [rbx+3Ch],0; ...; mov rax,[rbx+30h];
+    /// mov rax,[rax+rcx*8]`: the per-country air (+0x10 usable airbases, +0x58 wing pools, region records) by tag index.
+    /// </summary>
+    [Signature(2)] public const string StrategicAirSig = "48 8B 98 90 06 00 00 48 85 DB 74 ? 83 7B ? ? 74 ? 83 7F ? ? 48 8D 4F ? 75 ? 33 C0 48 63 C8 48 8B 43 ? 48 8B 04 C8";
+
+    private static class AirHolder
+    {
+        private static readonly nint At = Sig.FindAll(StrategicAirSig, 2)[0];
+        public static readonly int Holder = *(int*)(At + 3), Count = *(byte*)(At + 14), Array = *(byte*)(At + 36);
+    }
+
+    /// <summary>The country's CStrategicAir by tag, or 0. Any thread.</summary>
+    public static nint StrategicAir(int tag)
+    {
+        var holder = tag <= 0 || State == 0 ? 0 : *(nint*)(State + AirHolder.Holder);
+        if (holder == 0 || *(int*)(holder + AirHolder.Count) == 0) return 0;
+        return *(nint*)(*(nint*)(holder + AirHolder.Array) + 8 * TagIndex(tag));
+    }
+
+    // CSupplySystem (gamestate+0x3D8): per-province records by id at +0x138 (0xD8 bytes, count at +0x144), zeroed and rebuilt
+    // each UpdateSupply (main thread, hourly, before the AI pass): +0 need left after local nodes, +8 supply flowing in,
+    // +0x30 flow entries {u16 node, u16 country tag index, pad, i64 amount}.
+    private const int SupplyOfGameState = 0x3D8, FlowOfSupply = 0x138, FlowSize = 0xD8;
+    internal const int NeedOfFlow = 0, SuppliedOfFlow = 8;
+    public const int EntriesOfFlow = 0x30;
+
+    /// <summary>CSupplySystem, or 0.</summary>
+    public static nint Supply => State is var gs && gs != 0 ? *(nint*)(gs + SupplyOfGameState) : 0;
+
+    /// <summary>The supply record of province <paramref name="id"/>: +0 need, +8 supply flowing in, <see cref="EntriesOfFlow"/>; or 0.</summary>
+    public static nint SupplyFlow(int id)
+    {
+        var supply = Supply;
+        var flows = supply == 0 ? 0 : *(nint*)(supply + FlowOfSupply);
+        return flows == 0 || (uint)id >= (uint)*(int*)(supply + FlowOfSupply + 0xC) ? 0 : flows + (nint)FlowSize * id;
+    }
+
     private const int ProvincesOfGameState = 8;                              // province container: vtable slot 0 = by id
     private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8, TypeOfAdjacency = 0x10;
 
@@ -249,17 +330,32 @@ public static unsafe class Native
 /// <summary>COrdersGroup (hoi4/source/ordersgroup.cpp): an army or an army group. Offsets for HOI4 1.19.3.</summary>
 public readonly unsafe struct OrdersGroup(nint ptr)
 {
+    public const int RefOffset = 0x08;             // CRef {id, index}: what commands name it by
     public const int IsArmyGroupOffset = 0x39;
     public const int MembersOffset = 0x50;         // CPdxArray<COrdersGroupMember*>: its divisions (UngroupAllMembers walks it)
     public const int AttachedWingsOffset = 0x70;   // CPdxArray<CAirWing*>
+    public const int RootOrdersOffset = 0x98;      // CPdxArray<COrder*>: fronts, offensive lines, invasions, paradrops
     public const int ParentOffset = 0x1B8;         // army -> its army group
     public const int ArmiesOffset = 0x230;         // CPdxArray<COrdersGroup*>: armies of an army group
+    private const int ProvidersOfCountry = 0x168, GroupsOfProvider = 0xB0; // CCountry: one provider per theatre; its armies and army groups
 
     public nint Ptr { get; } = ptr;
+    public long Ref => *(long*)(Ptr + RefOffset);
     public bool IsArmyGroup => *(byte*)(Ptr + IsArmyGroupOffset) != 0;
     public nint Members => Ptr + MembersOffset;
     public int AttachedWingCount => *(int*)(Ptr + AttachedWingsOffset + 0xC);
     public ReadOnlySpan<nint> Armies => Native.PdxArray(Ptr + ArmiesOffset);
+
+    /// <summary>Every army and army group of the country (a snapshot of each list: commands sent meanwhile may change them).</summary>
+    public static IEnumerable<nint> OfCountry(nint country)
+    {
+        foreach (var provider in Native.PdxArray(country + ProvidersOfCountry).ToArray())
+        {
+            if (provider == 0) continue;
+            foreach (var group in Native.PdxArray(provider + GroupsOfProvider).ToArray())
+                if (group != 0) yield return group;
+        }
+    }
 
     /// <summary>
     /// Runs <paramref name="action"/> while this army group's member list also holds its armies' divisions. Army groups own
