@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using HOI4ModLoader;
-using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
 namespace SupplyOverlay;
@@ -52,13 +51,15 @@ public unsafe partial class SupplyOverlay : Plugin
     private const int StatesOfRoute = 72, RegionsOfRoute = 96; // route: the states (land) / regions (sea) it passes
     private const int ProvincesOfState = 24, ProvincesOfRegion = 0x18;
     private const int ColourSize = 32, LabelsSize = 128; // CreateArrow's colour and {colour, 3 label strings} blocks
+    private const int NameSlot = 0x10, ColourASlot = 0x30, ColourBSlot = 0x50, LabelsSlot = 0x70, SlotSize = 0xF0;
 
     [Function(CallingConventions.Microsoft)]
     private delegate nint CreateFn(nint manager, nint name, nint colourA, nint colourB, nint labels, uint layer);
 
     private delegate* unmanaged<nint, nint, byte, byte, int, char> _append;
     private delegate* unmanaged<nint, byte, void> _clear, _rebuild, _visible;
-    private IHook<CreateFn>? _create;
+    private CreateFn? _create;
+    private nint _slot; // the capture stub fills it with every game CreateArrow call
     private readonly byte[] _colourA = new byte[ColourSize], _colourB = new byte[ColourSize], _labels = new byte[LabelsSize];
     private readonly byte[] _tradeColourA = new byte[ColourSize], _tradeColourB = new byte[ColourSize];
     private nint _manager, _arrow, _tradeArrow;
@@ -75,28 +76,65 @@ public unsafe partial class SupplyOverlay : Plugin
         _clear = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.ClearPoints);
         _rebuild = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.RebuildGlyphs);
         _visible = (delegate* unmanaged<nint, byte, void>)Sig.Find(Signatures.SetVisible);
-        _create = Patches.Hook<CreateFn>(Sig.Find(Signatures.CreateArrow),
-            (manager, name, colourA, colourB, labels, layer) =>
-            {
-                if (_manager == 0 && EmptyStrings(labels)) Capture(manager, name, colourA, colourB, labels, layer);
-                return _create!.OriginalFunction(manager, name, colourA, colourB, labels, layer);
-            });
+        var at = Sig.Find(Signatures.CreateArrow);
+        _create = Patches.Function<CreateFn>(at);
+        InstallCaptureStub(at);
         MainThread.Every(TimeSpan.FromMilliseconds(30), () => Poll(toggle, trade));
     }
 
-    /// <summary>The game calls this with every arrow it draws: the first plain call hands us the manager and the colours.</summary>
-    private void Capture(nint manager, nint name, nint colourA, nint colourB, nint labels, uint layer)
+    /// <summary>A native stub at CreateArrow's entry copies the call's arguments into <see cref="_slot"/>. A managed hook
+    /// here crashed the game instead: the trampoline entered the CLR's first-call stub with a misaligned stack (dump
+    /// confirmed), so the capture must not cross into managed code.</summary>
+    private void InstallCaptureStub(nint at)
     {
-        _manager = manager;
-        _layer = layer;
-        _capturedName = Native.Utf8(Native.MsvcString(name));
-        Marshal.Copy(colourA, _colourA, 0, ColourSize);
-        Marshal.Copy(colourB, _colourB, 0, ColourSize);
-        Marshal.Copy(colourA, _tradeColourA, 0, ColourSize); // the same value objects, retinted: trade arrows get gold
-        Marshal.Copy(colourB, _tradeColourB, 0, ColourSize);
+        _slot = Allocator.AllocZeroed(SlotSize);
+        var asm = new List<string>
+        {
+            "use64",
+            $"mov r11, 0x{_slot:X}",
+            "mov [r11], rcx",       // manager
+            "mov r10d, [rsp+0x30]", // layer: the 6th argument
+            "mov [r11+8], r10d",
+            "push rsi",             // borrow a callee-saved register to copy through pointers
+        };
+        foreach (var (reg, slot, qwords) in new[] { ("rdx", NameSlot, 4), ("r8", ColourASlot, 4), ("r9", ColourBSlot, 4) })
+        {
+            asm.Add($"mov rsi, {reg}");
+            CopyAsm(asm, slot, qwords);
+        }
+        asm.Add("mov rsi, [rsp+0x30]"); // labels: the 5th argument, +8 past the pushed rsi
+        CopyAsm(asm, LabelsSlot, LabelsSize / 8);
+        asm.AddRange(new[] { "pop rsi", "sub rsp, 0x90", "movaps [rax-0x48], xmm6", "mov r14, rdx" }); // the replaced prologue
+        Patches.Asm(at, 14, asm.ToArray());
+    }
+
+    /// <summary>mov r10,[rsi+off] to [r11+slot+off] instruction pairs: FASM lines for the stub's copies.</summary>
+    private static void CopyAsm(List<string> asm, int slot, int qwords)
+    {
+        for (var i = 0; i < qwords; i++)
+        {
+            asm.Add(i == 0 ? "mov r10, [rsi]" : $"mov r10, [rsi+0x{i * 8:X}]");
+            asm.Add($"mov [r11+0x{slot + i * 8:X}], r10");
+        }
+    }
+
+    /// <summary>The stub stored the last CreateArrow call's arguments: take them when its labels are empty, like the old
+    /// hook demanded. Only an inline style name (length 1..15) is safe to read — a heap one dangles after the call.
+    /// ponytail: the stub rewrites the slot on another thread mid-copy, so a torn read only mixes two valid calls' colours.</summary>
+    private void TryCapture()
+    {
+        if (_slot == 0 || *(nint*)_slot == 0 || !EmptyStrings(_slot + LabelsSlot)) return;
+        if (*(long*)(_slot + NameSlot + 0x10) is < 1 or > 15) return;
+        _manager = *(nint*)_slot;
+        _layer = *(uint*)(_slot + 8);
+        _capturedName = Native.Utf8(Native.MsvcString(_slot + NameSlot));
+        Marshal.Copy(_slot + ColourASlot, _colourA, 0, ColourSize);
+        Marshal.Copy(_slot + ColourBSlot, _colourB, 0, ColourSize);
+        Marshal.Copy(_slot + ColourASlot, _tradeColourA, 0, ColourSize); // the same value objects, retinted: trade arrows get gold
+        Marshal.Copy(_slot + ColourBSlot, _tradeColourB, 0, ColourSize);
         Tint(_tradeColourA);
         Tint(_tradeColourB);
-        Marshal.Copy(labels, _labels, 0, LabelsSize);
+        Marshal.Copy(_slot + LabelsSlot, _labels, 0, LabelsSize);
         Log.Info($"supply overlay: caught the map's arrow manager (style seen: \"{_capturedName}\")");
     }
 
@@ -128,7 +166,7 @@ public unsafe partial class SupplyOverlay : Plugin
             return;
         }
         if (Game.ControlledTag == 0) { _arrow = _tradeArrow = 0; return; } // the menu: the map is rebuilt with it
-        if (_manager == 0) { Warn(); return; }
+        if (_manager == 0) { TryCapture(); if (_manager == 0) { Warn(); return; } }
         var redraw = Environment.TickCount64 - _drawn >= 5000;
         if (redraw) _drawn = Environment.TickCount64;
         if (_on)
@@ -163,7 +201,7 @@ public unsafe partial class SupplyOverlay : Plugin
     {
         fixed (byte* name = System.Text.Encoding.ASCII.GetBytes(style + '\0'))
         fixed (byte* a = colourA, b = colourB, l = _labels)
-            return _create!.OriginalFunction(_manager, (nint)name, (nint)a, (nint)b, (nint)l, _layer);
+            return _create!(_manager, (nint)name, (nint)a, (nint)b, (nint)l, _layer);
     }
 
     /// <summary>An arrow from the hub feeding each starving division to the division's province.</summary>
