@@ -22,4 +22,26 @@ public class ConfigTests
         }
         finally { File.Delete(path); }
     }
+
+    /// <summary>Settings a plugin no longer binds leave the file with their description; [General] stays; a second pass changes nothing.</summary>
+    [Fact]
+    public void RemovesUnboundKeys()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"hoimod-{Guid.NewGuid():N}.cfg");
+        try
+        {
+            var old = new ConfigFile(path);
+            old.Bind("General", "Enabled", true, "on");
+            old.Bind("A", "Kept", 1, "kept");
+            old.Bind("A", "Gone", 2, "gone");
+            old.Bind("B", "AlsoGone", 3, "gone too");
+            var now = new ConfigFile(path);
+            now.Bind("A", "Kept", 1, "kept");
+            Assert.Equal(["A.Gone", "B.AlsoGone"], now.RemoveUnbound("General").Order());
+            Assert.Equal(["General.Enabled", "A.Kept"], new ConfigFile(path).Entries().Select(e => $"{e.Section}.{e.Key}"));
+            Assert.DoesNotContain("gone", File.ReadAllText(path));
+            Assert.Empty(now.RemoveUnbound("General"));
+        }
+        finally { File.Delete(path); }
+    }
 }

@@ -61,6 +61,7 @@ public class MyPlugin : Plugin
 - `AffectsGameState`: the plugin changes game rules. It is switched off in multiplayer.
 - A plugin with a multiplayer-safe way of doing its job (vanilla commands only) leaves `AffectsGameState` off and branches on `Multiplayer` in `Load()`; every plugin reloads when the mode changes. Make that fallback a setting (e.g. ArmySupport's `FieldMarshal`: attach in single player, spread over the armies in multiplayer), not a second plugin.
 - `Config.Bind` settings in any section but `[General]` show in the Mods tab (true/false as checkboxes, numbers with arrows), in the order they're bound; clamp numbers to a sane range.
+- Bind every setting in `Load()`, unconditionally (even a switched-off feature's, before anything that can throw): after a successful load the loader deletes the entries the plugin didn't bind, as settings a newer version dropped. At startup it also deletes `config\com.green1052.*.cfg` files whose plugin is no longer in `plugins\`.
 - Register patches and `MainThread.Every` timers in `Load()`, so a reload cleans them up.
 - Send game actions with `Commands.New` / `TryPost`: they are the game's own commands, the same the UI sends, so multiplayer stays in sync.
 - Plugin ids look like `com.green1052.<name>`.

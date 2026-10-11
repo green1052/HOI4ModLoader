@@ -8,6 +8,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="Signatures.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
         <PackageReference Include="Reloaded.Hooks" Version="4.3.3" />
     </ItemGroup>
 

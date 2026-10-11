@@ -54,7 +54,7 @@ public static class MainThread
 
     private static void Tick()
     {
-        Game.Track(); // before any timer: a loaded save resets the plugins' per-game state first
+        Log.Guard("game tracking", Game.Track); // before any timer: a loaded save resets the plugins' per-game state first
         var now = Environment.TickCount64;
         foreach (var timer in Timers.ToArray()) // a timer may reload plugins, which removes and adds timers
         {

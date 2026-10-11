@@ -91,12 +91,14 @@ internal static class GameFiles
         {
             Log.Error($"can't clear {Dir}: {e.Message}");
         }
+        var built = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // file -> text so far: patches of one file stack
         foreach (var assembly in assemblies)
         foreach (var patch in assembly.GetCustomAttributes<GuiPatchAttribute>())
         {
             try
             {
-                var patched = patch.Apply(File.ReadAllText(Path.Combine(GameDir, patch.File)), patch.ReadSnippet(assembly));
+                var text = built.TryGetValue(patch.File, out var earlier) ? earlier : File.ReadAllText(Path.Combine(GameDir, patch.File));
+                var patched = patch.Apply(text, patch.ReadSnippet(assembly));
                 if (patched == null)
                 {
                     Log.Error($"{assembly.GetName().Name}: {patch.File} changed in this game version, left vanilla");
@@ -104,7 +106,7 @@ internal static class GameFiles
                 }
                 var target = Path.Combine(Dir, patch.File);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.WriteAllText(target, patched);
+                File.WriteAllText(target, built[patch.File] = patched);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {

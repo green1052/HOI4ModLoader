@@ -30,7 +30,7 @@ public static class Loader
     private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
     private static string _loadedFiles = "", _changedFiles = "";
     private static int _generation;
-    private static bool _gameFilesBuilt;
+    private static bool _started; // the first load (at startup) ran
 
     /// <summary>Called once by the native bootstrap (version.dll), before the game's entry point.</summary>
     [UnmanagedCallersOnly]
@@ -71,7 +71,7 @@ public static class Loader
                 Log.Error($"multiplayer check unavailable, game rule plugins stay off: {e.Message}");
             }
             // Signatures the core resolves on first use: a broken one (game update) is reported here, once, not in play.
-            foreach (var signature in new[] { Commands.PostSig, Commands.SessionHolderSig, Commands.MoveSig, Gui.SetTextSig, Gui.HasTextBoxSig })
+            foreach (var signature in new[] { Allocator.MallocSig, Allocator.CallocSig, Allocator.FreeSig, Commands.PostSig, Commands.SessionHolderSig, Commands.MoveSig, Gui.SetTextSig, Gui.HasTextBoxSig })
             {
                 try { Sig.Find(signature); }
                 catch (Exception e) { Log.Error($"core signature: {e.Message}"); }
@@ -205,12 +205,17 @@ public static class Loader
     private static void LoadPlugins()
     {
         _loadedFiles = PluginFiles(); // before reading them: a change during the load reloads again
-        if (!Directory.Exists(PluginsDir)) return;
+        var folder = Directory.Exists(PluginsDir);
+        var allRead = folder; // every DLL there read: the plugins found are all there are
         var files = new Dictionary<string, string>(); // assembly name -> file (a file may be named differently)
-        foreach (var file in Directory.EnumerateFiles(PluginsDir, "*.dll"))
+        foreach (var file in folder ? Directory.EnumerateFiles(PluginsDir, "*.dll") : [])
         {
             try { files[AssemblyName.GetAssemblyName(file).Name!] = file; }
-            catch (Exception e) { Log.Error($"{Path.GetFileName(file)}: {e.Message}"); }
+            catch (Exception e)
+            {
+                allRead = false;
+                Log.Error($"{Path.GetFileName(file)}: {e.Message}");
+            }
         }
         var context = new PluginContext(files, ++_generation);
 
@@ -223,23 +228,28 @@ public static class Loader
                 foreach (var type in assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(Plugin)) && !t.IsAbstract))
                 {
                     if (type.GetCustomAttribute<PluginAttribute>() is not { } info)
+                    {
+                        allRead = false;
                         Log.Error($"{type.FullName}: missing [Plugin]");
+                    }
                     else if (!found.TryAdd(info.Id, (type, info)))
                         Log.Error($"{info.Id}: duplicate plugin id ({type.FullName})");
                 }
             }
             catch (Exception e)
             {
+                allRead = false;
                 Log.Error($"{Path.GetFileName(file)}: {e.Message}");
             }
         }
 
         Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
         Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins' names too
-        if (!_gameFilesBuilt)
+        if (!_started)
         {
-            _gameFilesBuilt = true; // once: the game reads its interface files at startup, after this and before its main menu
+            _started = true; // once: the game reads its interface files at startup, after this and before its main menu
             GameFiles.Build([typeof(Loader).Assembly, .. found.Values.Where(f => IsEnabled(f.Info.Id)).Select(f => f.Type.Assembly).Distinct()]);
+            if (allRead) RemoveOrphanConfigs(found.Keys); // at startup only: a hot reload may catch a DLL mid-copy
         }
         var state = new Dictionary<string, bool?>(); // null while loading: a dependency cycle reads as failed
         foreach (var id in found.Keys.Order()) Load(id);
@@ -291,6 +301,7 @@ public static class Loader
                 plugin.Load();
                 log.Info($"{info.Version} loaded");
                 Loaded.Add(plugin);
+                RemoveDroppedSettings(config, log);
                 return true;
             }
             catch (Exception e)
@@ -303,6 +314,42 @@ public static class Loader
             {
                 Patches.Owner = null;
             }
+        }
+    }
+
+    /// <summary>
+    /// Deletes the settings a plugin that just loaded didn't bind: ones a newer version dropped, which the Mods tab would
+    /// list unnamed. [General] is the loader's (Enabled, IgnoreGameVersion). A plugin binds every setting in Load, even
+    /// for a feature switched off, or switching it off loses its values.
+    /// </summary>
+    private static void RemoveDroppedSettings(ConfigFile config, Logger log)
+    {
+        try
+        {
+            var removed = config.RemoveUnbound("General");
+            if (removed.Count > 0) log.Info($"removed settings it no longer has: {string.Join(", ", removed)}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.Error($"config cleanup: {e.Message}"); }
+    }
+
+    /// <summary>
+    /// Deletes config\com.green1052.*.cfg of our plugins no longer in the plugins folder (merged into others or dropped).
+    /// Only when every DLL there was read: one that failed to load may be the config's plugin. Others' configs are kept.
+    /// </summary>
+    private static void RemoveOrphanConfigs(IEnumerable<string> ids)
+    {
+        var dir = Path.Combine(ModsDir, "config");
+        if (!Directory.Exists(dir)) return;
+        var known = ids.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(dir, "com.green1052.*.cfg").ToList())
+        {
+            if (known.Contains(Path.GetFileNameWithoutExtension(file))) continue;
+            try
+            {
+                File.Delete(file);
+                Log.Info($"removed {Path.GetFileName(file)}: its plugin is gone");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"remove {Path.GetFileName(file)}: {e.Message}"); }
         }
     }
 

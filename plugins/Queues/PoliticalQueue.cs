@@ -257,6 +257,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
 
     private void Pump()
     {
+        if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
@@ -338,13 +339,6 @@ internal sealed unsafe class PoliticalQueue(Logger log)
             *(byte*)(cmd + 56) = 1;
         }
         Native.SetMsvcString(slot, Encoding.Latin1.GetBytes(entry.Slot));
-        if (Commands.CanExecute(cmd))
-        {
-            Commands.Post(cmd);
-            return true;
-        }
-        Native.SetMsvcString(slot, []); // frees a heap buffer
-        Commands.Free(cmd);
-        return false;
+        return Commands.TryPost(cmd); // a refused one is freed by its destructor, slot string included
     }
 }

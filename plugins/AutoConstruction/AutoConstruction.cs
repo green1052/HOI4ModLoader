@@ -52,7 +52,7 @@ public unsafe partial class AutoConstruction : Plugin
     // Layouts for HOI4 1.19.3.
     private const int StatesOfCountry = 0x460, ProductionOfCountry = 0xF68;
     private const int ProvincesOfState = 24, IdOfState = 88, CoresOfState = 176, BuildingsOfState = 288;
-    private const int IdOfProvince = 164, BuildingsOfProvince = 400;
+    private const int BuildingsOfProvince = 400;
     private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
     private const int LevelOfBuilding = 64, ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: int16 level, its container
     private const int Lines = 112, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
@@ -89,6 +89,10 @@ public unsafe partial class AutoConstruction : Plugin
             "Where your divisions are low on supply: upgrade the railway of a saturated hub, connect a cut-off hub, or build a hub where there is none near.");
         var production = Config.Bind("Production", "AutoProduction", true,
             "Move military factories from lines whose equipment has a big surplus to lines whose equipment is short, one at a time.");
+        // Every setting is bound whatever is on: unbound keys are pruned from the file after Load.
+        _surplusPercent = Math.Max(0, Config.Bind("Production", "SurplusPercent", 50, "A line gives factories away when its equipment's surplus is above this much (%) of what the army needs."));
+        _coverDays = Math.Max(0, Config.Bind("Production", "CoverDays", 60, "A short line only gets factories if its own output won't cover the shortage within this many days: a moved factory starts over at the base efficiency."));
+        _movesPerDay = Math.Max(1, Config.Bind("Production", "MovesPerTurn", 2, "Factories moved at most per game day, so lines keep their efficiency."));
 
         _find = (delegate* unmanaged<nint, nint, nint>)Sig.Find(Signatures.FindBuilding);
         _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.FreeLevels);
@@ -164,6 +168,7 @@ public unsafe partial class AutoConstruction : Plugin
 
     private void Pump()
     {
+        if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
@@ -196,16 +201,24 @@ public unsafe partial class AutoConstruction : Plugin
             if (!perProvince) count += Level(state + BuildingsOfState, type);
             else foreach (var province in Native.PdxArray(state + ProvincesOfState)) count += Level(province + BuildingsOfProvince, type);
         }
+        foreach (var (line, _) in ConstructionLines(country, type))
+            if (*(byte*)(line + RepairLine) == 0) count += *(int*)(line + LevelsOfLine);
+        return count;
+    }
+
+    /// <summary>The country's construction lines (repairs too) of <paramref name="type"/>, with the CBuilding each works on.</summary>
+    private static List<(nint Line, nint Building)> ConstructionLines(nint country, nint type)
+    {
+        var lines = new List<(nint, nint)>();
         var production = *(nint*)(country + ProductionOfCountry);
-        if (production == 0) return count;
+        if (production == 0) return lines;
         var lineVTable = Sig.VTable(Signatures.BuildingLine);
         foreach (var line in Native.PdxArray(production + Lines))
         {
-            if (*(nint*)line != lineVTable || *(byte*)(line + RepairLine) != 0) continue;
-            var building = *(nint*)(line + BuildingOfLine);
-            if (building != 0 && *(nint*)(building + TypeOfBuilding) == type) count += *(int*)(line + LevelsOfLine);
+            var building = *(nint*)line == lineVTable ? *(nint*)(line + BuildingOfLine) : 0;
+            if (building != 0 && *(nint*)(building + TypeOfBuilding) == type) lines.Add((line, building));
         }
-        return count;
+        return lines;
     }
 
     private int Level(nint container, nint type)
@@ -222,14 +235,8 @@ public unsafe partial class AutoConstruction : Plugin
     private int Queue(nint country, int tag, nint type, int wanted)
     {
         var perProvince = *(int*)(type + ProvinceLevel) > 0;
-        var building = new HashSet<nint>(); // containers with a construction line of this type
-        var production = *(nint*)(country + ProductionOfCountry);
-        if (production != 0)
-            foreach (var line in Native.PdxArray(production + Lines))
-            {
-                var b = *(nint*)line == Sig.VTable(Signatures.BuildingLine) ? *(nint*)(line + BuildingOfLine) : 0;
-                if (b != 0 && *(nint*)(b + TypeOfBuilding) == type) building.Add(*(nint*)(b + ContainerOfBuilding));
-            }
+        // Containers with a construction line of this type.
+        var building = ConstructionLines(country, type).Select(line => *(nint*)(line.Building + ContainerOfBuilding)).ToHashSet();
 
         var places = new List<(nint Container, int Id, int Free, (int, int, int, int) Rank)>();
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
@@ -243,7 +250,7 @@ public unsafe partial class AutoConstruction : Plugin
             else
                 foreach (var province in Native.PdxArray(state + ProvincesOfState))
                     if (_canBuildInProvince(country, province, type, 1) != 0)
-                        places.Add((province + BuildingsOfProvince, *(int*)(province + IdOfProvince), _freeLevels(province + BuildingsOfProvince, type), rank));
+                        places.Add((province + BuildingsOfProvince, Game.Id(province), _freeLevels(province + BuildingsOfProvince, type), rank));
         }
         var order = places.Where(p => p.Free > 0)
             .OrderBy(p => building.Contains(p.Container)).ThenByDescending(p => p.Rank).ToList();

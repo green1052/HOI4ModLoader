@@ -57,7 +57,8 @@ internal static class Updater
         {
             // Plugins get merged or renamed between versions: the previous release's go, ones the player added stay.
             if (File.Exists(Shipped))
-                foreach (var name in File.ReadAllLines(Shipped)) File.Delete(Path.Combine(pluginsDir, Path.GetFileName(name)));
+                foreach (var name in File.ReadAllLines(Shipped).Select(Path.GetFileName).Where(n => !string.IsNullOrWhiteSpace(n)))
+                    File.Delete(Path.Combine(pluginsDir, name!));
             Directory.CreateDirectory(pluginsDir);
             foreach (var name in names) File.Move(Path.Combine(Staged, name), Path.Combine(pluginsDir, name), true);
             File.WriteAllLines(Shipped, names);
@@ -116,10 +117,29 @@ internal static class Updater
             files.Add(target);
         }
         var stamp = DateTime.UtcNow.Ticks; // a unique .old: an earlier one may still be loaded
-        foreach (var file in files)
+        var swapped = new List<string>();
+        try
         {
-            if (File.Exists(file)) File.Move(file, $"{file}.{stamp}.old");
-            File.Move(file + ".new", file);
+            foreach (var file in files)
+            {
+                swapped.Add(file);
+                if (File.Exists(file)) File.Move(file, $"{file}.{stamp}.old");
+                File.Move(file + ".new", file);
+            }
+        }
+        catch
+        {
+            // Half a release next to half of another may not start at all: put the swapped files back (.new: deleted at the next start).
+            foreach (var file in Enumerable.Reverse(swapped))
+            {
+                try
+                {
+                    if (File.Exists(file) && File.Exists($"{file}.{stamp}.old")) File.Move(file, file + ".new", true);
+                    if (File.Exists($"{file}.{stamp}.old")) File.Move($"{file}.{stamp}.old", file);
+                }
+                catch (Exception e) { Log.Error($"restore {file}: {e.Message}"); }
+            }
+            throw;
         }
     }
 }

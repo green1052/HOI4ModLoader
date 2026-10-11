@@ -25,8 +25,11 @@ public unsafe partial class AiAssist
     private static bool _postures;
     private static int _garrisoned, _countered, _fellBack, _pinning, _brokeOff;
 
-    /// <summary>A country's grad: province id -> defenders wanted, its fortress cities, the enemies it is drawn against. Published whole, never mutated (AI threads read it).</summary>
-    private sealed record Grad(int Hour, Dictionary<int, int> Want, HashSet<int> Fortresses, HashSet<int> Strong);
+    /// <summary>
+    /// A country's grad: province id -> defenders wanted, its fortress cities, the explored ground in front of it it gives up, the
+    /// enemies it is drawn against. Published whole, never mutated (AI threads read it).
+    /// </summary>
+    private sealed record Grad(int Hour, Dictionary<int, int> Want, HashSet<int> Fortresses, HashSet<int> Given, HashSet<int> Strong);
 
     /// <summary>A country's posture decision: when made, since when it holds a grad, against whom, the line it saw (ids). Main thread only.</summary>
     private sealed record Stance(int Decided, int Since, HashSet<int> Strong, HashSet<int> Border);
@@ -47,7 +50,11 @@ public unsafe partial class AiAssist
         Grads.TryGetValue(tag, out var grad);
         if (stance.Strong.Count == 0)
         {
-            if (grad != null && Grads.TryRemove(tag, out _)) Unpin(tag); // strong enough again: its divisions go back to the AI's fronts
+            if (grad != null && Grads.TryRemove(tag, out _))
+            {
+                Unpin(tag); // strong enough again: its divisions go back to the AI's fronts
+                foreach (var (unit, owner) in Attackers.ToArray()) if (owner == tag) Attackers.Remove(unit); // only BreakOff, on a grad, drops them
+            }
             return null;
         }
         var broken = grad != null && grad.Want.Keys.Any(id => Game.Province(id) is var p && p != 0 && *(int*)(p + ControllerOfProvince) != tag);
@@ -171,9 +178,14 @@ public unsafe partial class AiAssist
         var given = MinCut.SourceSide(provinces.Count, edges, 0, 1);
         var want = new Dictionary<int, int>();
         var fortresses = new HashSet<int>();
+        var abandoned = new HashSet<int>();
         for (var v = 2; v < provinces.Count; v++)
         {
-            if (given[v]) continue;
+            if (given[v])
+            {
+                abandoned.Add(Game.Id(provinces[v]));
+                continue;
+            }
             var p = provinces[v];
             var sides = 0;
             foreach (var id in Game.Neighbours(p))
@@ -185,7 +197,7 @@ public unsafe partial class AiAssist
             if (fortress) fortresses.Add(Game.Id(p));
             want[Game.Id(p)] = 1 + (sides >= 3 ? 1 : 0) + (fortress ? 1 : 0);
         }
-        return want.Count == 0 ? null : new Grad(hour, want, fortresses, strong);
+        return want.Count == 0 ? null : new Grad(hour, want, fortresses, abandoned, strong);
     }
 
     /// <summary>What holding <paramref name="to"/> against an attack from <paramref name="from"/> costs: less across a river, into rough ground or forts; nothing across impassable ground.</summary>
@@ -213,12 +225,13 @@ public unsafe partial class AiAssist
     private static HashSet<nint> Held(Grad grad, int tag) =>
         grad.Want.Keys.Select(Game.Province).Where(p => p != 0 && *(int*)(p + ControllerOfProvince) == tag).ToHashSet();
 
+    /// <summary>Whether the province is on the given-up side of the tag's grad: no reserves or resting divisions go there.</summary>
+    private static bool GivenUp(int tag, int province) => Grads.TryGetValue(tag, out var grad) && grad.Given.Contains(province);
+
     /// <summary>Off its orders (else its front walks it back) and to the grad province, posted there: the AI's regrouping leaves it (<see cref="Pinned"/>). Main thread.</summary>
     private static bool Garrison(nint unit, int province, int tag, long now)
     {
-        var group = *(nint*)(unit + GroupOfUnit);
-        if (group != 0) Unassign(unit, group);
-        if (!Send(unit, province, now, KeyGapMs)) return false;
+        if (!Relocate(unit, province, now, KeyGapMs)) return false;
         _posted[unit] = tag;
         Interlocked.Increment(ref _garrisoned);
         return true;
@@ -320,12 +333,7 @@ public unsafe partial class AiAssist
             if (*(int*)(unit + CombatsOfUnit) == 0 || Percent(unit, OrgRatioSlot) >= WornOrg) continue;
             var location = *(nint*)(unit + LocationOfUnit);
             var rest = location == 0 ? -1 : RestProvince(country, tag, location);
-            if (rest < 0) continue; // nowhere safe nearby: it fights on
-            var group = *(nint*)(unit + GroupOfUnit);
-            if (group != 0) Unassign(unit, group); // on its front, the AI would walk it straight back
-            if (!Commands.Move(unit, rest, true)) continue;
-            _sent[unit] = now + SentMs;
-            _resting[unit] = (tag, Hour);
+            if (rest < 0 || !Rest(unit, rest, tag, now, Hour)) continue; // nowhere safe nearby: it fights on
             Attackers.Remove(unit);
             Interlocked.Increment(ref _brokeOff);
         }

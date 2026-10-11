@@ -70,16 +70,18 @@ public unsafe partial class AutoConstruction
 
     private void SupplyPump()
     {
+        if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
-        var supply = Game.State == 0 ? 0 : *(nint*)(Game.State + SupplyOfGameState);
+        var supply = *(nint*)(Game.State + SupplyOfGameState);
         if (country == 0 || supply == 0) return;
         var db = *(nint*)_buildingDb;
         if (db == 0) return;
         _supplyNode = *(nint*)(db + SupplyNodeOfDb);
         if (_infrastructure == 0) _infrastructure = *(nint*)(db + InfrastructureOfDb);
-        var countrySupply = *(nint*)(*(nint*)(supply + CountriesOfSupply) + 8 * Game.TagIndex(tag));
+        var countries = *(nint*)(supply + CountriesOfSupply);
+        var countrySupply = countries == 0 ? 0 : *(nint*)(countries + 8 * Game.TagIndex(tag));
         var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);
         if (network == 0 || _supplyNode == 0) return;
 
@@ -96,7 +98,7 @@ public unsafe partial class AutoConstruction
         foreach (var (province, _) in starving.OrderByDescending(s => s.Value))
         {
             if (actions == MaxSupplyActions) break;
-            var id = *(int*)(province + IdOfProvince);
+            var id = Game.Id(province);
             if (_supplySent.TryGetValue(id, out var until) && now < until) continue;
             var acted = FixSupply(country, tag, supply, network, province);
             // Whether or not there was something to do, give it time: what was queued or is missing changes slowly.
@@ -109,7 +111,7 @@ public unsafe partial class AutoConstruction
 
     private bool FixSupply(nint country, int tag, nint supply, nint network, nint province)
     {
-        var node = FeedingNode(supply, network, *(int*)(province + IdOfProvince), Game.TagIndex(tag));
+        var node = FeedingNode(supply, network, Game.Id(province), Game.TagIndex(tag));
         if (node != 0)
         {
             var nodeProvince = *(int*)(node + ProvinceOfNode);
@@ -125,7 +127,9 @@ public unsafe partial class AutoConstruction
     /// <summary>Our node sending the most supply into the province (its supply flow), or 0.</summary>
     private static nint FeedingNode(nint supply, nint network, int province, int tagIndex)
     {
-        var flow = *(nint*)(supply + FlowOfSupply) + (nint)FlowSize * province;
+        var flows = *(nint*)(supply + FlowOfSupply);
+        if (flows == 0) return 0;
+        var flow = flows + (nint)FlowSize * province;
         var entries = *(nint*)(flow + FlowEntries);
         (int Node, long Amount) best = (-1, 0);
         for (int i = 0, n = *(int*)(flow + FlowEntries + 0xC); i < n; i++)
@@ -187,36 +191,25 @@ public unsafe partial class AutoConstruction
             if (Game.Province(id) is var p && p != 0 && !candidates.Contains(p)) candidates.Add(p);
         var best = candidates
             .Where(p => *(int*)(p + ControllerOfProvince) == tag && _canBuildInProvince(country, p, _supplyNode, 1) != 0 && _freeLevels(p + BuildingsOfProvince, _supplyNode) > 0)
-            .OrderByDescending(HasRailway).ThenByDescending(p => p == province).ThenBy(p => *(int*)(p + IdOfProvince))
+            .OrderByDescending(HasRailway).ThenByDescending(p => p == province).ThenBy(Game.Id)
             .FirstOrDefault();
         if (best == 0) return false;
-        var hub = *(int*)(best + IdOfProvince);
+        var hub = Game.Id(best);
         if (!PostConstruction(tag, hub, _supplyNode)) return false;
-        Log.Info($"supply: no hub near province {*(int*)(province + IdOfProvince)}, building one in {hub}");
+        Log.Info($"supply: no hub near province {Game.Id(province)}, building one in {hub}");
         if (!HasRailway(best)) ConnectRailway(network, tag, hub);
         return true;
     }
 
-    private bool QueuedHubIn(nint country, nint state)
-    {
-        var production = *(nint*)(country + ProductionOfCountry);
-        if (production == 0) return false;
-        foreach (var line in Native.PdxArray(production + Lines))
-        {
-            if (*(nint*)line != Sig.VTable(Signatures.BuildingLine)) continue;
-            var building = *(nint*)(line + BuildingOfLine);
-            if (building == 0 || *(nint*)(building + TypeOfBuilding) != _supplyNode) continue;
-            var container = *(nint*)(building + ContainerOfBuilding); // province + BuildingsOfProvince
-            if (container != 0 && *(nint*)(container - BuildingsOfProvince + StateOfProvince) == state) return true;
-        }
-        return false;
-    }
+    private bool QueuedHubIn(nint country, nint state) => ConstructionLines(country, _supplyNode).Any(line =>
+        *(nint*)(line.Building + ContainerOfBuilding) is var container && container != 0 // province + BuildingsOfProvince
+        && *(nint*)(container - BuildingsOfProvince + StateOfProvince) == state);
 
     /// <summary>Any railway out of the province (the railway map's level per neighbour).</summary>
     private static bool HasRailway(nint province)
     {
         var railways = *(nint*)(Game.State + RailwaysOfGameState);
-        var info = railways == 0 ? 0 : *(nint*)(*(nint*)(railways + 8) + 8 * *(int*)(province + IdOfProvince));
+        var info = railways == 0 ? 0 : *(nint*)(*(nint*)(railways + 8) + 8 * Game.Id(province));
         if (info == 0) return false;
         var pairs = *(nint*)(info + RailwayPairs);
         for (int i = 0, n = *(int*)(info + RailwayPairs + 0xC); i < n; i++)
@@ -227,8 +220,9 @@ public unsafe partial class AutoConstruction
     /// <summary>The nearest province (breadth first over adjacency, up to <paramref name="max"/> steps) matching <paramref name="wanted"/>, or -1.</summary>
     private static int Nearest(nint from, int max, Func<int, bool> wanted)
     {
-        var seen = new HashSet<int> { *(int*)(from + IdOfProvince) };
-        if (wanted(*(int*)(from + IdOfProvince))) return *(int*)(from + IdOfProvince);
+        var start = Game.Id(from);
+        if (wanted(start)) return start;
+        var seen = new HashSet<int> { start };
         var frontier = new List<nint> { from };
         for (var depth = 1; depth <= max && frontier.Count > 0; depth++)
         {

@@ -15,8 +15,8 @@ public unsafe partial class FrontLine
     private const int SupplyShare = 25; // % of what the attacking province needs it must get, or a friendly neighbour of the target must have spare
 
     /// <summary>
-    /// Empty enemy provinces next to the line get one fresh division; surrounded enemy divisions as many as outnumber them
-    /// with forts counted (as vanilla's local attacks weigh them), or none. A province of ours always keeps one. Targets in
+    /// Empty enemy provinces next to the line get one fresh division; surrounded enemy divisions at least as many as they are,
+    /// more behind forts (as vanilla's local attacks weigh them), or none. A province of ours always keeps one. Targets in
     /// order: closing a pocket (and mopping one up), then value (victory points, supply hubs, airfields, ports), then
     /// shortening the front; skipped: ones our supply can't follow and worthless ones that lengthen the front (unless they
     /// close a pocket). Nothing more goes where ours are still on their way or fighting. Plain moves: front divisions go back

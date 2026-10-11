@@ -65,7 +65,7 @@ public unsafe partial class AutoTrade : Plugin
 
     public override void Load()
     {
-        _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals."));
+        _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals. Imports are cut once the balance is a whole import step above it."));
         _alliesFirst = Config.Bind("Sellers", "AlliesFirst", true, "Buy from your subjects first, then your faction, then whoever can sell the most (trade influence breaks ties).");
         var iconClick = Sig.Find(Signatures.ResourceIconClick);
         var update = Sig.Find(Signatures.ResourceItemUpdate);
@@ -107,6 +107,7 @@ public unsafe partial class AutoTrade : Plugin
 
     private void Pump()
     {
+        if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);

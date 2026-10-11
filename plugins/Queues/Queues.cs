@@ -194,8 +194,10 @@ public unsafe class Queues : Plugin
     private void LabelTech(nint item)
     {
         var status = *(nint*)(item + StatusOfTechItem);
-        var viewed = *(int*)(*(nint*)(item + ViewOfTechItem) + ViewedTagOfTechView);
-        if (status == 0 || viewed > 0 && viewed != Game.ControlledTag) return;
+        var view = *(nint*)(item + ViewOfTechItem);
+        if (status == 0 || view == 0) return;
+        var viewed = *(int*)(view + ViewedTagOfTechView);
+        if (viewed > 0 && viewed != Game.ControlledTag) return;
         var position = _research.Items.IndexOf(*(nint*)(status + TechOfStatus)) + 1;
         if (position == 0 || *(int*)(item + StateOfTechItem) == TechResearching) return;
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "bonus"); // every item but secret weapons has one
@@ -339,6 +341,7 @@ public unsafe class Queues : Plugin
 
     private void Pump()
     {
+        if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
@@ -394,9 +397,7 @@ public unsafe class Queues : Plugin
     {
         var index = *(int*)(tech + IndexOfTech) - 1;
         var statuses = Native.PdxArray(research + Statuses);
-        if (index < 0 || index >= statuses.Length || statuses[index] == 0) return false;
-        var status = statuses[index];
-        return *(int*)(status + LevelOfStatus) >= *(int*)(*(nint*)(status + TechOfStatus) + MaxLevel);
+        return index >= 0 && index < statuses.Length && statuses[index] != 0 && *(int*)(statuses[index] + LevelOfStatus) >= *(int*)(tech + MaxLevel);
     }
 
     /// <summary>

@@ -77,7 +77,7 @@ public unsafe partial class ArmySupport
 
     private void Rebase()
     {
-        var air = StrategicAir(Game.ControlledTag);
+        var air = Game.HasStarted ? StrategicAir(Game.ControlledTag) : 0;
         if (air == 0) return;
         var free = new Dictionary<nint, int>();
         foreach (var b in Native.PdxArray(air + BasesOfAir))

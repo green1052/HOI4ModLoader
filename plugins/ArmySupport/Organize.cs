@@ -52,10 +52,11 @@ public unsafe partial class ArmySupport
     }
 
     /// <summary>A reorganisation under way: pointers are looked up again every tick (units in the country's list, groups by CRef).</summary>
-    private sealed class Organizing(List<List<nint>> chunks, HashSet<long> oldGroups, List<long> kept, long armyGroup, HashSet<long> oldParents)
+    private sealed class Organizing(List<List<nint>> chunks, HashSet<long> oldGroups, List<long> kept, long armyGroup)
     {
         public readonly List<List<nint>> Chunks = chunks; // divisions of each new army
-        public readonly HashSet<long> OldGroups = oldGroups, OldParents = oldParents;
+        public readonly HashSet<long> OldGroups = oldGroups;
+        public readonly HashSet<long> OldParents = [];     // the armies' army groups when the new army groups were sent
         public readonly List<long> Armies = kept;          // whole armies kept, then the new ones
         public long ArmyGroup = armyGroup;                 // 0: a new one
         public bool Joining;
@@ -94,7 +95,7 @@ public unsafe partial class ArmySupport
         var down = Gui.KeyHeld('G');
         var hit = down && !_organizeDown && Gui.CtrlHeld && Gui.AltHeld && Gui.GameFocused;
         _organizeDown = down;
-        if (!hit) return;
+        if (!hit || !Game.HasStarted) return;
         _organizeGame.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
@@ -136,16 +137,16 @@ public unsafe partial class ArmySupport
             + (parent != 0 ? "joining their army group" : "under a new army group"));
         if (posted.Count == 0 && keep.Count == 0) return;
         _organizing = new Organizing(posted, [.. byGroup.Where(g => g.Key != 0).Select(g => Ref(g.Key))], [.. keep.Select(Ref)],
-            parent == 0 ? 0 : Ref(parent), [.. keep.Select(a => *(nint*)(a + OrdersGroup.ParentOffset)).Where(p => p != 0).Select(Ref)]);
+            parent == 0 ? 0 : Ref(parent));
     }
 
     /// <summary>The next step once the last one's commands have run.</summary>
     private void Organize()
     {
+        if (_organizing == null || !Game.HasStarted) return;
+        _organizeGame.Check();
         var job = _organizing;
         if (job == null) return;
-        _organizeGame.Check();
-        if (_organizing == null) return;
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         if (country == 0) return;
@@ -179,8 +180,6 @@ public unsafe partial class ArmySupport
         if (missing > 0) Log.Info($"organize: no idle general for {missing} new army(ies)");
 
         armies.AddRange(job.Armies.Select(r => Group(country, r)).Where(g => g != 0));
-        job.Armies.Clear();
-        job.Armies.AddRange(armies.Select(Ref));
         var target = job.ArmyGroup == 0 ? 0 : Group(country, job.ArmyGroup);
         if (target != 0 && new OrdersGroup(target).IsArmyGroup)
         {
@@ -193,9 +192,18 @@ public unsafe partial class ArmySupport
         }
         if (job.ArmyGroup != 0) Log.Info("organize: their army group is gone (its armies were emptied), making a new one");
         job.ArmyGroup = 0;
+        // Done once every army is in an army group it isn't in now: a new army may already sit in one.
+        job.OldParents.UnionWith(armies.Select(a => *(nint*)(a + OrdersGroup.ParentOffset)).Where(p => p != 0).Select(Ref));
+        job.Armies.Clear();
         foreach (var byProvider in armies.GroupBy(a => *(nint*)(a + Org.ProviderOfGroup)))
-            if (!Native.WithPdxArray([.. byProvider], a => Post(Org.NewArmyGroupSize, cmd => _newArmyGroup(cmd, a, byProvider.Key))))
-                Log.Info("organize: the game refused a new army group");
+            if (Native.WithPdxArray([.. byProvider], a => Post(Org.NewArmyGroupSize, cmd => _newArmyGroup(cmd, a, byProvider.Key))))
+                job.Armies.AddRange(byProvider.Select(Ref)); // a refused group's armies aren't waited for
+            else Log.Info("organize: the game refused a new army group");
+        if (job.Armies.Count == 0)
+        {
+            _organizing = null;
+            return;
+        }
         job.Joining = true;
         job.Deadline = Environment.TickCount64 + Org.TimeoutMs;
     }
@@ -319,8 +327,11 @@ public unsafe partial class ArmySupport
     private static IEnumerable<nint> Groups(nint country)
     {
         foreach (var provider in Native.PdxArray(country + Org.Providers).ToArray())
-        foreach (var group in Native.PdxArray(provider + Org.GroupsOfProvider).ToArray())
-            yield return group;
+        {
+            if (provider == 0) continue;
+            foreach (var group in Native.PdxArray(provider + Org.GroupsOfProvider).ToArray())
+                if (group != 0) yield return group;
+        }
     }
 
     /// <summary>The country's army or army group with CRef <paramref name="cref"/>, or 0.</summary>

@@ -6,9 +6,21 @@ namespace HOI4ModLoader;
 /// <summary>The running game: version, game state, the player's country. Offsets for HOI4 1.19.3.</summary>
 public static unsafe class Game
 {
-    /// <summary>launcher-settings.json "rawVersion", e.g. "1.19.3.0".</summary>
-    public static readonly string Version = JsonDocument.Parse(File.ReadAllText(
-        Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "launcher-settings.json"))).RootElement.GetProperty("rawVersion").GetString()!;
+    /// <summary>launcher-settings.json "rawVersion", e.g. "1.19.3.0"; "unknown" without one (plugins made for a version then skip).</summary>
+    public static readonly string Version = ReadVersion();
+
+    private static string ReadVersion()
+    {
+        try
+        {
+            using var settings = JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "launcher-settings.json")));
+            return settings.RootElement.GetProperty("rawVersion").GetString() ?? "unknown";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return "unknown"; // a type initializer that throws would take every Game member (and the loader's startup) down with it
+        }
+    }
 
     /// <summary>
     /// Country by tag: `mov rdi,[rip+GameState]; ...; call TagIndex; ...; mov rax,[rdi+Countries]; mov rax,[rax+rcx*8]`.
@@ -102,8 +114,10 @@ public static unsafe class Game
     /// <summary>CCountry for <paramref name="tag"/>, or 0.</summary>
     public static nint Country(int tag)
     {
-        var gs = State;
-        return gs == 0 || tag <= 0 ? 0 : *(nint*)(*(nint*)(gs + _countries) + 8L * TagIndex(tag));
+        if (tag <= 0) return 0;
+        var countries = Countries;
+        var index = countries.IsEmpty ? -1 : TagIndex(tag); // a tag from another game (a stale cache) may index past the end
+        return (uint)index < (uint)countries.Length ? countries[index] : 0;
     }
 
     /// <summary>Index of <paramref name="tag"/> into the game's per-country arrays (what the game pairs with a tag as a TagIdx).</summary>
@@ -137,10 +151,8 @@ public static unsafe class Game
     /// 2 river, 3 large river, 4 impassable; 0 when they aren't neighbours.</summary>
     public static int AdjacencyType(nint from, int to)
     {
-        var adjacency = *(nint*)(from + AdjacencyOfProvince);
-        if (adjacency == 0) return 0;
-        var data = *(nint*)(adjacency + Adjacencies);
-        for (int i = 0, n = *(int*)(adjacency + Adjacencies + 0xC); i < n; i++)
+        var (data, count) = AdjacencyList(from);
+        for (var i = 0; i < count; i++)
             if (*(int*)(data + i * AdjacencySize + NeighbourId) == to) return *(byte*)(data + i * AdjacencySize + TypeOfAdjacency);
         return 0;
     }
@@ -148,12 +160,17 @@ public static unsafe class Game
     /// <summary>Ids of the provinces next to <paramref name="province"/> (land and sea).</summary>
     public static List<int> Neighbours(nint province)
     {
-        var adjacency = *(nint*)(province + AdjacencyOfProvince);
-        if (adjacency == 0) return [];
-        var data = *(nint*)(adjacency + Adjacencies);
-        var ids = new List<int>();
-        for (int i = 0, n = *(int*)(adjacency + Adjacencies + 0xC); i < n; i++) ids.Add(*(int*)(data + i * AdjacencySize + NeighbourId));
+        var (data, count) = AdjacencyList(province);
+        var ids = new List<int>(count);
+        for (var i = 0; i < count; i++) ids.Add(*(int*)(data + i * AdjacencySize + NeighbourId));
         return ids;
+    }
+
+    /// <summary>The province's adjacency entries (AdjacencySize bytes each), none when it has no adjacency data.</summary>
+    private static (nint Data, int Count) AdjacencyList(nint province)
+    {
+        var adjacency = *(nint*)(province + AdjacencyOfProvince);
+        return adjacency == 0 ? (0, 0) : (*(nint*)(adjacency + Adjacencies), *(int*)(adjacency + Adjacencies + 0xC));
     }
 }
 

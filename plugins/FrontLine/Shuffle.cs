@@ -149,7 +149,7 @@ public unsafe partial class FrontLine
                 if (_sent.ContainsKey(id) || here.Count < 2) continue;
                 var target = Game.Province(id);
                 if (target == 0 || !Enemy(country, tag, target)) continue;
-                var defenders = Native.PdxArray(target + UnitsInProvince).ToArray();
+                var defenders = Native.PdxArray(target + UnitsInProvince).ToArray().Where(u => u != 0).ToArray();
                 if (defenders.Length == 0 || defenders.Length * (_fortLevel(target) / 2 + 1) > PinOdds || defenders.Any(Fighting)) continue; // empty: Attack's; busy already
                 var unit = here.Where(u => Free(u, tag, _now) && !Walking(u) && Org(u) >= PinOrg && Str(u) >= 70).OrderByDescending(Org).FirstOrDefault();
                 if (unit == 0) break;

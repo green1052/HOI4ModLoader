@@ -26,9 +26,10 @@ public static unsafe partial class Gui
     private static readonly Dictionary<nint, nint> TooltipHandlers = [];      // widget -> its handler { vtable, widget }
     private static readonly Dictionary<nint, Func<string>> TooltipTexts = []; // widget -> its text
 
-    /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none.</summary>
+    /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none (or no window).</summary>
     public static nint FindTextBox(nint window, string name)
     {
+        if (window == 0) return 0; // a native null read can't be caught: it ends the game
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, byte>)Sig.Find(HasTextBoxSig);
         var str = NewString(Encoding.ASCII.GetBytes(name));
@@ -38,10 +39,11 @@ public static unsafe partial class Gui
 
     /// <summary>
     /// A child of <paramref name="window"/> by name through one of CContainerWindow's lookups (vtable slot: 13 button,
-    /// 15 instantTextBox, 21 checkbox, 55 window). Like the game's own calls, only for children the .gui defines.
+    /// 15 instantTextBox, 21 checkbox, 55 window). Like the game's own calls, only for children the .gui defines. 0 for no window.
     /// </summary>
     public static nint Find(nint window, int slot, string name)
     {
+        if (window == 0) return 0;
         var str = NewString(Encoding.ASCII.GetBytes(name));
         try { return Find(window, slot, str); }
         finally { FreeString(str); }
@@ -56,6 +58,7 @@ public static unsafe partial class Gui
 
     public static void SetText(nint textBox, ReadOnlySpan<byte> text)
     {
+        if (textBox == 0) return; // FindTextBox found none
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_setText == null) _setText = (delegate* unmanaged<nint, nint, void>)Sig.Find(SetTextSig);
         var str = NewString(text);

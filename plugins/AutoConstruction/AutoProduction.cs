@@ -38,9 +38,6 @@ public unsafe partial class AutoConstruction
 
     private void LoadProduction()
     {
-        _surplusPercent = Math.Max(0, Config.Bind("Production", "SurplusPercent", 50, "A line gives factories away when its equipment's surplus is above this much (%) of what the army needs."));
-        _coverDays = Math.Max(0, Config.Bind("Production", "CoverDays", 60, "A short line only gets factories if its own output won't cover the shortage within this many days: a moved factory starts over at the base efficiency."));
-        _movesPerDay = Math.Max(1, Config.Bind("Production", "MovesPerTurn", 2, "Factories moved at most per game day, so lines keep their efficiency."));
         _balance = (delegate* unmanaged<nint, long*, nint, long*>)Sig.Find(ProductionSignatures.GetBalance);
         _need = (delegate* unmanaged<nint, long*, nint, nint, long*>)Sig.Find(ProductionSignatures.GetNeed);
         MainThread.Every(TimeSpan.FromSeconds(1), ProductionPump);
@@ -48,6 +45,7 @@ public unsafe partial class AutoConstruction
 
     private void ProductionPump()
     {
+        if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
@@ -93,10 +91,12 @@ public unsafe partial class AutoConstruction
         {
             if (_movesToday == _movesPerDay || !from.MoveNext()) break;
             if (!AddFactories(tag, from.Current, -1)) continue;
-            if (!AddFactories(tag, to, +1)) AddFactories(tag, from.Current, +1); // give it back
+            // Refused: give it back. Still counted against the day and both lines left alone for a while, so a refusal
+            // doesn't take and give back a factory every second.
+            if (AddFactories(tag, to, +1)) moves++;
+            else AddFactories(tag, from.Current, +1);
             _pending[from.Current] = _pending[to] = now + ProductionPendingMs;
             _movesToday++;
-            moves++;
         }
         if (moves > 0) Log.Info($"moved {moves} factor{(moves == 1 ? "y" : "ies")} from surplus lines to short ones");
     }

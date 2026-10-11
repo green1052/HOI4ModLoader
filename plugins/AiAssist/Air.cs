@@ -11,7 +11,7 @@ public unsafe partial class AiAssist
     private const int RegionEntrySize = 0x4E8, RegionOfEntry = 0x00, KindOfEntry = 0x08, ScoreOfEntry = 0x10, IgnoredRegion = 5;
     private const int SuperiorityRecords = 0xE0, SuperiorityRecordSize = 0xA0, OurSuperiority = 0x00, EnemySuperiority = 0x08;
     private const int CombatData = 0x170, OwnWings = 0x08, OtherWings = 0x20, WingDataSize = 0x98, HourOfWingData = 0x0C, DamageTaken = 0x38;
-    private const int SuperiorityIdOfRegion = 0x60, CombatIdOfRegion = 0x58, HourOfGameState = 0x468;
+    private const int SuperiorityIdOfRegion = 0x60, CombatIdOfRegion = 0x58;
     private const int WindowHours = 168, MinLosses = 20;
     private const long MinShare = 35_000, PullOutShare = 15_000; // our share of the region's air superiority
     private const int LossesPerKillPercent = 150;

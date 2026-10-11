@@ -20,7 +20,7 @@ public unsafe partial class AiAssist
     private int _raised;
     private static int _stationed;
     private static bool _holdLine, _axis, _beachDefense;
-    private const int AxisRetryHours = 24, ThinSectorWeight = 8;
+    private const int AxisHours = 24, ThinSectorWeight = 8;
     // CAIFront+0x218: its CAIForceConcentration (the game's armoured push), embedded. +0 divisions it was given (0: none), +0x14 its units,
     // +0x20 its army, +0x48 target (optional, set flag +0x78) with its CPdxArray<CProvince*> path at +0x60 (path[0] ours .. path[n-1] the target), +0x84 attack on.
     private const int ConcentrationOfFront = 0x218, UnitsOfConcentration = 0x14, ArmyOfConcentration = 0x20, PathOfConcentration = 0x60, HasTarget = 0x78, AttackOn = 0x84;
@@ -56,7 +56,7 @@ public unsafe partial class AiAssist
                 {
                     var entry = data + 16 * i; // {CArmy*, front slot*}
                     var unit = *(nint*)entry;
-                    if (Pinned(unit) || FreshlyArrived(unit)) continue;
+                    if (unit != 0 && (Pinned(unit) || FreshlyArrived(unit))) continue;
                     if (kept != i) Buffer.MemoryCopy((void*)entry, (void*)(data + 16 * kept), 16, 16);
                     kept++;
                 }
@@ -69,14 +69,14 @@ public unsafe partial class AiAssist
         {
             Safely(() =>
             {
-                var unit = (nint*)*(nint*)units;
+                var unit = Native.PdxArray(units);
                 for (int p = 0, parts = *(int*)(partitions + 0xC); p < parts; p++)
                 {
                     var part = *(nint*)partitions + 0x18 * p; // CPdxArray<int> indices into units, for army p
                     var indices = (int*)*(nint*)part;
                     int n = *(int*)(part + 0xC), kept = 0;
                     for (var k = 0; k < n; k++)
-                        if (!Pinned(unit[indices[k]])) indices[kept++] = indices[k];
+                        if ((uint)indices[k] >= (uint)unit.Length || !Pinned(unit[indices[k]])) indices[kept++] = indices[k];
                     *(int*)(part + 0xC) = kept; // the game skips empty partitions
                 }
             });
@@ -95,7 +95,7 @@ public unsafe partial class AiAssist
         List<long>? armies = null; // CRef ids of the theatre's armies at war, for paradrops
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
-            var country = *(nint*)(front + CountryOfFront);
+            var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
             var tag = country == 0 ? 0 : *(int*)(country + 8);
             if (tag == 0 || tag == Game.ControlledTag) continue;
             var reference = (int*)(front + FrontOfAiFront);
@@ -104,7 +104,7 @@ public unsafe partial class AiAssist
             if (frontLine == 0) continue;
             nint section = 0;
             foreach (var s in Native.PdxArray(frontLine + SectionsOfFront))
-                if (*(int*)(s + IdOfSection) == *(int*)(front + SectionOfAiFront)) { section = s; break; }
+                if (s != 0 && *(int*)(s + IdOfSection) == *(int*)(front + SectionOfAiFront)) { section = s; break; }
             if (section == 0) continue;
 
             // Both sides of the section: enemy provinces (held by a country at war with us), and our provinces facing them
@@ -143,7 +143,8 @@ public unsafe partial class AiAssist
             }
             // Hold the line: at war, every province of ours on the line keeps a defender, whatever else (a supply crisis,
             // another front) the game weighs; it would ship them off and leave the line empty while fighting.
-            if (!_holdLine || !hostile || Grads.ContainsKey(tag) || *(int*)(front + AreaDefense) != 0 // on a grad, it gets the divisions, not the old border || *(nint*)(front + InvasionTarget) != 0
+            if (!_holdLine || !hostile || Grads.ContainsKey(tag) // on a grad, it gets the divisions, not the old border
+                || *(int*)(front + AreaDefense) != 0 || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
             if (*(int*)(front + MinWanted) >= contact.Count) continue;
             *(int*)(front + MinWanted) = contact.Count;
@@ -155,18 +156,20 @@ public unsafe partial class AiAssist
         // is fixed: no zig-zag). A path past a neutral or allied province may miss the line: then the thin sector, or the whole line would stand still.
         if (spot is { } line && Spearhead(general) is var head and not 0 && Rings(head) is var core && core.Overlaps(line.Line))
         {
-            if (!(Axes.TryGetValue(general, out var current) && current.Tag == line.Tag && current.Head == head && hour - current.Hour is >= 0 and < AxisRetryHours))
+            if (!(Axes.TryGetValue(general, out var current) && current.Tag == line.Tag && current.Head == head && hour - current.Hour is >= 0 and < AxisHours))
             {
                 Axes[general] = (hour, line.Tag, head, core, line.Line);
                 Interlocked.Increment(ref _spearheads);
             }
         }
         else if (spot is { } best && best.Weight <= ThinSectorWeight // no thin sector anywhere: no axis today
-            && !(Axes.TryGetValue(general, out var axis) && axis.Tag == best.Tag && hour - axis.Hour is >= 0 and < AxisRetryHours)) // held a day: divisions don't zig-zag
+            && !(Axes.TryGetValue(general, out var axis) && axis.Tag == best.Tag && hour - axis.Hour is >= 0 and < AxisHours)) // held a day: divisions don't zig-zag
             Axes[general] = (hour, best.Tag, 0, Rings(Game.Id(best.Province)), best.Line);
-        foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisRetryHours) Axes.TryRemove(g, out _); // generals come and go all game
+        foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) Axes.TryRemove(g, out _); // generals come and go all game
         if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
-        foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisRetryHours) AxisArmies.TryRemove(g, out _);
+        foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) AxisArmies.TryRemove(g, out _);
+        // Fronts come and go all game: drop the stale lines (matched by value, so one refreshed meanwhile stays).
+        foreach (var entry in _line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) _line.TryRemove(entry);
     }
 
     /// <summary>
@@ -202,16 +205,16 @@ public unsafe partial class AiAssist
         return weight;
     }
 
-    /// <summary>The breakthrough axis: its target province and its ring; local attacks stay on these.</summary>
+    /// <summary>The province and the two rings of provinces around it (an axis' core, a beach's surroundings).</summary>
     private static HashSet<int> Rings(int target)
     {
         var core = new HashSet<int> { target };
         var ring = new List<int> { target };
-        for (var depth = 0; depth < 2; depth++) // the target and its neighbours
+        for (var depth = 0; depth < 2; depth++)
         {
             var next = new List<int>();
             foreach (var id in ring)
-            foreach (var n in Game.Neighbours(Game.Province(id)))
+            foreach (var n in Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [])
                 if (core.Add(n)) next.Add(n);
             ring = next;
         }
@@ -226,9 +229,10 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool OnAxis(int tag, nint from, nint to)
     {
+        if (Grads.ContainsKey(tag)) return true; // on its grad: no breakthrough; the grad's own filter picks the targets
         var hour = Hour;
         foreach (var axis in Axes.Values)
-            if (axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisRetryHours && axis.Line.Contains(Game.Id(from)))
+            if (axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours && axis.Line.Contains(Game.Id(from)))
                 return axis.Core.Contains(Game.Id(to)) || Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(axis.Core.Contains);
         return true;
     }
@@ -241,7 +245,7 @@ public unsafe partial class AiAssist
     {
         var hour = Hour;
         foreach (var axis in Axes.Values)
-            if (axis.Tag == tag && hour - axis.Hour is >= 0 and < 2 * AxisRetryHours && axis.Core.Contains(province)) return true;
+            if (axis.Tag == tag && hour - axis.Hour is >= 0 and < 2 * AxisHours && axis.Core.Contains(province)) return true;
         return false;
     }
 }

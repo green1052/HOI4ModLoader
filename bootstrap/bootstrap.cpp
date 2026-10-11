@@ -121,7 +121,14 @@ static LONG CALLBACK OnFault(EXCEPTION_POINTERS* e) {
     const char* crumb = t_crumb;
     if (!crumb && ModuleOf(r->ExceptionAddress)) return EXCEPTION_CONTINUE_SEARCH; // the game's or Windows' own: the game's crash report covers it
     t_reporting = true;
-    while (InterlockedExchange(&g_crashLock, 1)) SwitchToThread();
+    // Bounded: the holder may wait on a lock this thread holds (GetModuleFileNameW takes the loader lock). Unreported beats hung.
+    for (int waited = 0; InterlockedExchange(&g_crashLock, 1); waited++) {
+        if (waited == 1000) {
+            t_reporting = false;
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+        Sleep(1);
+    }
     g_reports++;
     PutTime();
     Put(" FAULT (first chance) thread ");

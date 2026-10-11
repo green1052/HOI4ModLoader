@@ -10,6 +10,7 @@ public sealed class ConfigFile
 {
     private readonly string _path;
     private readonly List<string> _lines;
+    private readonly HashSet<(string Section, string Key)> _bound = []; // bound through this instance
 
     public ConfigFile(string path)
     {
@@ -19,6 +20,7 @@ public sealed class ConfigFile
 
     public T Bind<T>(string section, string key, T defaultValue, string description) where T : IConvertible
     {
+        _bound.Add((section, key));
         var (sectionAt, keyAt) = Find(section, key);
         if (keyAt >= 0)
         {
@@ -76,6 +78,64 @@ public sealed class ConfigFile
         Reload();
         _lines[Find(section, key).Key] = $"{key} = {Convert.ToString(value, CultureInfo.InvariantCulture)}";
         File.WriteAllLines(_path, _lines);
+    }
+
+    /// <summary>
+    /// Deletes the entries this instance never bound (settings a plugin no longer has), with their description, except in
+    /// section <paramref name="keep"/>; a section that loses all its entries goes too. Returns the "section.key"s deleted.
+    /// </summary>
+    internal List<string> RemoveUnbound(string keep)
+    {
+        Reload();
+        var removed = new List<string>();
+        var emptied = new HashSet<string>();
+        var kept = new List<string>();
+        var section = "";
+        var skipBlank = false;
+        foreach (var raw in _lines)
+        {
+            var line = raw.Trim();
+            if (skipBlank && line == "") // the blank line after a removed entry
+            {
+                skipBlank = false;
+                continue;
+            }
+            skipBlank = false;
+            if (IsHeader(line)) section = line[1..^1];
+            else if (IsEntry(line, out var key) && section != keep && !_bound.Contains((section, key)))
+            {
+                removed.Add($"{section}.{key}");
+                emptied.Add(section);
+                while (kept.Count > 0 && kept[^1].TrimStart().StartsWith('#')) kept.RemoveAt(kept.Count - 1); // its description
+                skipBlank = true;
+                continue;
+            }
+            kept.Add(raw);
+        }
+        if (removed.Count == 0) return removed;
+
+        // A section that lost entries and has none left goes whole, up to the next section.
+        for (var i = kept.Count - 1; i >= 0; i--)
+        {
+            var line = kept[i].Trim();
+            if (!IsHeader(line) || !emptied.Contains(line[1..^1])) continue;
+            var end = i + 1;
+            while (end < kept.Count && !IsHeader(kept[end].Trim())) end++;
+            if (!kept.Skip(i + 1).Take(end - i - 1).Any(l => IsEntry(l.Trim(), out _))) kept.RemoveRange(i, end - i);
+        }
+        _lines.Clear();
+        _lines.AddRange(kept);
+        File.WriteAllLines(_path, _lines);
+        return removed;
+    }
+
+    private static bool IsHeader(string line) => line.StartsWith('[') && line.EndsWith(']');
+
+    /// <summary>A `key = value` line (trimmed), as <see cref="Entries"/> reads them.</summary>
+    private static bool IsEntry(string line, out string key)
+    {
+        key = line.Split('=', 2) is [var k, _] && !line.StartsWith('#') && !IsHeader(line) ? k.Trim() : "";
+        return key.Length > 0;
     }
 
     private void Reload()

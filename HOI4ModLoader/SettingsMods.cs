@@ -70,22 +70,24 @@ internal static unsafe class SettingsMods
 
     internal static void Install()
     {
+        // Everything resolved before the first hook: a broken signature leaves no half-installed tab (the loader's hooks stay).
         _checkBoxSprite = (delegate* unmanaged<nint, void>)Sig.Find(CheckBoxSpriteSig);
-        _ = Sig.VTable(CheckBoxGlue) + Sig.VTable(ButtonGlue) + Sig.VTable(MemberCall); // resolve now: fail at startup, not in a click
+        _ = Sig.VTable(CheckBoxGlue) + Sig.VTable(ButtonGlue) + Sig.VTable(MemberCall);
+        var (init, open, updateTabs) = (Sig.Find(InitSig), Sig.Find(OpenSig), Sig.Find(UpdateTabsSig));
 
-        _init = Patches.Hook<InitFn>(Sig.Find(InitSig), (screen, window) =>
+        _init = Patches.Hook<InitFn>(init, (screen, window) =>
         {
             var result = _init!.OriginalFunction(screen, window);
             Guard(() => Build(screen));
             return result;
         });
-        _open = Patches.Hook<OpenFn>(Sig.Find(OpenSig), screen =>
+        _open = Patches.Hook<OpenFn>(open, screen =>
         {
             var result = _open!.OriginalFunction(screen);
             if (screen == _screen && _page != 0 && *(nint*)(screen + ShownTab) == _page) Guard(ShowPage); // reopened on the Mods tab
             return result;
         });
-        _updateTabs = Patches.Hook<TabsFn>(Sig.Find(UpdateTabsSig), screen =>
+        _updateTabs = Patches.Hook<TabsFn>(updateTabs, screen =>
         {
             var result = _updateTabs!.OriginalFunction(screen);
             if (screen == _screen && _tab != 0) // the vanilla table knows 4 tabs: ours is selected when its page is shown

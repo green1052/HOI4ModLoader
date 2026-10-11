@@ -144,8 +144,11 @@ public static unsafe partial class Patches
 
     private static void RememberOriginal(nint at, byte[] bytes)
     {
-        if (bytes.Length == 0 || !Originals.TryAdd(at, bytes)) return;
-        OriginalsVersion++;
+        lock (Image.Gate)
+        {
+            if (bytes.Length == 0 || !Originals.TryAdd(at, bytes)) return;
+            OriginalsVersion++;
+        }
     }
 
     /// <summary>Throws unless a plugin (or the loader) is being loaded: a patch nobody owns would never be reverted.</summary>
@@ -167,7 +170,11 @@ public static unsafe partial class Patches
     internal static void Revert(string owner)
     {
         if (!Undo.Remove(owner, out var list)) return;
-        for (var i = list.Count - 1; i >= 0; i--) list[i]();
+        for (var i = list.Count - 1; i >= 0; i--)
+        {
+            try { list[i](); }
+            catch (Exception e) { Log.Error($"{owner}: revert: {e.Message}"); } // the rest still go: they are already off the list
+        }
         foreach (var a in Claims.Where(c => c.Value == owner).Select(c => c.Key).ToList()) Claims.Remove(a);
     }
 

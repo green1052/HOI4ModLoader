@@ -14,8 +14,7 @@ public unsafe partial class AiAssist
     // +8 bool* takeFirst (the feasibility check: the first candidate wins), +0x10 CPdxArray<CProvince*>* candidates, +0x48 CCountry*,
     // +0x60 SRWLOCK*, +0x68 CPdxArray<long>* scores (same index as the candidates).
     private const int FoundOfClosure = 0, TakeFirstOfClosure = 8, CandidatesOfClosure = 0x10, CountryOfClosure = 0x48, LockOfClosure = 0x60, ScoresOfClosure = 0x68;
-    private const int OrdersOfGroup = 0x98, TargetsOfInvasion = 0x70; // COrdersGroup: CPdxArray<COrder*> root orders; COrder: CPdxArray<int> beach ids
-    private const int WorkingLevel = 0x42, BeachHours = 24;
+    private const int TargetsOfInvasion = 0x70, BeachHours = 24; // COrder: CPdxArray<int> beach ids
     private const int BeachPercent = 50, BeachHoldHours = 7 * 24; // a launch waits while enemy divisions around a beach outnumber half the landing, a week at most
 
     [Function(CallingConventions.Microsoft)] public delegate void CandidateFn(nint closure, nint province);

@@ -36,13 +36,18 @@ public sealed unsafe partial class Image
 {
     public static readonly Image Game = new(NativeLibrary.GetMainProgramHandle());
 
+    /// <summary>
+    /// Guards the lookup caches and <see cref="Patches.Originals"/>: plugins look up lazily from game threads (an AI hook's
+    /// Commands.New) while a reload on the main thread adds to them.
+    /// </summary>
+    internal static readonly Lock Gate = new();
+
     private readonly nint _base;
     private readonly long _pointerBase; // what absolute pointers in the image are relative to: actual base when loaded, preferred base when mapped as data
     private readonly List<(nint Start, int Size, bool Code)> _sections = [];
     private readonly (int Begin, int End)[] _functions;
     private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = []; // code sections with patched bytes put back
-    private readonly Dictionary<(string, int, string?), nint[]> _found = [];          // FindAll results
-    private readonly Dictionary<string, nint> _vtables = [];                          // VTable results
+    private readonly Dictionary<object, object> _lookups = [];                        // FindAll and VTable results, or what they threw
 
     private Image(nint b, bool relocated = true)
     {
@@ -75,11 +80,29 @@ public sealed unsafe partial class Image
     /// Every match of <paramref name="pattern"/> in code. With <paramref name="anchor"/>, only matches inside functions that
     /// reference that exact string (engine strings survive updates better than code). Throws unless exactly <paramref name="count"/> match.
     /// </summary>
-    public nint[] FindAll(string pattern, int count = 1, string? anchor = null)
+    public nint[] FindAll(string pattern, int count = 1, string? anchor = null) =>
+        [.. Cached((pattern, count, anchor), () => Search(pattern, count, anchor))];
+
+    /// <summary>
+    /// Code never moves and scans see it unpatched, so a result holds for the whole run (plugin reloads look it up again),
+    /// and so does a failure: a broken signature resolved lazily (every frame) must not rescan the exe each time.
+    /// </summary>
+    private T Cached<T>(object key, Func<T> find) where T : notnull
     {
-        // Code never moves and scans see it unpatched, so a result holds for the whole run (plugin reloads look it up again).
-        var key = (pattern, count, anchor);
-        if (_found.TryGetValue(key, out var found)) return [.. found];
+        lock (Gate)
+        {
+            if (!_lookups.TryGetValue(key, out var result))
+            {
+                try { result = find(); }
+                catch (InvalidOperationException e) { result = e; }
+                _lookups[key] = result;
+            }
+            return result is Exception error ? throw new InvalidOperationException(error.Message) : (T)result;
+        }
+    }
+
+    private nint[] Search(string pattern, int count, string? anchor)
+    {
         var hits = Scan(pattern);
         if (anchor != null)
         {
@@ -88,7 +111,6 @@ public sealed unsafe partial class Image
         }
         if (hits.Count != count)
             throw new InvalidOperationException($"pattern matched {hits.Count}x (expected {count}): {pattern}{(anchor != null ? $" in functions using \"{anchor}\"" : "")}");
-        _found[key] = [.. hits];
         return [.. hits];
     }
 
@@ -138,9 +160,10 @@ public sealed unsafe partial class Image
     /// vtable of <paramref name="className"/> via MSVC RTTI: the type descriptor holds ".?AV&lt;name&gt;@@", the complete
     /// object locator (signature 1, offset 0) points at it by RVA, and the vtable's slot -1 points at the locator.
     /// </summary>
-    public nint VTable(string className)
+    public nint VTable(string className) => Cached(className, () => FindVTable(className));
+
+    private nint FindVTable(string className)
     {
-        if (_vtables.TryGetValue(className, out var known)) return known;
         var name = FindData(Encoding.ASCII.GetBytes($".?AV{className}@@\0"));
         if (name.Count != 1) throw new InvalidOperationException($"RTTI for {className} found {name.Count}x");
         var td = (int)(name[0] - 16 - _base);
@@ -148,7 +171,7 @@ public sealed unsafe partial class Image
         var locators = FindData(BitConverter.GetBytes(td)).Where(a => *(int*)(a - 12) == 1 && *(int*)(a - 8) == 0).Select(a => a - 12).ToList();
         var vtables = locators.SelectMany(col => FindData(BitConverter.GetBytes(_pointerBase + (col - _base)))).Select(a => a + 8).ToList();
         if (vtables.Count != 1) throw new InvalidOperationException($"vtable of {className} found {vtables.Count}x");
-        return _vtables[className] = vtables[0];
+        return vtables[0];
     }
 
     /// <summary>

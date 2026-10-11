@@ -120,7 +120,7 @@ public unsafe partial class AutoTrade
             if (!_on) foreach (var arrow in _arrows) _visible(arrow, 0);
         }
         _down = down;
-        if (!_on || Game.ControlledTag == 0) return;
+        if (!_on || !Game.HasStarted || Game.ControlledTag == 0) return;
         if (_manager == 0)
         {
             if (!_reported) Log.Info("trade overlay: the map's arrow manager is not caught yet; select a unit or open a map mode with arrows, then toggle again");
@@ -169,14 +169,10 @@ public unsafe partial class AutoTrade
     /// through CreateArrow too, and reusing e.g. "defence_line" painted a huge dark band over the map.</summary>
     private nint MakeArrow()
     {
-        string[] tries = _capturedName.Contains("supply") ? [Style, _capturedName] : [Style];
-        foreach (var style in tries.Distinct())
-        {
-            var arrow = Create(style);
-            if (arrow != 0) return arrow;
-            if (style != _capturedName) Log.Info($"trade overlay: style \"{style}\" not found, trying \"{_capturedName}\"");
-        }
-        return 0;
+        var arrow = Create(Style);
+        if (arrow != 0 || !_capturedName.Contains("supply") || _capturedName == Style) return arrow;
+        Log.Info($"trade overlay: style \"{Style}\" not found, trying \"{_capturedName}\"");
+        return Create(_capturedName);
     }
 
     private nint Create(string style)

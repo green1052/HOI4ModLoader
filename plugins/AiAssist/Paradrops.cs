@@ -7,7 +7,7 @@ public unsafe partial class AiAssist
 {
     // ---- Strategic paradrops: the vanilla AI never makes a paradrop order (only the map UI posts the source command) ----
 
-    private const int RefOfGroup = 0x08, TagOfGroup = 0x3C, RootsOfGroup = 0x98;            // COrdersGroup: CRef id; owner tag; CPdxArray<COrder*> root orders
+    private const int RefOfGroup = 0x08, TagOfGroup = 0x3C, OrdersOfGroup = 0x98;            // COrdersGroup: CRef id; owner tag; CPdxArray<COrder*> root orders
     private const int RefOfUnit = 0x18, CanParadrop = 0x5B5, UnitOfMemberSlot = 4;           // CArmy: CRef id; its stats' can-paradrop flag; COrdersGroupMember vtable: -> CArmy*
     private const int SourceOfOrder = 0xB8, UnitsOfOrder = 0x210, IdOfOrder = 0x244;         // COrder: source province, CPdxArray<COrdersGroupMember*>, id
     private const int ArgOfOrderCommand = 0x34;                                               // after GroupOfCommand/OrderOfCommand: Execute on (byte), SetParadropTarget province (int)
@@ -26,6 +26,7 @@ public unsafe partial class AiAssist
 
     private sealed class Drop
     {
+        public nint General; // the CAIGeneral whose axis it backs: an Axes key, never dereferenced
         public long Group;
         public int Source, Order, Target, Hour, Launched = -1;
         public long[] Units = [];
@@ -84,7 +85,7 @@ public unsafe partial class AiAssist
     /// <summary>Every half minute: each AI country runs at most one paradrop at a time, from an army on its breakthrough axis.</summary>
     private void PlanParadrops()
     {
-        if (!SheepMod.Active || !Game.HasStarted) return; // menus, lobby, loading: no AI commands
+        if (!Game.HasStarted || !SheepMod.Active) return; // menus, lobby, loading: no AI commands (and Sheep Mod is asked once a game runs)
         _game.Check(); // CRef ids of an old game must not resolve into this one
         var hour = Hour;
         var player = Game.ControlledTag;
@@ -124,12 +125,15 @@ public unsafe partial class AiAssist
         return stats != 0 && *(byte*)(stats + CanParadrop) != 0;
     }
 
-    /// <summary>Paratroopers of an army on a breakthrough axis go to the nearest airbase that can fly them (vanilla's own check).</summary>
+    /// <summary>
+    /// Paratroopers of the axis theatre's army with the most of them ready go to the airbase nearest the axis that can fly them
+    /// (vanilla's own check).
+    /// </summary>
     private static void StartDrop(nint country, int tag, int hour)
     {
         foreach (var (general, axis) in Axes)
         {
-            if (axis.Tag != tag || hour - axis.Hour is < 0 or >= AxisRetryHours) continue;
+            if (axis.Tag != tag || hour - axis.Hour is < 0 or >= AxisHours) continue;
             if (!AxisArmies.TryGetValue(general, out var armies) || armies.Tag != tag) continue;
             if (BestTarget(country, tag, axis.Core, 0) == 0) continue; // nothing worth a drop behind this axis today
             nint group = 0;
@@ -145,18 +149,18 @@ public unsafe partial class AiAssist
             }
             if (units.Count == 0) continue;
             if (units.Count > MaxParatroopers) units.RemoveRange(MaxParatroopers, units.Count - MaxParatroopers);
-            var source = Airbase(tag, group, axis.Line);
+            var source = Airbase(tag, group, [.. axis.Line.Where(axis.Core.Contains)]); // the line around the axis: its targets must be in range
             if (source == 0) continue;
             var cmd = Allocator.AllocZeroed(SourceCommandSize);
             Native.WithPdxArray(units.ToArray(), list => _paradropSource(cmd, group, source, 0, list));
             if (!Commands.CanExecute(cmd)) // the allow_paratroopers rule is off (a new order checks only the rule and the group)
             {
-                ((delegate* unmanaged<nint, int, void>)(*(nint**)cmd)[0])(cmd, 1); // the deleting destructor: frees its unit array too
+                Commands.Free(cmd); // the deleting destructor: frees its unit array too
                 NextParadrop[tag] = hour + CooldownHours;
                 return;
             }
             if (!Commands.Post(cmd, true)) return;
-            var drop = new Drop { Group = *(long*)(group + RefOfGroup), Source = source, Hour = hour, Units = units.Select(u => *(long*)(u + RefOfUnit)).ToArray() };
+            var drop = new Drop { General = general, Group = *(long*)(group + RefOfGroup), Source = source, Hour = hour, Units = units.Select(u => *(long*)(u + RefOfUnit)).ToArray() };
             Drops[tag] = drop;
             foreach (var u in drop.Units) Paratroopers[u] = tag;
             return;
@@ -170,7 +174,7 @@ public unsafe partial class AiAssist
         if (group == 0) return false;
         if (drop.Order == 0) // the source command has run by now: find the order it made
         {
-            foreach (var o in Native.PdxArray(group + RootsOfGroup))
+            foreach (var o in Native.PdxArray(group + OrdersOfGroup))
                 if (o != 0 && *(int*)(o + TypeOfOrder) == Paradrop && *(int*)(o + SourceOfOrder) == drop.Source && !ParadropOrders.ContainsKey((drop.Group, *(int*)(o + IdOfOrder))))
                 {
                     drop.Order = *(int*)(o + IdOfOrder);
@@ -189,10 +193,12 @@ public unsafe partial class AiAssist
             return false;
         }
         var executing = *(byte*)(order + Executing) != 0;
+        if (executing && drop.Launched >= 0 && hour > drop.Launched) return true; // jumped: its target fills with our paratroopers, vanilla finishes it
         var target = drop.Target == 0 ? 0 : Game.Province(drop.Target);
         if (target == 0 || !DropTarget(country, tag, target) || _isParadropTarget(order, target) == 0)
         {
-            var core = AxisOf(tag, hour);
+            // The axis it was planned for (another theatre's targets are out of its planes' range).
+            var core = Axes.TryGetValue(drop.General, out var axis) && axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours ? axis.Core : null;
             var next = core == null ? 0 : BestTarget(country, tag, core, order);
             if (next != 0 && PostOrderCommand(Signatures.ParadropTargetCommand, drop.Group, drop.Order, next)) drop.Target = next; // vanilla re-checks the route's air on it
             else if (executing) PostOrderCommand(Signatures.ExecuteCommand, drop.Group, drop.Order, 0); // nothing safe to land on: hold
@@ -245,13 +251,6 @@ public unsafe partial class AiAssist
         *(int*)(cmd + OrderOfCommand) = order;
         *(int*)(cmd + ArgOfOrderCommand) = argument;
         return Commands.TryPost(cmd, true);
-    }
-
-    private static HashSet<int>? AxisOf(int tag, int hour)
-    {
-        foreach (var axis in Axes.Values)
-            if (axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisRetryHours) return axis.Core;
-        return null;
     }
 
     /// <summary>

@@ -29,8 +29,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Like the original check (nonzero = skip this target), but only the best kind of target of <paramref name="from"/>
-    /// stays: ones opening a corridor to a pocket of ours (when it holds at least as many of our divisions as the best
+    /// Like the original check (nonzero = skip this target), but targets <see cref="RuledOut"/> are skipped (and don't count
+    /// as alternatives), and only the best kind of target of <paramref name="from"/> stays: ones opening a corridor to a pocket of ours (when it holds at least as many of our divisions as the best
     /// pocket-closing target cuts off), else pocket-closing ones, else ones on the axis, else valuable ones, else none that
     /// lengthen the front; the game's random pick then takes one of those. Vanilla's own rejections stay. AI threads: read only.
     /// </summary>
@@ -44,19 +44,10 @@ public unsafe partial class AiAssist
             var tag = *(int*)us;
             var me = Game.Country(tag);
             if (me == 0 || !SheepMod.Active) return 0;
-            if (Grads.ContainsKey(tag) && !Exhausted(to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0)
+            var ruled = RuledOut(me, tag, from, to);
+            if (ruled != 0)
             {
-                Interlocked.Increment(ref _steered);
-                return 1; // on its grad: local attacks only into fought-out spearheads, pockets and the way to its own
-            }
-            if (_armorTerrain && BadForArmor(tag, from, to))
-            {
-                Interlocked.Increment(ref _steered);
-                return 1;
-            }
-            if (_supplyAware && Starved(me, tag, from, to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0)
-            {
-                Interlocked.Increment(ref _unsupplied);
+                Interlocked.Increment(ref ruled == Unsupplied ? ref _unsupplied : ref _steered);
                 return 1;
             }
             if (!(_attackTargets || _axis)) return 0;
@@ -64,9 +55,9 @@ public unsafe partial class AiAssist
             foreach (var id in _attackTargets ? Game.Neighbours(from) : []) // the axis alone needs none of these
             {
                 var c = Game.Province(id);
-                if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || _armorTerrain && BadForArmor(tag, from, c)
-                    || _supplyAware && Starved(me, tag, from, c) && Pocket(me, tag, c) == 0 && Relief(me, tag, c) == 0) continue;
-                if (!Strong(from, c)) continue; // fails vanilla's strength test anyway
+                // The other targets this attack could take instead, as vanilla and the checks above would let them through;
+                // a strength test failure fails vanilla's candidate loop anyway.
+                if (c == 0 || !Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || !Strong(from, c) || RuledOut(me, tag, from, c) != 0) continue;
                 pocket = Math.Max(pocket, Pocket(me, tag, c));
                 relief = Math.Max(relief, Relief(me, tag, c));
                 shortest = Math.Min(shortest, FrontChange(me, tag, c));
@@ -86,6 +77,21 @@ public unsafe partial class AiAssist
             return _cantMove(us, from, to);
         }
         finally { Breadcrumb.Leave(crumb); }
+    }
+
+    private const int Steered = 1, Unsupplied = 2;
+
+    /// <summary>
+    /// Why a local attack from <paramref name="from"/> on <paramref name="to"/> is off whatever else it could take (0: it isn't):
+    /// on its grad only fought-out spearheads, pockets and the way to its own (Steered); not into terrain that cripples the armor
+    /// there (Steered); not where supply can't follow, unless it closes a pocket or opens the way to ours (Unsupplied).
+    /// </summary>
+    private static int RuledOut(nint me, int tag, nint from, nint to)
+    {
+        if (Grads.ContainsKey(tag) && !Exhausted(to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
+        if (_armorTerrain && BadForArmor(tag, from, to)) return Steered;
+        if (_supplyAware && Starved(me, tag, from, to) && Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Unsupplied;
+        return 0;
     }
 
     /// <summary>A neighbour vanilla's candidate loop would weigh at all (before its own CantMoveInto): not behind an impassable
@@ -254,6 +260,7 @@ public unsafe partial class AiAssist
     // CBuildingDatabase (0x3F0 bytes): 0x3A0 supply_node, 0x3A8 rail_way, 0x3B0 infrastructure, 0x3B8 naval_base (the slot
     // Signatures.BuildingDbCall reads), 0x3C0 arms_factory, 0x3C8 industrial_complex; 0x298 the air base types.
     private const int ResourceEntries = 0xF8, SupplyNodeType = 0x3A0, AirBaseTypes = 0x298, CapitalOfCountry = 0x1018;
+    private const int LevelOfBuilding = 0x40, WorkingLevel = 0x42; // CBuilding: short levels, built and working (bombed-out ones don't count)
     private const int EntrenchOfUnit = 0x458, MaxEntrenchOfUnit = 0x460; // CArmy: dig-in now and at most (1e5)
     private const int MinTargetValue = 30, FreshStrength = 70;
     private const long CapitalsCacheMs = 60_000;
@@ -276,13 +283,14 @@ public unsafe partial class AiAssist
 
         double value = 3 * Math.Min(*(int*)(target + VictoryPoints), 30);
         if (Capitals().Contains(*(int*)(state + IdOfState))) value += main ? 60 : 15;
-        var hub = _findBuilding(target + BuildingsOfProvince, *(nint*)(db + SupplyNodeType)); // nodes (and air bases below) are always defined
-        if (hub != 0 && *(short*)(hub + 0x40) > 0) value += 20;
+        var node = *(nint*)(db + SupplyNodeType); // FindBuilding reads the type at once: never a null one
+        var hub = node == 0 ? 0 : _findBuilding(target + BuildingsOfProvince, node);
+        if (hub != 0 && *(short*)(hub + LevelOfBuilding) > 0) value += 20;
 
         var air = 0;
         var types = (nint*)*(nint*)(db + AirBaseTypes);
         for (int i = 0, n = *(int*)(db + AirBaseTypes + 0xC); i < n; i++)
-            if (_findBuilding(state + BuildingsOfState, types[i]) is var b && b != 0) air += *(short*)(b + 0x42);
+            if (types[i] != 0 && _findBuilding(state + BuildingsOfState, types[i]) is var b && b != 0) air += *(short*)(b + WorkingLevel);
         long resources = 0;
         var definition = *(nint*)(state + ResourcesOfState);
         if (definition != 0)
@@ -319,7 +327,8 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// An empty enemy province next to a stack of ours gets one fresh division from it (one always stays): vanilla's local
-    /// attacks often skip them. A plain move; a front division goes back to its front by itself afterwards. Main thread.
+    /// attacks often skip them (not where supply can't follow, under SupplyAwareAttacks). A plain move; a front division goes
+    /// back to its front by itself afterwards. Main thread.
     /// </summary>
     private static void TakeEmpty(nint country, int tag, nint[] units, long now)
     {
@@ -333,7 +342,8 @@ public unsafe partial class AiAssist
             {
                 if (spare == 0) break;
                 var target = Game.Province(id);
-                if (target == 0 || _gap.ContainsKey(id) || Divisions(target) > 0 || !Enemy(country, tag, target)) continue;
+                if (target == 0 || _gap.ContainsKey(id) || Divisions(target) > 0 || !Enemy(country, tag, target)
+                    || _supplyAware && Starved(country, tag, here.Key, target)) continue; // supply must follow it there, as with local attacks
                 if (!Send(fresh[--spare], id, now, SentMs)) continue;
                 Interlocked.Increment(ref _taken);
                 if (++taken == MaxMoves) return;
@@ -355,8 +365,8 @@ public unsafe partial class AiAssist
     /// Supply only flows through our side's provinces, so once <paramref name="to"/> is taken its supply comes over its land
     /// neighbours held by us or allies. Starved: <paramref name="from"/> gets less than SupplyAwareMinPercent % of what it
     /// needs and no other friendly neighbour of the target has that much spare (flow in minus its own need).
-    /// The callers exempt pocket-closing and relief targets. AI threads, read only: the game rebuilds the flow on the main
-    /// thread each hour, before the AI pass.
+    /// Local attacks exempt pocket-closing and relief targets. AI threads (and the main thread), read only: the game rebuilds
+    /// the flow on the main thread each hour, before the AI pass.
     /// </summary>
     private static bool Starved(nint me, int tag, nint from, nint to)
     {
