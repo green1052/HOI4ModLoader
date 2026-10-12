@@ -82,6 +82,8 @@ public unsafe partial class FrontLine : Plugin
     private Dictionary<nint, Held> _held = [];                               // every division we took for a job: one bookkeeping, so no feature takes another's
     private Dictionary<int, (nint[] Units, bool Attack)> _sent = [];          // province we sent divisions into (a battle to help, an attack) -> them
     private bool _force;                                                      // an AI country's turn: commands posted as the AI posts them
+    private bool _restore;                                                    // the next player turn puts back the divisions the last game held
+    private string _remembered = "";                                          // what Remember last wrote
     private int _nextAi;                                                      // the AI country the last tick's budget stopped at
     // Rebuilt every turn: who is on which order, how many of a front stand in a province, our divisions, memos.
     private readonly Dictionary<nint, nint> _orders = [];                     // member -> order (Manage's turns only)
@@ -152,6 +154,7 @@ public unsafe partial class FrontLine : Plugin
             _operations.Clear();
             _opOrdered.Clear();
             _opLastHour = -1;
+            _restore = true; // a save loaded (or the plugin reloaded): put back what the last game had taken off its plans
         });
         if (operations) LoadOperations();
         if (micro) MainThread.Every(TimeSpan.FromSeconds(2), Manage);
@@ -240,7 +243,12 @@ public unsafe partial class FrontLine : Plugin
         _game.Check();
         if (!Game.HasStarted) return;
         var player = Game.ControlledTag;
-        if (player != 0) Turn(player); // 0: observer
+        if (player != 0)
+        {
+            if (_restore) Restore(player);
+            Turn(player); // 0: observer
+            Remember(player);
+        }
         if (_ai)
         {
             var countries = Game.Countries.ToArray();
@@ -524,6 +532,51 @@ public unsafe partial class FrontLine : Plugin
     {
         var location = Division.Location(unit);
         return location != 0 && Province.EnemyDivisionsNext(country, tag, location);
+    }
+
+    private static readonly string HeldFile = Path.Combine(Loader.ModsDir, "cache", "frontline_held.txt");
+
+    /// <summary>
+    /// The player's divisions we hold off their battle plan, by ref (unit, army, order id), written when it changes: a save
+    /// loaded or a plugin reload forgets them, and they would stay off their plan.
+    /// </summary>
+    private void Remember(int tag)
+    {
+        var lines = string.Join("\n", SideOf(tag).Held.Where(h => h.Value.Order != 0)
+            .Select(h => $"{Division.Ref(h.Key)} {new OrdersGroup(h.Value.Group).Ref} {h.Value.Order}").Order());
+        if (lines == _remembered) return;
+        _remembered = lines;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(HeldFile)!);
+            File.WriteAllText(HeldFile, lines);
+        }
+        catch (IOException e) { Log.Error($"held divisions: {e.Message}"); }
+    }
+
+    /// <summary>
+    /// After a load: the divisions the file names that are still the player's, in the same army and on no order go back onto
+    /// their order (a different campaign's refs name nothing, or divisions that fail these checks).
+    /// </summary>
+    private void Restore(int tag)
+    {
+        _restore = false;
+        string[] lines;
+        try { lines = File.Exists(HeldFile) ? File.ReadAllLines(HeldFile) : []; }
+        catch (IOException) { return; }
+        var restored = 0;
+        foreach (var line in lines)
+        {
+            var parts = line.Split(' ');
+            if (parts.Length != 3 || !long.TryParse(parts[0], out var unitRef) || !long.TryParse(parts[1], out var groupRef) || !int.TryParse(parts[2], out var order)) continue;
+            var unit = Game.Resolve(unitRef);
+            var group = Game.Resolve(groupRef);
+            if (unit == 0 || group == 0 || Division.Commander(unit) != tag || Division.Group(unit) != group || OrderOf(unit, group) != 0
+                || !Division.Ready(unit, tag) || !Commands.Assign(unit, group, order)) continue;
+            _pending[unit] = Environment.TickCount64 + PendingMs;
+            restored++;
+        }
+        if (restored > 0) Log.Info($"put {restored} division(s) the last game had taken off their battle plan back onto it");
     }
 
     /// <summary><see cref="Province.NextToEnemy"/>, remembered for the turn.</summary>

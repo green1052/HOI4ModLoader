@@ -135,6 +135,19 @@ public static unsafe class Game
     /// <summary>The game's clock in hours since its start date (0 without a game).</summary>
     public static int Hour => State is var gs && gs != 0 ? *(int*)(gs + HourOfGameState) : 0;
 
+    /// <summary>CRef::Resolve(int* ref) -> object (ref: {int type, int id}, as saved in the save game).</summary>
+    [Signature] public const string ResolveRefSig = "48 83 EC 28 8B 01 3D 68 12 00 00 76";
+
+    private static delegate* unmanaged<long*, nint> _resolveRef;
+
+    /// <summary>The object a CRef (a unit's or an army's <c>Ref</c>) names now, or 0: refs outlive a save and load, pointers don't.</summary>
+    public static nint Resolve(long reference)
+    {
+        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
+        if (_resolveRef == null) _resolveRef = (delegate* unmanaged<long*, nint>)Sig.Find(ResolveRefSig);
+        return reference == 0 ? 0 : _resolveRef(&reference);
+    }
+
     /// <summary>The game's year: its date counts hours from 1.1.1 in 365-day years.</summary>
     public static int Year => Hour / (365 * 24) + 1;
 
