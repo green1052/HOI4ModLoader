@@ -18,6 +18,8 @@ l_english:
     com.green1052.frontline.LosingPercent.desc:0 "A defence counts as being lost when the attacker holds this share of the battle bar (organisation)."
     com.green1052.frontline.PlugRadius:0 "Helper distance (provinces)"
     com.green1052.frontline.PlugRadius.desc:0 "How far a helper may come from."
+    com.green1052.frontline.Lure:0 "Lure (AI)"
+    com.green1052.frontline.Lure.desc:0 "AI only (Apply to AI): a defence being lost is let go, to draw the attacker in, when it can be cut off.\n- Both shoulders (our line provinces next to it) held and not being lost\n- 2+ fresh mobile divisions within 3 provinces, against at most twice as many attackers\nOnce in, AI Assist's encirclement cuts the salient at its neck and the fire brigade counterattacks."
     com.green1052.frontline.Escape:0 "Encirclement escape"
     com.green1052.frontline.Escape.desc:0 "Pulls front divisions out of a salient that is about to be cut off.\n- When its way back narrows to 1-2 provinces next to the enemy\n- Only if the enemy at that neck is at least as strong as our divisions in the salient (else it can't close it)\n- Once cut off (pocket up to 30 provinces, friendly lines within 6), the divisions inside break out together once a day"
     com.green1052.frontline.Attack:0 "Opportunity attacks"

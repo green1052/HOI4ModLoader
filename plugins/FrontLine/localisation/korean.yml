@@ -19,6 +19,8 @@
     com.green1052.frontline.LosingPercent.desc:0 "전투 막대(조직력)에서 공격 측이 이 비율 이상을 차지하면 지는 방어전으로 봅니다."
     com.green1052.frontline.PlugRadius:0 "증원 거리(프로빈스)"
     com.green1052.frontline.PlugRadius.desc:0 "구멍 메우기에 보낼 사단을 데려올 수 있는 최대 거리입니다."
+    com.green1052.frontline.Lure:0 "유인 포위 (AI)"
+    com.green1052.frontline.Lure.desc:0 "AI 전용(AI에도 적용): 지고 있는 방어전을 막지 않고 적을 끌어들입니다. 잘라낼 수 있을 때만.\n- 양옆(어깨) 전선 프로빈스를 지키고 있고 거기서도 지고 있지 않음\n- 3칸 안에 쌩쌩한 기동 사단 2개 이상, 밀고 오는 적은 그 2배 이하\n적이 들어오면 AI 보조의 포위 기능이 돌출부의 목을 끊고, 소방수가 반격합니다."
     com.green1052.frontline.Escape:0 "포위 탈출"
     com.green1052.frontline.Escape.desc:0 "포위되기 직전의 돌출부에서 전선 사단을 퇴로 밖으로 빼냅니다.\n- 퇴로가 적과 맞닿은 프로빈스 1~2개로 좁아졌을 때\n- 그 길목의 적이 돌출부 안 아군 이상으로 강할 때만(약하면 포위를 닫지 못하므로)\n- 이미 포위됐다면(30 프로빈스 이하, 6칸 안에 아군 전선) 안의 사단이 하루 한 번 함께 아군 쪽으로 돌파합니다"
     com.green1052.frontline.Attack:0 "기회 공격"

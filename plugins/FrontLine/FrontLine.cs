@@ -114,6 +114,9 @@ public unsafe partial class FrontLine : Plugin
             "Send the nearest fresh division into a defence of ours that is being lost; it joins the battle and goes back to its front afterwards.");
         _losing = Math.Clamp(Config.Bind("Plugging", "LosingPercent", 60, "A defence counts as being lost when the attacker holds this share (%) of the battle's organisation (the battle bar)."), 50, 100);
         _plugRadius = Math.Clamp(Config.Bind("Plugging", "PlugRadius", 4, "How far (provinces) a helper may come from."), 1, MaxRestSearch);
+        _lure = Config.Bind("Plugging", "Lure", true,
+            "AI only (ApplyToAI): a defence being lost is let go, to draw the attacker in, when both its shoulders are held and not being lost and 2+ fresh mobile divisions "
+            + "stand within 3 provinces against at most twice as many attackers; AI Assist's encirclement then cuts the salient at its neck and the fire brigade counterattacks.");
         _escape = Config.Bind("Escape", "Escape", true,
             "Pull front divisions back out of a salient whose way back narrows to one or two provinces next to the enemy (and the enemy there is strong enough to close it), through that neck while it is still open. "
             + "Once cut off (up to 30 provinces, friendly lines within 6), the divisions inside attack together once a day toward the nearest friendly ground.");
@@ -401,6 +404,7 @@ public unsafe partial class FrontLine : Plugin
             if (plugs == MaxPlugsPerTurn) break;
             var id = Game.Id(province);
             if (_sent.ContainsKey(id)) continue; // one helper per battle on its way at a time
+            if (_force && _lure && Lure(country, tag, province)) continue;
             helpers ??= Pool(country, tag, units, true, u => Org(u) >= 80 && Str(u) >= 70);
             var helper = Take(tag, province, _plugRadius, helpers);
             if (helper == 0) continue;
@@ -409,6 +413,42 @@ public unsafe partial class FrontLine : Plugin
             plugs++;
             Log.Info($"plugging: a fresh division sent into a defence being lost ({progress:0}% for the attacker)");
         }
+    }
+
+    private const int LureRadius = 3, MinLureReserves = 2, LureHours = 48;
+    private bool _lure;
+    private readonly Dictionary<int, int> _lured = []; // province id -> game hour it was let go (logged once)
+
+    /// <summary>
+    /// An AI defence being lost is let go instead of plugged, to draw the attacker in, when it can be cut off: both shoulders
+    /// (our line provinces next to it) are held and not being lost, and at least MinLureReserves fresh mobile divisions of ours
+    /// stand within LureRadius, against at most twice as many enemy divisions attacking it. Once in, the attacker's salient is
+    /// cut at its neck (AI Assist's Encirclement) and the fire brigade counterattacks it.
+    /// </summary>
+    private bool Lure(nint country, int tag, nint province)
+    {
+        var shoulders = Game.Neighbours(province).Select(Game.Province)
+            .Where(p => p != 0 && Province.Controller(p) == tag && Province.NextToEnemy(country, tag, p)).ToList();
+        if (shoulders.Count < 2 || shoulders.Any(p => _losingNow.ContainsKey(p) || !Province.Units(p).ToArray().Any(u => Division.Commander(u) == tag))) return false;
+        var attackers = Game.Neighbours(province).Select(Game.Province).Where(p => p != 0 && Province.Enemy(country, tag, p)).Sum(Province.Divisions);
+        var reserves = 0;
+        var seen = new HashSet<nint> { province };
+        var frontier = new List<nint> { province };
+        for (var depth = 0; depth < LureRadius && frontier.Count > 0; depth++)
+        {
+            frontier = frontier.SelectMany(p => Game.Neighbours(p)).Select(Game.Province).Where(p => p != 0 && seen.Add(p) && Province.Controller(p) == tag).ToList();
+            foreach (var p in frontier)
+            foreach (var u in Province.Units(p))
+                if (u != 0 && Division.IsLand(u) && Division.Commander(u) == tag && Division.Motorized(u) && Org(u) >= 70 && !Division.Fighting(u)) reserves++;
+        }
+        if (reserves < MinLureReserves || attackers > 2 * reserves) return false;
+        var id = Game.Id(province);
+        if (!_lured.TryGetValue(id, out var at) || Game.Hour - at is < 0 or >= LureHours)
+        {
+            _lured[id] = Game.Hour;
+            Log.Info($"  #{tag} lure: lets {attackers} enemy division(s) into province {id} (both shoulders held, {reserves} mobile division(s) within {LureRadius})");
+        }
+        return true;
     }
 
     /// <summary>
