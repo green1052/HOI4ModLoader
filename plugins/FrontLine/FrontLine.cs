@@ -297,7 +297,9 @@ public unsafe partial class FrontLine : Plugin
         if (_fireBrigade || _depth || _shuffle) Survey(country, tag, fronts.Values);
 
         Return(tag);
-        if (_rotation) foreach (var group in groups) RotateArmy(country, tag, group);
+        // Not for the AI: its front orders take a division off its order straight back, so it walked to rest and back on and
+        // on (Japan's in Shandong, every few hours).
+        if (_rotation && !_force) foreach (var group in groups) RotateArmy(country, tag, group);
         if (_plugging) Plug(country, tag, units);
         if (_fireBrigade) Counterattack(country, tag, fronts.Values);
         if (_escape)
