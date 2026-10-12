@@ -301,6 +301,18 @@ public static unsafe class Native
         }
     }
 
+    /// <summary>The same for a CPdxArray&lt;int&gt; (province ids, ...).</summary>
+    public static T WithPdxArray<T>(int[] items, Func<nint, T> use)
+    {
+        var header = stackalloc nint[3];
+        fixed (int* data = items)
+        {
+            header[0] = (nint)data;
+            ((int*)header)[2] = ((int*)header)[3] = items.Length;
+            return use((nint)header);
+        }
+    }
+
     /// <summary>Characters of an MSVC std::string at <paramref name="at"/> (inline buffer when capacity &lt; 16).</summary>
     public static Span<byte> MsvcString(nint at)
     {

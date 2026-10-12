@@ -32,7 +32,8 @@ namespace AiAssist;
 /// - Refit priority: front-line divisions get reinforcements and upgrades first (until they are 75 % full).
 /// - Encirclement: enemy salients are cut at their neck from both flanks instead of pushed head-on.
 /// - Railway guns: the armies on the breakthrough axis get the railway guns first and keep them.
-/// - Supply hubs: a new hub where AI divisions starve with none near (vanilla only upgrades and links hubs).
+/// - Supply hubs: the railway from the hub feeding starving AI divisions to the capital is upgraded, and (late, rich countries)
+///   a new hub goes where they starve with none near (vanilla only upgrades and links hubs).
 /// </summary>
 [Plugin(Id, "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
@@ -104,7 +105,8 @@ public unsafe partial class AiAssist : Plugin
         var railGuns = Config.Bind("AI", "RailwayGuns", true,
             "The AI's railway guns go to the armies on its breakthrough axis first and stay there: those armies are served first and other armies can't take their guns. Needs BreakthroughAxis.") && _axis;
         var supplyHubs = Config.Bind("AI", "SupplyHubs", true,
-            "From 1941 on, where the divisions of an AI country with 60+ civilian factories are low on supply with no supply hub within 3 provinces, it builds one (railway-connected provinces first); checked weekly, two a month at most. "
+            "Where an AI country's divisions are low on supply, the railway from the supply hub feeding them to the capital is upgraded a level (one a week, the same hub's again after 60 days; a railway level costs little next to a hub). "
+            + "From 1941 on, where the divisions of an AI country with 60+ civilian factories starve with no supply hub within 3 provinces, it also builds one (railway-connected provinces first); checked weekly, two a month at most. "
             + "A hub costs 20000, so earlier or poorer it doesn't. Vanilla's AI only upgrades and links the hubs it has.");
 
         _log = Log;
@@ -138,6 +140,7 @@ public unsafe partial class AiAssist : Plugin
             Salients.Clear();
             ThinLines.Clear();
             HubPlans.Clear();
+            RailwayPlans.Clear();
             ClearRailGuns();
             _capitals = (0, []);
             _provinceCount = -1;
@@ -215,6 +218,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _salients, "put {0} breakthrough axis/axes on the neck of an enemy salient");
         Add(ref _closed, "closed {0} salient pocket(s)");
         Add(ref _gunned, "gave railway guns to {0} new set(s) of axis armies");
+        Add(ref _railways, "upgraded {0} railway(s) to hubs of starving AI divisions");
         Add(ref _hubs, "queued {0} supply hub(s) where AI divisions starve");
         if (done.Count > 0) Log.Info($"last minute: {string.Join(", ", done)}");
     }
