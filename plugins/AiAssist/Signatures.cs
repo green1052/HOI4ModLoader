@@ -8,6 +8,12 @@ public static class Signatures
     /// <summary>PostAICommand(command, int* postingTag) -> bool: every AI command, from every AI path; an invalid one is deleted and 0 returned.</summary>
     [Signature] public const string PostAICommand = "40 53 48 83 EC 40 80 3D ? ? ? ? 00 48 8B D9 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 75 ? 48 8B CA E8";
 
+    /// <summary>
+    /// CAIGeneral::UpdateAreaDefense(general): gives every army on its area defence fronts (front+0x104 set, armies at +0x60)
+    /// an area defence order (type 5) and its provinces. Called from 0x141096DC0, the result unused.
+    /// </summary>
+    [Signature] public const string UpdateAreaDefense = "48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC E8 00 00 00 0F 29 B4 24 ? ? ? ? 4C 8B B1";
+
     /// <summary>The AI theatre distribution: collect divisions it may move to other fronts (ctx, CPdxArray&lt;{CArmy*, slot*}&gt;* out): every army member on no order.</summary>
     [Signature] public const string CollectReassignableUnits = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 98 00 00 00 4C 8B FA";
 

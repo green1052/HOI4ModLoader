@@ -15,11 +15,23 @@ public unsafe partial class AiAssist
     [Function(CallingConventions.Microsoft)] public delegate nint GeneralRetFn(nint general);
     [Function(CallingConventions.Microsoft)] public delegate void BalanceFn(nint front, nint units, nint partitions, nint specs, nint log);
 
-    private IHook<GeneralRetFn>? _unitRequests;
+    private IHook<GeneralRetFn>? _unitRequests, _areaDefense;
     private IHook<BalanceFn>? _armyBalancing;
     private int _raised, _unguarded;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // front line section -> hour last logged
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> UnguardedAt = new(); // tag -> hour last logged
+
+    /// <summary>The theatre general's country (from its fronts) can't be invaded.</summary>
+    private static bool GeneralCantBeInvaded(nint general)
+    {
+        foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
+        {
+            var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
+            var tag = country == 0 ? 0 : Game.Tag(country);
+            if (tag > 0) return tag != Game.ControlledTag && CantBeInvaded(country, tag);
+        }
+        return false;
+    }
 
     /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
     private static bool CantBeInvaded(nint country, int tag) =>
@@ -49,6 +61,15 @@ public unsafe partial class AiAssist
             return result;
         });
         if (!_holdLine) return;
+        // Area defence against enemies that hold no port: no orders made, and DropAreaDefence deletes the ones left, so their
+        // armies' divisions are collected for the land fronts (on an order they never are). Requests at 0 alone didn't free an
+        // army already on an area defence front: Italy kept shipping its East African divisions to the Dodecanese.
+        _areaDefense = Patches.Hook<GeneralRetFn>(Sig.Find(Signatures.UpdateAreaDefense), general =>
+        {
+            var skip = false;
+            Safely(() => skip = GeneralCantBeInvaded(general));
+            return skip ? 0 : _areaDefense!.OriginalFunction(general);
+        });
         // The regrouping drains fronts through here (unassign, then one mass move a turn), which no front request can block:
         // the last defender of a province, and the wall around a pocket, are kept out of its lists instead. Vanilla would
         // reassign them and staff the new front with divisions from far away, while the replacements walk the pocket breaks out.

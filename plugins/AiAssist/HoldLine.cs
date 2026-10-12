@@ -194,6 +194,7 @@ public unsafe partial class AiAssist
             var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag <= 0 || tag == player) continue;
             PrunePosted(country, tag);
+            DropAreaDefence(country, tag);
             var fresh = NewDivisions(country, tag); // every pass: one deployed in peace isn't new once war comes
             var grad = _postures ? Posture(country, tag, hour) : null; // a much stronger enemy: its grad is the line
             var line = grad != null ? Held(grad, tag) : LineOf(tag, hour);
@@ -231,6 +232,26 @@ public unsafe partial class AiAssist
             if (grad == null) Depth(country, tag, line, hour);
         }
         ShareJobs();
+    }
+
+    private const int AreaDefenceOrder = 5; // COrder type of an area defence (port and home garrison) battle plan
+
+    /// <summary>
+    /// Against enemies that hold no port (<see cref="CantBeInvaded"/>), the AI's area defence orders left over are deleted
+    /// (UpdateAreaDefense makes no new ones then): their armies walk divisions to ports far away (Italy's East African ones to
+    /// Kismayo, Libya, the Dodecanese), and divisions on an order are never collected for other fronts. Main thread.
+    /// </summary>
+    private static void DropAreaDefence(nint country, int tag)
+    {
+        if (!CantBeInvaded(country, tag)) return;
+        foreach (var group in OrdersGroup.OfCountry(country))
+        foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray())
+        {
+            if (order == 0 || Order.Type(order) != AreaDefenceOrder) continue;
+            var divisions = Order.Members(order).Length;
+            if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;
+            _log?.Info($"#{tag}: deleted an area defence order of {divisions} division(s): its enemies hold no port");
+        }
     }
 
     /// <summary>The line's provinces short of defenders (one each, or what the grad wants) that nobody is walking to yet.</summary>
