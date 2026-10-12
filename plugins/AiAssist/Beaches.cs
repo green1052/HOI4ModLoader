@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace AiAssist;
 
-public unsafe partial class AiAssist
+public partial class AiAssist
 {
     // ---- Beach defence: landings are walled in and attacked at once, not after the front collapses ----
 

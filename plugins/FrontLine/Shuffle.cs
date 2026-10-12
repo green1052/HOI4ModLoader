@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace FrontLine;
 
-public unsafe partial class FrontLine
+public partial class FrontLine
 {
     // ---- Fronts: each front order's divisions and line, the ground it lost lately, and whether it is in a crisis ----
 

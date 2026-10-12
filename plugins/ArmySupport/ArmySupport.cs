@@ -8,7 +8,7 @@ namespace ArmySupport;
 /// army organizer (Organize.cs).
 /// </summary>
 [Plugin("com.green1052.armysupport", "Army Support", "1.0.0", GameVersion = "1.19.3")]
-public unsafe partial class ArmySupport : Plugin
+public partial class ArmySupport : Plugin
 {
     public override void Load()
     {

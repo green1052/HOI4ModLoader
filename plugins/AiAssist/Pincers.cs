@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace AiAssist;
 
-public unsafe partial class AiAssist
+public partial class AiAssist
 {
     // ---- Pincers and feints: a second axis around a massed enemy, and a feint elsewhere before a new main push ----
 

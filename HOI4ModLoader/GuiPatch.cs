@@ -83,11 +83,6 @@ public static class GameFiles
         });
     }
 
-    /// <summary>
-    /// Puts <paramref name="source"/> where the game reads <paramref name="path"/> (e.g. "gfx/fonts/korean/hoi_18mbs.dds"), in
-    /// front of its own and mods' copies. From a plugin's Load: the game reads most files once, at startup. A hard link where
-    /// it can (the same volume), else a copy.
-    /// </summary>
     /// <summary><see cref="Add(string, string)"/> with the file's contents (e.g. a plugin's embedded resource).</summary>
     public static void Add(string path, byte[] contents)
     {
@@ -96,6 +91,11 @@ public static class GameFiles
         File.WriteAllBytes(target, contents);
     }
 
+    /// <summary>
+    /// Puts <paramref name="source"/> where the game reads <paramref name="path"/> (e.g. "gfx/fonts/korean/hoi_18mbs.dds"), in
+    /// front of its own and mods' copies. From a plugin's Load: the game reads most files once, at startup. A hard link where
+    /// it can (the same volume), else a copy.
+    /// </summary>
     public static void Add(string path, string source)
     {
         var target = Path.Combine(Dir, path);

@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace AiAssist;
 
-public unsafe partial class AiAssist
+public partial class AiAssist
 {
     // ---- Rotation, escape and the fire brigade: AI divisions come off their front to rest or before a salient is cut off, and
     //      reserves counterattack break-ins (hold the line) ----
@@ -95,7 +95,7 @@ public unsafe partial class AiAssist
             if (closing && Grads.TryGetValue(tag, out var grad) && grad.Fortresses.Contains(Game.Id(location))) closing = false; // a fortress city on the grad holds to the last
             if (!closing && !(worn && Province.EnemyDivisionsNext(country, tag, location))) continue;
             if (!strong.TryGetValue(location, out var dominant)) dominant = strong[location] = Dominant(country, tag, [location]);
-            if (dominant || !closing && !RestRoom(country, tag, location)) continue;
+            if (dominant || !closing && !RestRoom(tag, location)) continue;
             var rest = RestProvince(country, tag, location);
             if (rest < 0 || !Rest(unit, rest, tag, hour)) continue; // nowhere safe nearby: it stays
             left[location] = here - 1;
@@ -106,7 +106,7 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>Fewer than MaxRestingPercent of the tag's divisions within RestArea provinces of ours rest (one more counted).</summary>
-    private static bool RestRoom(nint country, int tag, nint location)
+    private static bool RestRoom(int tag, nint location)
     {
         int all = 0, resting = 0;
         foreach (var p in Within([location], RestArea, q => Province.Controller(q) == tag))

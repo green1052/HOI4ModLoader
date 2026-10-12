@@ -294,9 +294,4 @@ public static unsafe partial class Gui
         return s;
     }
 
-    private static void FreeString(nint s)
-    {
-        Native.FreeMsvcString(s);
-        Allocator.Free(s);
-    }
 }

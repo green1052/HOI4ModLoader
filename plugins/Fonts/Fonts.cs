@@ -15,7 +15,7 @@ namespace Fonts;
 /// bitmap font of the game's language (gfx\fonts\&lt;language&gt;\*.fnt with its .dds/.tga) is drawn anew with it, with the
 /// same characters, line height and baseline, and an outline where the original has one; characters the font lacks keep the
 /// original's glyph. The results are cached (HOI4ModLoader\cache\fonts) and put in front of the game's own files
-/// (<see cref="GameFiles.Add"/>), so nothing is installed as a mod. Display only. Takes effect at the next start.
+/// (<see cref="GameFiles.Add(string, string)"/>), so nothing is installed as a mod. Display only. Takes effect at the next start.
 /// </summary>
 [Plugin("com.green1052.fonts", "Fonts", "1.0.0")]
 public sealed class Fonts : Plugin

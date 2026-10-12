@@ -8,7 +8,7 @@ namespace ArmySupport;
 /// the reserve. Only the regions it turned on are turned off; one the player turns off by hand is left alone for the game.
 /// The player's own commands: multiplayer works.
 /// </summary>
-public unsafe partial class ArmySupport
+public partial class ArmySupport
 {
     private const int CrewsHours = 6, CrewsFightHours = 48, CrewsQuietHours = 72, CrewsMinPlanes = 10, CrewsMax = 2;
 

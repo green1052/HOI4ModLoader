@@ -134,7 +134,7 @@ public unsafe partial class FrontLine
             {
                 if (next.Count <= NeckWidth && next.All(p => NextToEnemy(country, tag, p)) && next.Any(p => Province.EnemyDivisionsNext(country, tag, p)))
                 {
-                    if (EnemyPower(country, tag, next) < OurPower(tag, salient.Concat(next))) return -1; // we hold it
+                    if (EnemyPower(country, next) < OurPower(tag, salient.Concat(next))) return -1; // we hold it
                     neck = depth;
                 }
                 else if ((inside += next.Count) > MaxSalient || depth == MaxNeckSearch) return -1; // too big for a salient, or no neck near
@@ -151,7 +151,7 @@ public unsafe partial class FrontLine
         provinces.SelectMany(p => Province.Units(p).ToArray()).Where(u => u != 0 && Division.IsLand(u) && Division.Commander(u) == tag).Sum(Division.Power);
 
     /// <summary>The power of the enemy divisions next to the provinces.</summary>
-    private long EnemyPower(nint country, int tag, IEnumerable<nint> provinces)
+    private long EnemyPower(nint country, IEnumerable<nint> provinces)
     {
         var seen = new HashSet<int>();
         long power = 0;

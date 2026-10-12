@@ -3,7 +3,7 @@ using HOI4ModLoader;
 
 namespace AiAssist;
 
-public unsafe partial class AiAssist
+public partial class AiAssist
 {
     // ---- Encirclement: an enemy salient is cut at its neck from both flanks instead of pushed head-on (part of the breakthrough axis) ----
 

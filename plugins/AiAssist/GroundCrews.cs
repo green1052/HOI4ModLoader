@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace AiAssist;
 
-public unsafe partial class AiAssist
+public partial class AiAssist
 {
     // ---- Ground crews: the AI spends spare command power on More Ground Crews (+10 % air efficiency) where its wings fight ----
     //

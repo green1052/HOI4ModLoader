@@ -115,7 +115,6 @@ public unsafe partial class AiAssist
                     if (Game.Province(id) is var q && q != 0 && Province.Controller(q) == facing.Key) g.Add(q);
             }
         }
-        var thin = land * 5 < border.Count * 6; // under ~1.2 divisions per line province, as Manned
         var kept = old.Strong.Where(e => Game.AtWar(country, e)).ToHashSet();
         var blocked = hour - old.Blocked < 0; // left a grad within the month
         var strong = new HashSet<int>();

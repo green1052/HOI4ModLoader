@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace FrontLine;
 
-public unsafe partial class FrontLine
+public partial class FrontLine
 {
     // ---- Attack: empty and surrounded enemy provinces next to the line, best targets first ----
 
