@@ -31,7 +31,7 @@ public unsafe partial class AiAssist
 
     private void LoadAirTraining()
     {
-        _ = Sig.Find(Signatures.RegionAirData) + Sig.FindAll(Game.StrategicAirSig, 2)[0]; // the superiority records Quiet reads
+        _ = Sig.Find(AirRegions.RegionAirDataSig) + Sig.FindAll(Game.StrategicAirSig, 2)[0]; // the superiority records Quiet reads
         _setMission = (delegate* unmanaged<nint, nint, int, byte, byte, nint>)Sig.Find(Signatures.SetMissionCommand);
         _canTrain = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.CanTrain);
         _baseOf = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.AirBaseOfWing);
