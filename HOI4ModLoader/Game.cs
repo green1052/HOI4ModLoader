@@ -152,8 +152,8 @@ public static unsafe class Game
         return reference == 0 ? 0 : _resolveRef(&reference);
     }
 
-    /// <summary>The game's year: its date counts hours from 1.1.1 in 365-day years.</summary>
-    public static int Year => Hour / (365 * 24) + 1;
+    /// <summary>The game's year: its date counts hours in 365-day years from 5000 years before year 0 (1936 reads 6936).</summary>
+    public static int Year => Hour / (365 * 24) - 5000;
 
     /// <summary>The country's tag.</summary>
     public static int Tag(nint country) => *(int*)(country + TagOfCountry);

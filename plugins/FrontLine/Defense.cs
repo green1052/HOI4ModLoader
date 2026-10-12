@@ -11,8 +11,8 @@ public unsafe partial class FrontLine
     private readonly Dictionary<int, int> _breakouts = []; // pocket (its lowest province id) -> game hour of its last breakout
 
     /// <summary>
-    /// Our divisions in ground of ours (and allies') cut off from the rest, up to MaxCutOff provinces, with friendly lines within
-    /// MaxBreakoutDistance provinces: once a day, all of them with some organisation attack the enemy province that starts the
+    /// Our divisions in ground of ours (and allies') cut off from the rest by land and sea, up to MaxCutOff provinces, with
+    /// friendly lines within MaxBreakoutDistance provinces: once a day, all of them with some organisation attack the enemy province that starts the
     /// shortest way out. Pockets far from any friendly ground (overseas colonies) are left alone.
     /// </summary>
     private void Breakout(nint country, int tag, nint[] units)
@@ -26,6 +26,8 @@ public unsafe partial class FrontLine
             if (location == 0 || walked.Contains(Game.Id(location)) || !Friendly(country, tag, location)) continue;
             var region = Province.Region(location, MaxCutOff, p => Friendly(country, tag, p), walked);
             if (region == null) continue; // part of the main body
+            if (region.Any(p => Game.Neighbours(p).Any(n => Game.Province(n) is var q && q != 0 && Province.Controller(q) == 0)))
+                continue; // on the coast: the sea keeps it supplied and reachable (a colony, a beachhead), no pocket
             var key = region.Min(Game.Id);
             if (_breakouts.TryGetValue(key, out var last) && hour - last is >= 0 and < BreakoutHours) continue;
             var target = WayOut(country, tag, region);
