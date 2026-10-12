@@ -20,7 +20,7 @@ namespace Fonts;
 [Plugin("com.green1052.fonts", "Fonts", "1.0.0")]
 public sealed class Fonts : Plugin
 {
-    private const int Format = 2; // bump when the output changes: every cache is redrawn
+    private const int Format = 3; // bump when the output changes: every cache is redrawn
 
     public override void Load()
     {
@@ -365,6 +365,11 @@ internal sealed unsafe class Gdi : IDisposable
     [DllImport("gdi32")] private static extern uint GetGlyphOutlineW(nint dc, uint glyph, uint format, GlyphMetrics* metrics, uint size, byte* buffer, int* matrix);
 
     private readonly nint _dc, _font;
+    // Glyphs are drawn this many times bigger and averaged down: smooth edges, where GDI's hinting at the real size snaps
+    // strokes to whole pixels (blocky, uneven letters).
+    private const int Scale = 4;
+    private const float Gamma = 0.8f; // averaged edges read thin and grey: denser coverage, as hinted or the game's own glyphs
+    private readonly int _embolden;   // big pixels to thicken strokes by: the face has no weight as heavy as asked for
 
     /// <summary>The face Windows actually picked (it substitutes one it can't find).</summary>
     public readonly string Face;
@@ -373,10 +378,15 @@ internal sealed unsafe class Gdi : IDisposable
     public Gdi(string face, int height, int weight)
     {
         _dc = CreateCompatibleDC(0);
-        _font = CreateFontW(height, 0, 0, 0, weight, 0, 0, 0, 1 /* default charset */, 7 /* TrueType only */, 0, 4 /* anti-aliased */, 0, face);
+        _font = CreateFontW(height * Scale, 0, 0, 0, weight, 0, 0, 0, 1 /* default charset */, 7 /* TrueType only */, 0, 4 /* anti-aliased */, 0, face);
         SelectObject(_dc, _font);
         var name = stackalloc char[64];
         Face = new string(name, 0, Math.Max(0, GetTextFaceW(_dc, 64, name) - 1));
+        // The face's own weight (OS/2 usWeightClass): Windows' stand-in bold for a face without one (a single weight, a
+        // variable font) is a hair thicker at most. A bold stroke is about 5% of the em wider than a regular one.
+        var os2 = stackalloc byte[2];
+        var own = GetFontData(_dc, 0x322F534F /* "OS/2" */, 4, os2, 2) == 2 ? os2[0] << 8 | os2[1] : weight;
+        if (weight - own >= 100) _embolden = (int)Math.Round(0.05 * Math.Abs(height) * Scale * (weight - own) / 300.0);
     }
 
     /// <summary>Installed outline (TrueType/OpenType) families, sorted; vertical "@" variants left out.</summary>
@@ -428,22 +438,44 @@ internal sealed unsafe class Gdi : IDisposable
         GlyphMetrics m;
         var size = GetGlyphOutlineW(_dc, index, GgoGray8 | GgoGlyphIndex, &m, 0, null, identity);
         if (size == GdiError) return null;
-        if (size == 0 || m.BlackBoxX == 0) return new Glyph(0, [], 0, 0, 0, 0, m.CellIncX); // a space
+        var advance = (int)Math.Round((m.CellIncX + _embolden) / (double)Scale); // a thickened glyph is that much wider
+        if (size == 0 || m.BlackBoxX == 0) return new Glyph(0, [], 0, 0, 0, 0, advance); // a space
         var coverage = new byte[size];
         fixed (byte* buffer = coverage)
             if (GetGlyphOutlineW(_dc, index, GgoGray8 | GgoGlyphIndex, &m, size, buffer, identity) == GdiError) return null;
-        int w = (int)m.BlackBoxX, h = (int)m.BlackBoxY, pitch = (w + 3) & ~3;
+        // The big black box (top left from the pen on the baseline, y down) averaged into the real size's pixels.
+        int bigW = (int)m.BlackBoxX, bigH = (int)m.BlackBoxY, pitch = (bigW + 3) & ~3, bigX = m.OriginX, bigY = -m.OriginY;
+        if (_embolden > 0) // each stroke _embolden big pixels wider, half on each side
+        {
+            var k = _embolden;
+            var thick = new byte[(bigW + k) * (bigH + k)];
+            for (var y = 0; y < bigH; y++)
+            for (var x = 0; x < bigW; x++)
+            {
+                var v = coverage[y * pitch + x];
+                if (v == 0) continue;
+                for (var dy = 0; dy <= k; dy++)
+                for (var dx = 0; dx <= k; dx++)
+                    if (thick[(y + dy) * (bigW + k) + x + dx] < v) thick[(y + dy) * (bigW + k) + x + dx] = v;
+            }
+            (coverage, bigW, bigH, pitch, bigX, bigY) = (thick, bigW + k, bigH + k, bigW + k, bigX - k / 2, bigY - k / 2);
+        }
+        int left = (int)Math.Floor(bigX / (double)Scale), top = (int)Math.Floor(bigY / (double)Scale);
+        int w = (int)Math.Ceiling((bigX + bigW) / (double)Scale) - left, h = (int)Math.Ceiling((bigY + bigH) / (double)Scale) - top;
         var shadow = outline > 0 ? 1 : 0;
         int ow = w + 2 * outline + shadow, oh = h + 2 * outline + shadow;
         var fill = new float[ow * oh]; // 0..1
-        for (var y = 0; y < h; y++)
-        for (var x = 0; x < w; x++)
-            fill[(y + outline) * ow + x + outline] = Math.Min(64, (int)coverage[y * pitch + x]) / 64f;
+        for (var y = 0; y < bigH; y++)
+        for (var x = 0; x < bigW; x++)
+        {
+            var cell = ((int)Math.Floor((bigY + y) / (double)Scale) - top + outline) * ow + (int)Math.Floor((bigX + x) / (double)Scale) - left + outline;
+            fill[cell] += Math.Min(64, (int)coverage[y * pitch + x]) / (64f * Scale * Scale);
+        }
         var pixels = new byte[ow * oh * 4];
         for (var y = 0; y < oh; y++)
         for (var x = 0; x < ow; x++)
         {
-            var f = fill[y * ow + x];
+            var f = fill[y * ow + x] = MathF.Pow(fill[y * ow + x], Gamma);
             var o = 0f; // the outline: the most ink within its radius (a disc), and again a shadow's step up-left
             for (var s = 0; s <= shadow; s++)
             for (var dy = -outline; dy <= outline; dy++)
@@ -456,7 +488,7 @@ internal sealed unsafe class Gdi : IDisposable
             var shade = darkInk ? (byte)0x20 : a > 0 ? (byte)(255 * f / a) : (byte)0;
             (pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]) = (shade, shade, shade, (byte)(255 * a));
         }
-        return new Glyph(0, pixels, ow, oh, m.OriginX - outline, baseline - m.OriginY - outline, m.CellIncX);
+        return new Glyph(0, pixels, ow, oh, left - outline, baseline + top - outline, advance);
     }
 
     public void Dispose()
