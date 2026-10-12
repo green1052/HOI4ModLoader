@@ -48,8 +48,11 @@ public sealed class GuiPatchAttribute(string file, string snippet) : Attribute
 /// (its PhysFS search path, which hoi4.exe exports): the game reads them instead of its own and mods' copies, with no mod
 /// to install or enable. Only interface files: the checksum (common, events, history, map) stays vanilla.
 /// </summary>
-internal static class GameFiles
+public static class GameFiles
 {
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CreateHardLinkW(string link, string target, nint security);
+
     [Function(CallingConventions.Microsoft)] public delegate int MountFn(nint dir, nint mountPoint, int appendToPath);
     [Function(CallingConventions.Microsoft)] public delegate int UnmountFn(nint dir);
 
@@ -78,6 +81,19 @@ internal static class GameFiles
             }
             return result;
         });
+    }
+
+    /// <summary>
+    /// Puts <paramref name="source"/> where the game reads <paramref name="path"/> (e.g. "gfx/fonts/korean/hoi_18mbs.dds"), in
+    /// front of its own and mods' copies. From a plugin's Load: the game reads most files once, at startup. A hard link where
+    /// it can (the same volume), else a copy.
+    /// </summary>
+    public static void Add(string path, string source)
+    {
+        var target = Path.Combine(Dir, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        if (File.Exists(target)) File.Delete(target); // a hot reload's second add
+        if (!CreateHardLinkW(target, source, 0)) File.Copy(source, target);
     }
 
     /// <summary>Writes the files of <paramref name="assemblies"/> anew (left out: vanilla). Before the game reads its interface.</summary>

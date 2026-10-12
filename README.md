@@ -39,6 +39,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | FrontLine | Front line micro (rotation, plugging, escape, attacks, reserves) plus battle plan and operation (blitz, pincer) hotkeys | ✅ |
 | ArmySupport | Air wings and railway guns for field marshals, railway gun positioning, airbase capacity, auto rebase | ✅ (field marshals: spread over armies; railway gun positioning: single player) |
 | ChecksumPatcher | Keeps achievements with mods | ✅ |
+| Fonts | The game's text in an installed font or a .ttf/.otf file | ✅ |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 
 ### Queues
@@ -86,6 +87,13 @@ Front line micro a player does by hand, with the battle plan UI's own commands (
 
 ### ChecksumPatcher
 Keeps achievements available when mods change the checksum (Ironman already works with mods). Patched in memory only.
+
+### Fonts
+The game's text in a font you choose, with no font mod to make: set `Font` in `HOI4ModLoader\config\com.green1052.fonts.cfg` to an installed font's name (e.g. `Malgun Gothic`) or the path of a `.ttf`/`.otf`/`.ttc` file, and start the game.
+- At startup every bitmap font of the game's language (`gfx\fonts\korean` for Korean, `gfx\fonts` for English, ...) is drawn anew with it by Windows: the same characters, line height and baseline, bold where the original is, and a dark outline and shadow where the original has one. Characters the font lacks keep the original glyph. Fonts whose texture is compressed (the map labels, a few others) stay as they are.
+- The first start with new settings takes some seconds (Korean: about 10); the result is cached in `HOI4ModLoader\cache\fonts` until the settings or the game's fonts change.
+- Settings: `HeaderFont` (titles; empty: the same font), `SizePercent` (glyph size in the same lines), `Keep` (fonts that stay the game's own, by part of their file name; `typewriter` by default).
+- A font name Windows doesn't know is reported in the log, and the game's fonts stay.
 
 ### AiAssist
 An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.
