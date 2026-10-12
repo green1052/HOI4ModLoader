@@ -202,12 +202,14 @@ static std::wstring FindHostFxr(const std::wstring& root) {
 }
 
 void StartProfiler(const std::wstring& mods); // profiler.cpp
+void StartPrefetch(const std::wstring& mods); // prefetch.cpp
 
 static void BootDotnet() {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring mods = std::wstring(exe, wcsrchr(exe, L'\\')) + L"\\HOI4ModLoader";
     StartProfiler(mods); // before anything else, so it sees the whole start-up
+    StartPrefetch(mods); // the game's files into the file cache while .NET and the game start
     OpenCrashLog(mods);
 
     // The .NET 10 Runtime (x64) the player installed, where its installer puts it.

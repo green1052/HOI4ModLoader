@@ -39,6 +39,7 @@
         <ClCompile Include="bootstrap.cpp" />
         <ClCompile Include="allocator.c" />
         <ClCompile Include="profiler.cpp" />
+        <ClCompile Include="prefetch.cpp" />
     </ItemGroup>
     <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 
