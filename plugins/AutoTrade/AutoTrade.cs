@@ -39,7 +39,7 @@ public static class Signatures
 public unsafe partial class AutoTrade : Plugin
 {
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.
-    private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484;
+    private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484; // int: how many states it controls (0: gone or exiled), not AutoConstruction's state array
     private const int Influence = 0xF0;                         // CCountry: CPdxArray<long> trade influence, by importer TagIndex
     private const int DiplomacyOfCountry = 0xF88, Overlord = 0x188, Faction = 0x290; // diplomacy block: overlord tag (0 = none), faction*
     private const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem

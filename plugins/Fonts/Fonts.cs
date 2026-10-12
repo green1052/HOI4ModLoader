@@ -162,18 +162,23 @@ public sealed class Fonts : Plugin
         // b: bold, mbs: medium bold with a shadow, header: extra bold
         var weight = Regex.IsMatch(name, @"_bold|\d+bs?$|header", RegexOptions.IgnoreCase) ? 700 : Regex.IsMatch(name, @"\d+mbs$", RegexOptions.IgnoreCase) ? 600 : 400;
 
-        // The size whose sample glyph (Hangul if the font has it, else H) is as tall as the original's: faces differ in how
-        // much of their em a letter takes, so a line height alone draws some far bigger or smaller.
-        var sampleLine = lines.FirstOrDefault(l => l.StartsWith("char id=44032 ")) ?? lines.FirstOrDefault(l => l.StartsWith("char id=72 "));
-        var target = sampleLine == null ? 0 : original.InkRows(Field(sampleLine, "x"), Field(sampleLine, "y"), Field(sampleLine, "width"), Field(sampleLine, "height"), darkInk);
+        // The size whose sample glyph (Hangul when both the original and the chosen face have it, else H) is as tall as the
+        // original's: faces differ in how much of their em a letter takes, so a line height alone draws some far bigger or smaller.
         double em = lineHeight * 0.75;
-        for (var pass = 0; pass < 3 && target > 0; pass++)
+        foreach (var sampleLine in new[] { "char id=44032 ", "char id=72 " }.Select(id => lines.FirstOrDefault(l => l.StartsWith(id))).OfType<string>())
         {
-            using var probe = new Gdi(face, -(int)Math.Round(em), weight);
-            var drawn = probe.Draw((char)Field(sampleLine!, "id"), 0, 0, false);
-            var rows = drawn == null ? 0 : Bitmap.InkRows(drawn);
-            if (rows == 0) break;
-            em *= (double)target / rows;
+            var target = original.InkRows(Field(sampleLine, "x"), Field(sampleLine, "y"), Field(sampleLine, "width"), Field(sampleLine, "height"), darkInk);
+            var sized = false;
+            for (var pass = 0; pass < 3 && target > 0; pass++)
+            {
+                using var probe = new Gdi(face, -(int)Math.Round(em), weight);
+                var drawn = probe.Draw((char)Field(sampleLine, "id"), 0, 0, false);
+                var rows = drawn == null ? 0 : Bitmap.InkRows(drawn);
+                if (rows == 0) break; // the face lacks it (a Latin face for a Korean game): the next sample
+                em *= (double)target / rows;
+                sized = true;
+            }
+            if (sized) break;
         }
 
         var glyphs = new List<Glyph>();
@@ -529,7 +534,7 @@ internal sealed unsafe class Gdi : IDisposable
 
     public void Dispose()
     {
+        DeleteDC(_dc); // first: GDI won't delete a font still selected into a DC, and every Gdi leaked one
         DeleteObject(_font);
-        DeleteDC(_dc);
     }
 }

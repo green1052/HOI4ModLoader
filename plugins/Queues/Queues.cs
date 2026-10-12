@@ -59,7 +59,7 @@ public static class Signatures
 /// Research, national focus and intelligence agency upgrade queues. Shift+click a tech, focus or agency upgrade to
 /// queue/unqueue it; whenever a research slot, the focus or the agency is idle, the first queued entry the game accepts
 /// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
-/// a numbered badge (Gui.Number) on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (added to its GUI below).
+/// a numbered badge (Gui.Number) on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (the GuiPatch above).
 /// Entries that can no longer start (researched techs, focuses completed or shut out by a mutually exclusive one, agency
 /// levels done) are dropped. The political power queue (<see cref="PoliticalQueue"/>) comes with it.
 /// </summary>
@@ -143,8 +143,10 @@ public unsafe class Queues : Plugin
         _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
             _game.Check();
-            if (focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
-            else if (focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
+            var viewed = *(nint*)(view + ViewedCountryOfFocusView);
+            var ours = viewed == 0 || *(int*)(viewed + TagOfCountry) == Game.ControlledTag; // another country's tree: never queued (it could never start)
+            if (ours && focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
+            else if (ours && focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
             else _focusClick!.OriginalFunction(view, focus, a3);
         });
         _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>

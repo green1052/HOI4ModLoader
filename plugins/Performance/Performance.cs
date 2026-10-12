@@ -41,7 +41,7 @@ public unsafe class Performance : Plugin
 
     private IHook<DecisionTargetsFn>? _decisionTargets;
     private IHook<RenderFn>? _render;
-    private static long _drawn;
+    private long _drawn; // when the screen was last drawn (ms)
 
     public override void Load()
     {
@@ -64,7 +64,7 @@ public unsafe class Performance : Plugin
         if (days <= 1) return;
         _decisionTargets = Patches.Hook<DecisionTargetsFn>(Sig.Find(Signatures.DecisionTargets), (decisions, force) =>
         {
-            // The day, not the hour: vanilla's gate inside still picks the country's hour of that day. Same on every machine.
+            // The day, not the hour: vanilla's gate inside still picks the country's hour of that day.
             if (force != 0 || Game.Hour / 24 % days == 0) _decisionTargets!.OriginalFunction(decisions, force);
         });
     }

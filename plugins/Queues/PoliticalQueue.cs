@@ -62,7 +62,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
     private const int SlotOfIdea = 2720, IdOfCharacter = 8;
     private const int IdeaItemOfImpl = 8, WindowOfIdeaItem = 40, IdeaOfItem = 48, IdeaActive = 56, IdeaName = 72, IdeaButton = 0x70;
     private const int ListOfIdeasWindow = 1416;
-    private const int OccupantOfImpl = 16, SlotOfImpl = 32, CharacterItemOffset = 1400; // the pick lambda gets item + 1400
+    private const int OccupantOfImpl = 16, SlotOfImpl = 32; // the pick lambda gets item + CharacterOfItem
     private const int CharacterOfItem = 1400, SlotOfItem = 1560, CharacterName = 1592;
     private const int DecisionOfItem = 4016, DecisionName = 3984, TargetOfItem = 4024, TargetedDecisionName = 3976;
     private const int CharacterButton = 0x28, DecisionButton = 0xA58;
@@ -134,7 +134,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
             if (!Gui.ShiftHeld && status != 0) Drop(Kind.Advisor, *(nint*)status); // hired by hand
             if (!Gui.ShiftHeld || status == 0 || slot == 0) return _advisorPick!.OriginalFunction(impl, status);
             Toggle(new Entry(Kind.Advisor, *(nint*)status, SlotName(slot)) { Occupant = *(nint*)(impl + OccupantOfImpl) });
-            LabelAdvisor(status - CharacterItemOffset);
+            LabelAdvisor(status - CharacterOfItem);
             return 0;
         });
         // A plain click on an advisor the game blocked does nothing, as if it were still disabled: stop it before the item
