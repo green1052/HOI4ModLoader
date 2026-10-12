@@ -8,7 +8,7 @@ public unsafe partial class AiAssist
 {
     // ---- Army training: AI armies with nothing to do train their divisions up to regulars ----
 
-    private const int TrainingOfGroup = 0x19D, OwnerOfGroup = 0x3C;      // COrdersGroup: training on; owner tag
+    private const int TrainingOfGroup = 0x19D;                           // COrdersGroup: training on (owner tag: TagOfGroup)
     private const int TrainingOfCommand = 0x30, StopAtMaxOfCommand = 0x31; // COrderSetTrainingCommand
     private const long MinTrainingStrength = Native.FixedPoint * 7 / 10;
     private const int WarSignalsOfDiplomacy = 0x158; // CPdxArray<int>: why the AI expects a war (vanilla's training halt reads it)
@@ -68,7 +68,8 @@ public unsafe partial class AiAssist
             if (new OrdersGroup(group).IsArmyGroup) continue;
             var training = *(byte*)(group + TrainingOfGroup) != 0;
             var want = !coming && _belowMaxLevel(group) != 0
-                && !(atWar && Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray().Any(o => o != 0 && Order.Type(o) == Order.Front))
+                && !(atWar && (Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray() is var orders
+                    && (orders.All(o => o == 0) || orders.Any(o => o != 0 && Order.Type(o) == Order.Front)))) // at war: a garrison's, not one freed for the line
                 && units.All(u => !Division.Fighting(u) && Division.Strength(u) >= MinTrainingStrength
                     && Division.Location(u) is var at && at != 0 && !Province.NextToEnemy(country, tag, at));
             if (want == training) continue;
@@ -80,7 +81,7 @@ public unsafe partial class AiAssist
                 Commands.Free(cmd);
                 continue;
             }
-            var owner = *(int*)(group + OwnerOfGroup);
+            var owner = *(int*)(group + TagOfGroup);
             if (_postAi(cmd, &owner) == 0) continue;
             Interlocked.Increment(ref want ? ref _armiesTraining : ref _armiesStopped);
         }

@@ -141,7 +141,7 @@ public unsafe partial class AiAssist
     private const int AiOfCountry = 0x228, StrategiesOfAi = 0x68, StrategyValueSlot = 4; // CCountry -> CCountryAI; its strategy table, GetValue(type, tag index, 0)
     // ai_strategy types, in the game's token table order (0x1429CAD60): conquer 0, antagonize 1, befriend 2, protect 3,
     // alliance 6, contain 13, ignore 37, prepare_for_war 43.
-    private const int ConquerStrategy = 0, AntagonizeStrategy = 1, BefriendStrategy = 2, ProtectStrategy = 3, AllianceStrategy = 6, ContainStrategy = 13, IgnoreStrategy = 37;
+    private const int ConquerStrategy = 0, BefriendStrategy = 2, ProtectStrategy = 3, AllianceStrategy = 6, ContainStrategy = 13, IgnoreStrategy = 37;
 
     /// <summary>The country's AI strategy value of <paramref name="type"/> toward the country at tag index <paramref name="index"/>; 0 for a player's or none.</summary>
     private static int Strategy(nint country, int type, int index)
@@ -367,7 +367,7 @@ public unsafe partial class AiAssist
                 continue;
             }
             if (!_holdLine || !hostile || Grads.ContainsKey(tag) // on a grad, it gets the divisions, not the old border
-                || *(int*)(front + AreaDefense) != 0 || *(nint*)(front + InvasionTarget) != 0
+                || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
             var facing = 0;
             foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);

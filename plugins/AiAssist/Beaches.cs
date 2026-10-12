@@ -11,7 +11,8 @@ public partial class AiAssist
 
     private static int _provinceCount = -1; // probe result: the game has no province enumeration
     // By province id, from the last controller scan: its controller then, the game hour it last changed hands, the hour it was taken
-    // from the sea (no neighbour held by the taker or its allies before, or next to its fresh landing). Main thread.
+    // from the sea (no neighbour held by the taker or its allies before, or next to its fresh landing). Written on the main
+    // thread (replaced whole on a resize or a load), read on AI threads too: readers take one reference.
     private static int[] _controllers = [], _changed = [], _landed = [];
     private static int _scanned = Never;
     private int _beachesAt = Never;
@@ -169,10 +170,10 @@ public partial class AiAssist
     }
 
     /// <summary>Taken from the sea in the last LandedHours, and held by the same country since (a change of hands resets it).</summary>
-    private static bool Landed(int id, int hour) => (uint)id < (uint)_landed.Length && hour - _landed[id] is >= 0 and < LandedHours;
+    private static bool Landed(int id, int hour) => _landed is var landed && (uint)id < (uint)landed.Length && hour - landed[id] is >= 0 and < LandedHours;
 
     /// <summary>Changed hands in the last <paramref name="hours"/> game hours.</summary>
-    private static bool Taken(int id, int hour, int hours) => (uint)id < (uint)_changed.Length && (uint)(hour - _changed[id]) < (uint)hours;
+    private static bool Taken(int id, int hour, int hours) => _changed is var changed && (uint)id < (uint)changed.Length && (uint)(hour - changed[id]) < (uint)hours;
 
     /// <summary>Whether the province borders the sea (a neighbour with no controller).</summary>
     private static bool Coastal(nint p) =>

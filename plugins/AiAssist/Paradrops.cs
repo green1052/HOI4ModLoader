@@ -18,7 +18,7 @@ public unsafe partial class AiAssist
 
     private static bool _paradrops;
     private static int _paradropped, _activeDrops, _beachDrops; // _activeDrops: Drops.Count for AI threads (ConcurrentDictionary.IsEmpty takes every lock)
-    private static int _paratroopersReserved;
+    private static int _paratroopersReserved, _reservedCount; // _reservedCount: Reserved.Count, read lock-free on AI threads
     private static int _noParatroopers, _noAirbase, _notReady, _noTarget; // why the planner didn't drop, for the log (Sheep Mod's AI builds no paratroopers or transports)
     private int _dropAt = Never, _planAt = Never;
     private static nint _deleteVTable, _assignVTable, _unassignVTable;
@@ -61,6 +61,7 @@ public unsafe partial class AiAssist
         NextParadrop.Clear();
         Paratroopers.Clear();
         Reserved.Clear();
+        Volatile.Write(ref _reservedCount, 0);
         ParadropOrders.Clear();
         Volatile.Write(ref _activeDrops, 0);
     }
@@ -74,7 +75,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool KeepsParadrops(nint cmd)
     {
-        if (Volatile.Read(ref _activeDrops) == 0 && Reserved.IsEmpty) return true;
+        if (Volatile.Read(ref _activeDrops) == 0 && Volatile.Read(ref _reservedCount) == 0) return true; // IsEmpty takes every lock: every AI command passes here
         var vtable = *(nint*)cmd;
         if (vtable == _deleteVTable) return !ParadropOrders.ContainsKey((*(long*)(cmd + Commands.GroupOfOrderCommand), *(int*)(cmd + Commands.OrderOfOrderCommand)));
         if (vtable != _assignVTable && vtable != _unassignVTable) return true;
@@ -200,12 +201,14 @@ public unsafe partial class AiAssist
 
     private static void ReserveParatroopers(nint country, int tag)
     {
-        foreach (var (unit, owner) in Reserved) if (owner == tag) Reserved.TryRemove(unit, out _);
         var paratroopers = Game.Units(country).ToArray().Where(u => u != 0 && CanDrop(u)).ToList();
-        if (paratroopers.Count == 0 || Grads.ContainsKey(tag)) return;
+        if (Grads.ContainsKey(tag)) paratroopers.Clear(); // on its grad they hold the line too
+        var now = paratroopers.Select(Division.Ref).ToHashSet();
+        foreach (var unit in now) Reserved[unit] = tag; // added before the stale ones go: an AI thread never sees a gap
+        foreach (var (unit, owner) in Reserved) if (owner == tag && !now.Contains(unit)) Reserved.TryRemove(unit, out _);
+        Volatile.Write(ref _reservedCount, Reserved.Count);
         foreach (var unit in paratroopers)
         {
-            Reserved[Division.Ref(unit)] = tag;
             if (Paratrooper(unit) || Division.Fighting(unit) || !Division.Ready(unit, tag) || Division.Group(unit) is not (var g and not 0)) continue;
             if (OnOrder(unit, g) && Commands.Unassign(unit, g, true)) Interlocked.Increment(ref _paratroopersReserved);
             // Off its order it stays where it stood: it waits at an airbase instead, where a drop can start from.

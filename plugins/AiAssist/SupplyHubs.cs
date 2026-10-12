@@ -133,9 +133,10 @@ public unsafe partial class AiAssist
             if (feeding < 0 || RailwayPlans.TryGetValue((tag, feeding), out var last) && hour - last is >= 0 and < RailwayCooldownHours) continue;
             var path = RailwayToCapital(feeding, tag, capital, out var lowest);
             if (path == null || lowest >= MaxRailway) continue; // in the capital state, not linked by our railways, or at the top already
-            RailwayPlans[(tag, feeding)] = hour;
             // +1 level along the path, mode 2 as the interior minister calls it; it posts the command itself.
-            if (Native.WithPdxArray(path, p => { var t = tag; return _buildRailway(p, &t, 1, 2); }) != 0) Interlocked.Increment(ref _railways);
+            if (Native.WithPdxArray(path, p => { var t = tag; return _buildRailway(p, &t, 1, 2); }) == 0) continue; // refused: the next starving area
+            RailwayPlans[(tag, feeding)] = hour;
+            Interlocked.Increment(ref _railways);
             return;
         }
     }

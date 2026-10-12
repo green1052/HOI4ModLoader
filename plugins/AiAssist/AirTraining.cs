@@ -48,7 +48,8 @@ public unsafe partial class AiAssist
             Safely(() => train = Train(wing, airbase, region, mission));
             if (!train) Safely(() => keep = MovingBack(wing, airbase));
             return train || keep ? (byte)1 : _assignWing!.OriginalFunction(wing, airbase, region, mission, cancelTransfer);
-        });        MainThread.Every(TimeSpan.FromSeconds(1), TrainIdleWings);
+        });
+        MainThread.Every(TimeSpan.FromSeconds(1), TrainIdleWings);
     }
 
     private const int StateOfAirBase = 0x68; // CAirBase: its state; none for a carrier's
@@ -72,6 +73,7 @@ public unsafe partial class AiAssist
             var tag = country == 0 ? 0 : Game.Tag(country);
             var air = tag <= 0 || tag == player ? 0 : Game.StrategicAir(tag);
             if (air == 0) continue;
+            var room = TrainingRoom(tag, day); // counted once a country: per wing it walked every wing again
             foreach (var pool in Native.PdxArray(air + PoolsOfAir).ToArray())
             {
                 if (pool == 0) continue;
@@ -79,7 +81,8 @@ public unsafe partial class AiAssist
                 {
                     if (wing == 0 || *(int*)(wing + MissionsOfWing) != 0 || *(long*)(wing + DestinationOfWing) != 0 || *(nint*)(wing + AttachedArmyOfWing) != 0) continue;
                     if (OnCarrier(_baseOf(wing))) continue; // a carrier's wings fly with it
-                    if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel || !RoomToTrain(tag, day)) continue;
+                    if (room <= 0) break;
+                    if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel) continue;
                     var cmd = Allocator.AllocZeroed(SetMissionSize);
                     _setMission(cmd, wing, TrainingMission, 1, 1);
                     *(byte*)(cmd + StopAtMaxOfSetMission) = 1;
@@ -91,6 +94,7 @@ public unsafe partial class AiAssist
                     if (!Commands.Post(cmd, true)) continue;
                     TrainingPosted.AddOrUpdate(tag, (day, 1), (_, sent) => sent.Day == day ? (day, sent.Count + 1) : (day, 1));
                     Interlocked.Increment(ref _training);
+                    room--;
                 }
             }
         }
@@ -165,7 +169,8 @@ public unsafe partial class AiAssist
         var tag = WingOwner(wing);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
         var hour = Game.Hour;
-        if (Moved.TryGetValue(wing, out var last) && last.From == airbase && hour - last.Hour < BackAfterHours)
+        if (Moved.Count > 4096) foreach (var (w, m) in Moved) if (hour - m.Hour is < 0 or >= BackAfterHours) Moved.TryRemove(w, out _); // wings come and go
+        if (Moved.TryGetValue(wing, out var last) && last.From == airbase && hour - last.Hour is >= 0 and < BackAfterHours)
         {
             Interlocked.Increment(ref _keptBase);
             return true;
@@ -174,12 +179,18 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    /// <summary>Fewer than half of the country's wings train, counting training posted today (it shows in the bits once run).</summary>
-    private static bool RoomToTrain(int tag, int day)
+    /// <summary>Fewer than half of the country's wings train (<see cref="TrainingRoom"/> above 0).</summary>
+    private static bool RoomToTrain(int tag, int day) => TrainingRoom(tag, day) > 0;
+
+    /// <summary>
+    /// How many more of the country's wings may go on training under MaxTrainingPercent: those with the training bit, or the
+    /// ones posted today if more (a posted mission shows in the bits once run; adding both counted it twice).
+    /// </summary>
+    private static int TrainingRoom(int tag, int day)
     {
         var air = Game.StrategicAir(tag);
-        if (air == 0) return false;
-        int wings = 0, training = TrainingPosted.TryGetValue(tag, out var sent) && sent.Day == day ? sent.Count : 0;
+        if (air == 0) return 0;
+        int wings = 0, training = 0, posted = TrainingPosted.TryGetValue(tag, out var sent) && sent.Day == day ? sent.Count : 0;
         foreach (var pool in Native.PdxArray(air + PoolsOfAir))
         {
             if (pool == 0) continue;
@@ -190,6 +201,6 @@ public unsafe partial class AiAssist
                 if ((*(int*)(w + MissionsOfWing) & TrainingMission) != 0) training++;
             }
         }
-        return (training + 1) * 100 <= wings * MaxTrainingPercent;
+        return wings * MaxTrainingPercent / 100 - Math.Max(training, posted);
     }
 }

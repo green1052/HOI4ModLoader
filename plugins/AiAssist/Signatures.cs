@@ -144,13 +144,6 @@ public static class Signatures
     [Signature] public const string OrderReady = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 8B 41 30 48 8B F1 83 F8 03 75 ? E8 ? ? ? ? EB ? 83 F8 04 75 ? E8 ? ? ? ?";
 
     /// <summary>
-    /// The air AI's per-wing order (0x1412CAFF0; wing, CAirBase* base, CStrategicRegion* region, int mission index or -1, bool
-    /// cancelTransfer) -> bool: flies the wing to the base with the mission, or sets the region and mission there with the
-    /// AI's commands. A wing on training at its base only gets training cleared. Called for every wing the plan uses, by the
-    /// mission share-out (0x1412C3F20, region and mission) and the rebasing (0x1412CDB20, -1), from CAIMilitaryMinister's
-    /// daily and hourly updates: the country's AI worker thread.
-    /// </summary>
-    /// <summary>
     /// CAIGeneral's daily army training pass (CCountry*, bool haltAll, CPdxArray&lt;CAIFront*&gt;* fronts): stops every exercise when
     /// haltAll (surrender progress, 10 %+ of divisions fighting, war preparation), else decides per army of its fronts.
     /// AI worker thread.
@@ -199,6 +192,13 @@ public static class Signatures
     /// </summary>
     [Signature] public const string LeaderStealBranch = "48 3B E8 74 ? 48 8B C8 E8 ? ? ? ? 84 C0 75 ? 81 EE C8 00 00 00";
 
+    /// <summary>
+    /// The air AI's per-wing order (0x1412CAFF0; wing, CAirBase* base, CStrategicRegion* region, int mission index or -1, bool
+    /// cancelTransfer) -> bool: flies the wing to the base with the mission, or sets the region and mission there with the
+    /// AI's commands. A wing on training at its base only gets training cleared. Called for every wing the plan uses, by the
+    /// mission share-out (0x1412C3F20, region and mission) and the rebasing (0x1412CDB20, -1), from CAIMilitaryMinister's
+    /// daily and hourly updates: the country's AI worker thread.
+    /// </summary>
     [Signature] public const string AssignWing = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC 30 45 8B F9";
 
     /// <summary>

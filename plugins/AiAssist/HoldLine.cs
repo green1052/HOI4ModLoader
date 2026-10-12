@@ -44,7 +44,7 @@ public unsafe partial class AiAssist
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> DominantSince = new();
     private static readonly Dictionary<int, HashSet<nint>> Known = []; // tag -> its land divisions at its last backfill pass (main thread)
     private PerGame _game = null!;
-    private static int _world = -1; // Game.Generation at the last reset: until it runs after a load, _line points into the old world
+    private static int _world = -1; // Game.Generation at the last reset: until it runs after a load, Line points into the old world
     private int _backfillAt = Never;
     private static int _backfilled, _reserved, _deployed, _returned, _stopped, _depth, _kept;
 
@@ -531,6 +531,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private static void StopBeatenOffensives(nint country, int tag, int hour)
     {
+        foreach (var (army, at) in Beaten) if (hour - at is < 0 or >= BeatenHours) Beaten.TryRemove(army, out _);
         var landCombat = Sig.VTable(LandCombat);
         var losing = new HashSet<nint>();  // our attacks being lost: the battles' provinces
         var winning = new HashSet<nint>();
@@ -878,7 +879,8 @@ public unsafe partial class AiAssist
     /// <summary>A land division of the tag (not lent) that can take orders now: not fighting, retreating or embarked, not one we sent or rest.</summary>
     private static bool Movable(nint unit, int tag)
     {
-        return Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Paratrooper(unit) && !Jobs.Taken(unit, Id);
+        return Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Paratrooper(unit) && !Jobs.Taken(unit, Id)
+            && (Volatile.Read(ref _reservedCount) == 0 || !Reserved.ContainsKey(Division.Ref(unit))); // paratroopers wait at their airbase
     }
 
     /// <summary>Our divisions with a job (posted, resting, walking somewhere for us), for the other plugins to leave alone.</summary>
@@ -1101,7 +1103,9 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// Offensive timing: a battle plan starts once its divisions are ready, not while they still recover their organisation
-    /// (under MinAttackOrg % on average) or walk up to the line (over MaxGatheringPercent % of them on the move). AI threads.
+    /// (under MinAttackOrg % on average), walk up to the line (over MaxGatheringPercent % of them on the move), fight under an
+    /// enemy sky, stand in mud, face a fortified line they don't outgun two to one, stand in a salient whose way back closes,
+    /// or had their attacks beaten back in the last three days. AI threads.
     /// </summary>
     private static bool TimeToAttack(nint order, int tag, int hour)
     {

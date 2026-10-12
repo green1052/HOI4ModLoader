@@ -78,9 +78,9 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// The enemies the tag can't hold the open line against: per enemy, its divisions' power within two provinces of our
-    /// threatened line over our land power's share for the line provinces facing it. Twice as strong, or 1.3x while we lost
-    /// line provinces in the last week or have too few divisions for the line, puts it on the list (only twice as strong within a
-    /// month of leaving a grad). The grad goes after seven daily decisions in a row with every kept enemy under 80 %, a month after
+    /// threatened line over our land power's share for the line provinces facing it. Twice as strong, or PressedRatio (1.6x)
+    /// while we lost two line provinces or more in the last week, puts it on the list (only twice as strong within a month of
+    /// leaving a grad). The grad goes after seven daily decisions in a row with every kept enemy under 80 %, a month after
     /// it was taken at the earliest. No line seen (out of contact, the enemy walking up to the grad): the stance stays as it was.
     /// </summary>
     private static Stance Decide(nint country, int tag, HashSet<nint>? border, Stance? old, int hour)
@@ -134,7 +134,7 @@ public unsafe partial class AiAssist
             return new Stance(hour, hour, strong, top, 0, old.Strong.Count > 0 ? hour + BlockHours : old.Blocked, history);
         var days = weak && strong.Count == 0 ? old.Weak + 1 : 0;
         if (days >= ExitDays && hour - old.Since >= MinGradHours)
-            return new Stance(hour, hour, [], top, 0, hour + BlockHours, history); // strong enough again, for a week
+            return new Stance(hour, hour, [], top, 0, hour + BlockHours, history); // strong enough again: no new grad for BlockHours
         strong.UnionWith(kept);
         return new Stance(hour, old.Since, strong, top, days, old.Blocked, history);
     }
@@ -326,7 +326,7 @@ public unsafe partial class AiAssist
         return spares;
     }
 
-    /// <summary>The tag's fresh, idle posted divisions (reserves, garrisons past what their province wants) up to ReserveReach provinces behind <paramref name="held"/>.</summary>
+    /// <summary>The tag's fresh, idle reserve and second-line divisions up to ReserveReach provinces behind <paramref name="held"/>.</summary>
     private static List<nint> Reserves(int tag, nint held)
     {
         var found = new List<nint>();

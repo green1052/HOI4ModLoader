@@ -55,7 +55,7 @@ public unsafe partial class AiAssist
     {
         var day = Game.Hour / 24;
         if (day != _frontDay) { FrontCache.Clear(); _frontDay = day; }
-        if (FrontCache.TryGetValue(army, out var cached)) return cached.Front;
+        if (FrontCache.TryGetValue(army, out var cached) && cached.Day == day) return cached.Front; // an AI thread's write from yesterday may outlive the clear
         var front = Division.Fighting(army);
         var location = Division.Location(army);
         var country = Game.Country(tag);

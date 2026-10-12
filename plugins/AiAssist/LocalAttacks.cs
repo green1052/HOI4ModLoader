@@ -327,7 +327,8 @@ public unsafe partial class AiAssist
                 var target = Game.Province(id);
                 if (target == 0 || Gap.ContainsKey(id) || Province.Divisions(target) > 0 || !Province.Enemy(country, tag, target)
                     || _supplyAware && Province.Starved(country, tag, here.Key, target, _supplyShare)) continue; // supply must follow it there, as with local attacks
-                if (!Send(fresh[--spare], id, now, SentHours)) continue;
+                if (!Send(fresh[spare - 1], id, now, SentHours)) continue;
+                spare--;
                 Interlocked.Increment(ref _taken);
                 if (++taken == MaxMoves) return;
             }

@@ -184,6 +184,15 @@ public unsafe partial class AiAssist : Plugin
             HubPlans.Clear();
             RailwayPlans.Clear();
             TrainingPosted.Clear();
+            Moved.Clear();
+            Bombarding.Clear();
+            Claimed.Clear();
+            Beaten.Clear();
+            ShortOfMen.Clear();
+            WaitedAt.Clear();
+            RaisedAt.Clear();
+            UnguardedAt.Clear();
+            _portHolders = null;
             ClearRailGuns();
             _capitals = (0, []);
             _provinceCount = -1;

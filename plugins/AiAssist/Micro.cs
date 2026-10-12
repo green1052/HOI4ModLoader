@@ -237,7 +237,7 @@ public partial class AiAssist
             var province = target == 0 ? 0 : Game.Province(target);
             if (province == 0) continue;
             var defenders = Province.Enemy(country, tag, province) ? Province.Divisions(province) : Hostiles(country, province);
-            var need = Math.Max(1, defenders * (Province.FortLevel(province) / 2 + 1)); // vanilla's local attack test: as many as they are, more against forts
+            var need = Math.Max(1, defenders * (Province.FortLevel(province) / 2 + 1)); // vanilla's local attack test (as many as they are, more against forts); our mobile ones count double below
             var team = new List<nint>();
             var power = 0;
             foreach (var p in Within([province], FireRadius, q => Province.Controller(q) == tag))

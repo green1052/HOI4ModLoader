@@ -9,7 +9,7 @@ public unsafe partial class AiAssist
     // ---- Navy: idle task forces train at peace and bombard coastal battles at war ----
 
     private const int FleetsOfCountry = 0x278, TaskForcesOfFleet = 0xB8, HomeOfFleet = 0xD8;  // CCountry: CPdxArray<CFleet*>; CFleet: CPdxArray<CTaskForce*>, home base
-    private const int RefOfTaskForce = 0x18, CombatOfTaskForce = 0x1B4, LocationOfTaskForce = 0x1F0, PathCountOfTaskForce = 0x20C;
+    private const int RefOfTaskForce = 0x18, CombatOfTaskForce = 0x1B4, LocationOfTaskForce = 0x1F0;
     private const int FleetOfTaskForce = 0x340, MissionOfTaskForce = 0x374, ParentOfTaskForce = 0x4B0, ActivityOfTaskForce = 0x4B8;
     private const int HoldMission = 0, NavalTrainingMission = 7, ReserveFleetMission = 8;   // NNavalMission::EMissionType
     private const int NavalCommandSize = 0x48, StopAtMaxOfNavalCommand = 0x44;              // CNavalMissionSetTypeCommand, CNavalMissionMoveCommand
@@ -31,9 +31,11 @@ public unsafe partial class AiAssist
     private static delegate* unmanaged<nint, long*, long*> _shoreBombardment, _shipBombardment;
     private static delegate* unmanaged<nint, nint, nint, byte, int, byte, nint> _moveShips;
     private const int ShipsOfTaskForce = 0x348, MoveShipsSize = 0x58;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> Claimed = new(); // sea a split-off half is meant for -> hour
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int Tag, int Sea), int> Claimed = new(); // sea a split-off half is meant for -> hour
     private static int _fleetsSplit;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Province, int Hour)> Bombarding = new(); // task force: where sent, when
+    // task force -> where it was sent, when, whose (each country covers its own battles: two navies off one coast both bombard)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Province, int Hour, int Tag)> Bombarding = new();
+    private const int MinSplitShips = 4; // halves of two ships at least: a fleet isn't shredded into single ships
     private static int _fleetsTraining, _fleetsBombarding;
     private static bool _navalTraining, _shoreSupport;
 
@@ -125,7 +127,9 @@ public unsafe partial class AiAssist
                     if (tf != 0) byRef[*(long*)(tf + RefOfTaskForce)] = tf;
         var targets = BombardTargets(country, tag);
         var hour = Game.Hour;
-        var open = targets.Count(t => !Bombarding.Any(b => b.Value.Province == t.Sea && hour - b.Value.Hour is >= 0 and < BombardStayHours));
+        foreach (var (tf, sent) in Bombarding) if (hour - sent.Hour is < 0 or >= BombardWaitHours) Bombarding.TryRemove(tf, out _); // sunk, merged, done
+        foreach (var (key, at) in Claimed) if (hour - at is < 0 or >= BombardStayHours) Claimed.TryRemove(key, out _);
+        var open = targets.Count(t => !Covered(tag, t.Sea, hour));
         var kept = 0;
         for (var i = 0; i < count; i++)
         {
@@ -175,6 +179,10 @@ public unsafe partial class AiAssist
         return true;
     }
 
+    /// <summary>One of the tag's task forces holds at or heads for the sea, sent within BombardStayHours.</summary>
+    private static bool Covered(int tag, int sea, int hour) =>
+        Bombarding.Any(b => b.Value.Tag == tag && b.Value.Province == sea && hour - b.Value.Hour is >= 0 and < BombardStayHours);
+
     private const int CombatsOfGameState = 0x268, ProvinceOfCombat = 0x38; // CPdxArray<CCombat*>; the battle's province (the defender's)
     [VTable] public const string LandCombat = "CLandCombat";
 
@@ -206,7 +214,7 @@ public unsafe partial class AiAssist
 
     // ponytail: no look at enemy fleets on the way or at the target; add the strategic navy's region danger if fleets sail into them.
     /// <summary>
-    /// Sends a task force with guns to the busiest bombardment sea within reach, on hold (only ships on hold bombard); one
+    /// Sends a task force with guns or carriers (halved when a second battle has none) to the busiest bombardment sea within reach, on hold (only ships on hold bombard); one
     /// already there or on its way stays. Whether taken.
     /// </summary>
     private static bool Bombard(nint tf, int tag, List<(int Sea, int Weight)> targets)
@@ -215,9 +223,9 @@ public unsafe partial class AiAssist
         var on = *(int*)(tf + MissionOfTaskForce) == HoldMission;
         var ours = Bombarding.TryGetValue(tf, out var sent) && hour - sent.Hour >= 0;
         // On its way, or there; of several at one battle only one stays while another battle has none.
-        var doubled = ours && Bombarding.Any(b => b.Key != tf && b.Key < tf && b.Value.Province == sent.Province && hour - b.Value.Hour is >= 0 and < BombardStayHours);
+        var doubled = ours && Bombarding.Any(b => b.Key != tf && b.Key < tf && b.Value.Tag == tag && b.Value.Province == sent.Province && hour - b.Value.Hour is >= 0 and < BombardStayHours);
         if (on && ours && hour - sent.Hour < BombardStayHours && !(doubled && targets.Any(t => t.Sea != sent.Province
-            && !Bombarding.Any(b => b.Value.Province == t.Sea && hour - b.Value.Hour is >= 0 and < BombardStayHours)))) return true;
+            && !Covered(tag, t.Sea, hour)))) return true;
         if (targets.Count == 0) return on && ours && hour - sent.Hour < BombardWaitHours; // battles pause: it waits at sea, not in port
         long guns;
         _shoreBombardment(tf, &guns);
@@ -226,11 +234,11 @@ public unsafe partial class AiAssist
         if (here == 0) return false;
         if (on && targets.Any(t => t.Sea == Game.Id(here)))
         {
-            Bombarding[tf] = (Game.Id(here), hour); // bombarding: its wait for the next battle counts from now
+            Bombarding[tf] = (Game.Id(here), hour, tag); // bombarding: its wait for the next battle counts from now
             return true;
         }
         var steps = SeaSteps(here, MaxBombardSteps);
-        var covered = Bombarding.Where(b => b.Key != tf && hour - b.Value.Hour is >= 0 and < BombardStayHours).Select(b => b.Value.Province).ToHashSet();
+        var covered = Bombarding.Where(b => b.Key != tf && b.Value.Tag == tag && hour - b.Value.Hour is >= 0 and < BombardStayHours).Select(b => b.Value.Province).ToHashSet();
         var reach = targets.Where(t => steps.ContainsKey(t.Sea)).OrderBy(t => covered.Contains(t.Sea)).ThenBy(t => steps[t.Sea]).ToList(); // the nearest battle no other one covers
         var sea = reach.FirstOrDefault().Sea;
         if (sea == 0) return on && ours && hour - sent.Hour < BombardWaitHours;
@@ -240,12 +248,12 @@ public unsafe partial class AiAssist
             _setNavalMission(hold, tf, HoldMission);
             if (!Post(hold, tag)) return false;
         }
-        var other = reach.FirstOrDefault(t => t.Sea != sea && !covered.Contains(t.Sea) && !(Claimed.TryGetValue(t.Sea, out var c) && hour - c is >= 0 and < BombardStayHours)).Sea;
-        if (other != 0 && Split(tf, tag)) Claimed[other] = hour; // the half left where it is takes that battle next pass
+        var other = reach.FirstOrDefault(t => t.Sea != sea && !covered.Contains(t.Sea) && !(Claimed.TryGetValue((tag, t.Sea), out var c) && hour - c is >= 0 and < BombardStayHours)).Sea;
+        if (other != 0 && Split(tf, tag)) Claimed[(tag, other)] = hour; // the half left where it is takes that battle next pass
         var move = Allocator.AllocZeroed(NavalCommandSize);
         _navalMove(move, tf, sea, 0);
         if (!Post(move, tag)) return false;
-        Bombarding[tf] = (sea, hour);
+        Bombarding[tf] = (sea, hour, tag);
         Interlocked.Increment(ref _fleetsBombarding);
         return true;
     }
@@ -257,7 +265,7 @@ public unsafe partial class AiAssist
     private static bool Split(nint tf, int tag)
     {
         var ships = Native.PdxArray(tf + ShipsOfTaskForce).ToArray().Where(s => s != 0).ToList();
-        if (ships.Count < 2) return false;
+        if (ships.Count < MinSplitShips) return false;
         var half = ships.OrderByDescending(s => { long v; _shipBombardment(s, &v); return v; }).Where((_, i) => i % 2 == 1).ToArray();
         var cmd = Allocator.AllocZeroed(MoveShipsSize);
         Native.WithPdxArray(half, list => _moveShips(cmd, list, 0, 1, -1, 0));
