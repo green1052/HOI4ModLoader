@@ -301,9 +301,36 @@ public static unsafe class Division
     /// <summary>Embarked or otherwise taken up.</summary>
     public static bool Busy(nint unit) => *(nint*)(unit + BusyOffset) != 0;
 
-    /// <summary>A land division of <paramref name="tag"/> (not lent) that can take orders now: not fighting (a defender can only retreat), retreating or embarked.</summary>
-    public static bool Ready(nint unit, int tag) =>
-        IsLand(unit) && Commander(unit) == tag && Owner(unit) == tag && !Fighting(unit) && !Retreating(unit) && !Busy(unit);
+    /// <summary>
+    /// A land division of <paramref name="tag"/> (not lent) that can take orders now: not fighting (a defender can only retreat),
+    /// retreating or embarked. Not an Army HQ either (it stays behind the line), unless <paramref name="headquarters"/>.
+    /// </summary>
+    public static bool Ready(nint unit, int tag, bool headquarters = false) =>
+        IsLand(unit) && Commander(unit) == tag && Owner(unit) == tag && !Fighting(unit) && !Retreating(unit) && !Busy(unit)
+        && (headquarters || !IsHeadquarters(unit));
+
+    /// <summary>
+    /// The AI's micro attacks skipping Army HQs: `mov rcx,rax; call TemplateData(CArmy*); cmp byte [rax+1B4h],0` (is_army_hq of
+    /// CDivisionTemplateData, what the save writes). TemplateData: [unit+3B8h] (CDivisionTemplate) + 18h, or 0.
+    /// </summary>
+    [Signature] public const string HeadquartersSig = "48 8B C8 E8 ? ? ? ? 80 B8 B4 01 00 00 00 0F 85";
+
+    private static class Hq
+    {
+        private static readonly nint At = Sig.Find(HeadquartersSig);
+        public static readonly delegate* unmanaged<nint, nint> TemplateData = (delegate* unmanaged<nint, nint>)TemplateDataAt(At);
+        public static readonly int Flag = *(int*)(At + 10);
+    }
+
+    /// <summary>The template data getter, from a <see cref="HeadquartersSig"/> match (call at +3).</summary>
+    internal static nint TemplateDataAt(nint at) => at + 8 + *(int*)(at + 4);
+
+    /// <summary>An Army HQ (Thunder at Our Gates): a division of an army HQ template, which buffs its army from behind the line. Any thread.</summary>
+    public static bool IsHeadquarters(nint unit)
+    {
+        var data = Hq.TemplateData(unit);
+        return data != 0 && *(byte*)(data + Hq.Flag) != 0;
+    }
 
     /// <summary>Armored or motorized: hardness 0.4+ or armor.</summary>
     public static bool Motorized(nint unit)

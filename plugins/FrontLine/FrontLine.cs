@@ -585,7 +585,7 @@ public unsafe partial class FrontLine : Plugin
             var unit = Game.Resolve(unitRef);
             var group = Game.Resolve(groupRef);
             if (unit == 0 || group == 0 || Division.Commander(unit) != tag || Division.Group(unit) != group || OrderOf(unit, group) != 0
-                || !Division.Ready(unit, tag) || !Commands.Assign(unit, group, order)) continue;
+                || !Division.Ready(unit, tag, headquarters: true) || !Commands.Assign(unit, group, order)) continue; // an HQ an older version took
             _pending[unit] = Environment.TickCount64 + PendingMs;
             restored++;
         }
