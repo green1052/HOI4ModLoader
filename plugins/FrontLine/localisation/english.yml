@@ -19,7 +19,7 @@ l_english:
     com.green1052.frontline.PlugRadius:0 "Helper distance (provinces)"
     com.green1052.frontline.PlugRadius.desc:0 "How far (provinces) a helper may come from."
     com.green1052.frontline.Escape:0 "Encirclement escape"
-    com.green1052.frontline.Escape.desc:0 "Pull front divisions back out of a salient whose way back narrows to one or two provinces next to the enemy, through that neck while it is still open."
+    com.green1052.frontline.Escape.desc:0 "Pull front divisions back out of a salient whose way back narrows to one or two provinces next to the enemy (and the enemy there is strong enough to close it), through that neck while it is still open. Once cut off (up to 30 provinces, friendly lines within 6), the divisions inside attack together once a day toward the nearest friendly ground."
     com.green1052.frontline.Attack:0 "Opportunity attacks and pocket mop-up"
     com.green1052.frontline.Attack.desc:0 "Take empty enemy provinces next to the line with a fresh division, and attack enemy divisions already surrounded with at least as many fresh ones (more behind forts); a province of ours always keeps one. Best targets first: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front; none our supply can't follow (unless it closes a pocket) or that lengthen the front by more than two provinces for nothing."
     com.green1052.frontline.AttackOdds:0 "Assault odds (%)"

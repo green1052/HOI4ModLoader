@@ -7,6 +7,76 @@ public unsafe partial class FrontLine
     // ---- Escape: a salient whose way back narrows to a neck next to the enemy is left through the neck ----
 
     private const int NeckWidth = 2, MaxNeckSearch = 8, MaxSalient = 20;
+    private const int MaxCutOff = 30, MaxBreakoutDistance = 6, BreakoutHours = 24, BreakoutOrg = 30;
+    private readonly Dictionary<int, int> _breakouts = []; // pocket (its lowest province id) -> game hour of its last breakout
+
+    /// <summary>
+    /// Our divisions in ground of ours (and allies') cut off from the rest, up to MaxCutOff provinces, with friendly lines within
+    /// MaxBreakoutDistance provinces: once a day, all of them with some organisation attack the enemy province that starts the
+    /// shortest way out. Pockets far from any friendly ground (overseas colonies) are left alone.
+    /// </summary>
+    private void Breakout(nint country, int tag, nint[] units)
+    {
+        var hour = Game.Hour;
+        foreach (var (key, at) in _breakouts.ToArray()) if (hour - at is < 0 or > 30 * 24) _breakouts.Remove(key);
+        var walked = new HashSet<int>();
+        foreach (var unit in units)
+        {
+            var location = Division.Location(unit);
+            if (location == 0 || walked.Contains(Game.Id(location)) || !Friendly(country, tag, location)) continue;
+            var region = Province.Region(location, MaxCutOff, p => Friendly(country, tag, p), walked);
+            if (region == null) continue; // part of the main body
+            var key = region.Min(Game.Id);
+            if (_breakouts.TryGetValue(key, out var last) && hour - last is >= 0 and < BreakoutHours) continue;
+            var target = WayOut(country, tag, region);
+            if (target == 0) continue; // nothing friendly near: an overseas holding, not a pocket
+            var inside = region.ToHashSet();
+            var breakers = units.Where(u => Division.Location(u) is var l && l != 0 && inside.Contains(l) && Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= BreakoutOrg).ToList();
+            if (breakers.Count == 0) continue;
+            foreach (var breaker in breakers)
+            {
+                _held.Remove(breaker); // whatever it was doing for us
+                Commands.Move(breaker, Game.Id(target), _force);
+                _pending[breaker] = _now + PendingMs;
+            }
+            _breakouts[key] = hour;
+            Log.Info($"breakout: {breakers.Count} division(s) cut off in {region.Count} province(s) attack toward friendly lines");
+        }
+    }
+
+    /// <summary>The enemy province next to the pocket on the shortest land way to friendly ground outside it (fewest enemy divisions on a tie), or 0.</summary>
+    private nint WayOut(nint country, int tag, List<nint> region)
+    {
+        var inside = region.Select(Game.Id).ToHashSet();
+        var from = new Dictionary<int, nint>(); // province id -> the pocket's neighbour it was reached through
+        var frontier = new List<nint>();
+        foreach (var p in region)
+        foreach (var id in Game.Neighbours(p))
+            if (!inside.Contains(id) && !from.ContainsKey(id) && Game.Province(id) is var n && n != 0 && Enemy(country, tag, n)) // not through neutrals
+            {
+                from[id] = n;
+                frontier.Add(n);
+            }
+        for (var depth = 1; depth <= MaxBreakoutDistance && frontier.Count > 0; depth++)
+        {
+            var next = new List<nint>();
+            nint best = 0;
+            foreach (var p in frontier)
+            foreach (var id in Game.Neighbours(p))
+            {
+                if (inside.Contains(id) || Game.Province(id) is not (var n and not 0) || Province.Controller(n) == 0) continue;
+                var exit = from[Game.Id(p)];
+                if (Friendly(country, tag, n))
+                {
+                    if (best == 0 || Province.Divisions(exit) < Province.Divisions(best)) best = exit;
+                }
+                else if (Enemy(country, tag, n) && from.TryAdd(id, exit)) next.Add(n);
+            }
+            if (best != 0) return best;
+            frontier = next;
+        }
+        return 0;
+    }
 
     /// <summary>Front divisions in a salient about to be cut off pull back through its neck, where another of their front holds their province.</summary>
     private void Escape(nint country, int tag, nint[] units)

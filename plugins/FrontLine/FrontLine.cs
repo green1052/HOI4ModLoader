@@ -113,7 +113,8 @@ public unsafe partial class FrontLine : Plugin
         _losing = Math.Clamp(Config.Bind("Plugging", "LosingPercent", 60, "A defence counts as being lost when the attacker holds this share (%) of the battle's organisation (the battle bar)."), 50, 100);
         _plugRadius = Math.Clamp(Config.Bind("Plugging", "PlugRadius", 4, "How far (provinces) a helper may come from."), 1, MaxRestSearch);
         _escape = Config.Bind("Escape", "Escape", true,
-            "Pull front divisions back out of a salient whose way back narrows to one or two provinces next to the enemy, through that neck while it is still open.");
+            "Pull front divisions back out of a salient whose way back narrows to one or two provinces next to the enemy (and the enemy there is strong enough to close it), through that neck while it is still open. "
+            + "Once cut off (up to 30 provinces, friendly lines within 6), the divisions inside attack together once a day toward the nearest friendly ground.");
         _attack = Config.Bind("Attack", "Attack", true,
             "Take empty enemy provinces next to the line with a fresh division, and attack enemy divisions already surrounded with at least as many fresh ones (more behind forts); a province of ours always keeps one. "
             + "Best targets first: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front; none our supply can't follow (unless it closes a pocket) or that lengthen the front by more than two provinces for nothing.");
@@ -146,6 +147,7 @@ public unsafe partial class FrontLine : Plugin
         _game = new PerGame(() => // one reset for the operations too: they share _held
         {
             _sides.Clear(); // Begin swaps a new side in
+            _breakouts.Clear();
             _orders.Clear();
             _operations.Clear();
             _opOrdered.Clear();
@@ -289,7 +291,11 @@ public unsafe partial class FrontLine : Plugin
         if (_rotation) foreach (var group in groups) RotateArmy(country, tag, group);
         if (_plugging) Plug(country, tag, units);
         if (_fireBrigade) Counterattack(country, tag, fronts.Values);
-        if (_escape) Escape(country, tag, units);
+        if (_escape)
+        {
+            Escape(country, tag, units);
+            Breakout(country, tag, units);
+        }
         if (_shuffle) Shuffle(country, tag, fronts.Values);
         if (_depth) DepthDefense(country, tag, fronts.Values);
         if (_fireBrigade) PostReserves(country, tag, fronts.Values);

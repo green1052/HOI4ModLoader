@@ -103,27 +103,34 @@ public static unsafe class Province
         var cut = 0;
         var seen = new HashSet<int> { Game.Id(target) };
         foreach (var id in Game.Neighbours(target))
-        {
-            if (seen.Contains(id) || Game.Province(id) is not (var e and not 0) || !Enemy(country, tag, e)) continue;
-            // The enemy ground reached from here without passing the target: closed and small, it is cut off.
-            var region = new List<nint> { e };
-            seen.Add(id);
-            var closed = true;
-            for (var i = 0; i < region.Count && closed; i++)
-            foreach (var n in Game.Neighbours(region[i]))
-            {
-                if (seen.Contains(n) || Game.Province(n) is not (var p and not 0) || !Enemy(country, tag, p)) continue;
-                seen.Add(n);
-                region.Add(p);
-                if (region.Count > MaxPocket)
-                {
-                    closed = false;
-                    break;
-                }
-            }
-            if (closed) cut += region.Sum(Divisions);
-        }
+            if (!seen.Contains(id) && Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)
+                && Region(e, MaxPocket, p => Enemy(country, tag, p), seen) is { } region) // the enemy ground beyond, closed and small: cut off
+                cut += region.Sum(Divisions);
         return cut;
+    }
+
+    /// <summary>The enemy province is in a pocket already: its enemy ground, up to <see cref="MaxPocket"/> provinces, is closed.</summary>
+    public static bool Encircled(nint country, int tag, nint province) =>
+        Enemy(country, tag, province) && Region(province, MaxPocket, p => Enemy(country, tag, p)) != null;
+
+    /// <summary>
+    /// The land provinces connected to <paramref name="start"/> through ones <paramref name="inside"/> accepts, if they are no
+    /// more than <paramref name="max"/>; null when the region is bigger (open). <paramref name="seen"/>: ids to leave out, and
+    /// it gets the ones walked.
+    /// </summary>
+    public static List<nint>? Region(nint start, int max, Func<nint, bool> inside, HashSet<int>? seen = null)
+    {
+        seen ??= [];
+        seen.Add(Game.Id(start));
+        var region = new List<nint> { start };
+        for (var i = 0; i < region.Count; i++)
+        foreach (var n in Game.Neighbours(region[i]))
+        {
+            if (!seen.Add(n) || Game.Province(n) is not (var p and not 0) || !inside(p)) continue;
+            region.Add(p);
+            if (region.Count > max) return null;
+        }
+        return region;
     }
 
     /// <summary>
