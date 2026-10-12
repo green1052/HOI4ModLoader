@@ -113,7 +113,7 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 - Features that change game rules (field marshals holding air wings and railway guns, railway gun positioning, AiAssist) switch off in a multiplayer lobby and back on in single player. Field marshal assignment switches to spreading over the marshal's armies with vanilla commands instead.
 
 ## Performance: mimalloc
-Off by default. `[Performance] MimallocAllocator = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` makes the game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap (takes effect at the next start). It measured no faster, and the game sometimes reads memory it just freed, which the Windows heap tolerates and mimalloc can turn into a crash (the known case, targeted decisions, is worked around). The old `Mimalloc` setting, on by default, is removed from existing configs, so updated installs go back to the Windows heap.
+On by default: the game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap. `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` turns it off (takes effect at the next start). The game sometimes reads memory it just freed, which the Windows heap tolerates; so small blocks are freed a little late (after the same thread's next 16384 frees), and the known case, targeted decisions, waits until the decision is done.
 
 ## Troubleshooting
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.

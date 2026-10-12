@@ -8,7 +8,7 @@ namespace HOI4ModLoader;
 /// The game's own heap: hoi4.exe's statically linked CRT allocation functions. Memory the game frees (commands, string
 /// buffers) or that we free for it must come from and go back to here. Optionally swaps in mimalloc (Microsoft's release
 /// build, HOI4ModLoader\core\mimalloc.dll) underneath them, through native shims in version.dll (bootstrap\allocator.c),
-/// off by default: it measured no faster, and it turns the game's latent use-after-free bugs into crashes.
+/// with small frees quarantined (bootstrapllocator.c): the game reads some blocks right after freeing them.
 /// </summary>
 public static unsafe class Allocator
 {

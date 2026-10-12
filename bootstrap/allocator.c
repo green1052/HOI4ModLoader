@@ -13,6 +13,8 @@ static void* (*mi_realloc)(void*, size_t);
 static void (*mi_free)(void*);
 static size_t (*mi_usable_size)(const void*);
 static unsigned char (*mi_is_in_heap_region)(const void*);
+static DWORD g_ringFls = FLS_OUT_OF_INDEXES; // the quarantine rings' FLS slot, see hm_free
+static void WINAPI flushRing(void* data);
 
 __declspec(dllexport) void hm_init(HANDLE* crtHeap, void* malloc_, void* calloc_, void* realloc_, void* free_, void* usableSize, void* isInHeap) {
     g_crtHeap = crtHeap;
@@ -22,6 +24,7 @@ __declspec(dllexport) void hm_init(HANDLE* crtHeap, void* malloc_, void* calloc_
     mi_free = free_;
     mi_usable_size = usableSize;
     mi_is_in_heap_region = isInHeap;
+    g_ringFls = FlsAlloc(flushRing);
 }
 
 __declspec(dllexport) void* hm_malloc(size_t size) { return mi_malloc(size); }
@@ -65,10 +68,53 @@ __declspec(dllexport) void hm_defer(int on) {
     t_deferredCount = 0;
 }
 
+// Quarantine: a small block's free waits for the next QUARANTINE small frees on the same thread, so a read soon after it
+// (the game's latent use-after-free bugs, which the Windows heap tolerates) still finds the old contents. Per thread, so
+// mimalloc still frees on the freeing thread; a thread's ring is flushed by its FLS callback when it exits.
+// ponytail: catches reads within ~16k frees; a later one still crashes (wrap that call in hm_defer like ActivateDecision).
+#define QUARANTINE (1 << 14)
+#define QUARANTINE_MAX_SIZE 4096
+typedef struct { size_t next; void* slots[QUARANTINE]; } Ring;
+static __declspec(thread) Ring* t_ring;
+static __declspec(thread) int t_noRing; // its ring was flushed (thread exit) or couldn't be made: frees happen at once
+
+static void WINAPI flushRing(void* data) {
+    Ring* ring = data;
+    if (!ring) return;
+    t_ring = NULL;
+    t_noRing = 1;
+    for (size_t i = 0; i < QUARANTINE; i++)
+        if (ring->slots[i]) mi_free(ring->slots[i]);
+    HeapFree(GetProcessHeap(), 0, ring);
+}
+
+static Ring* threadRing(void) {
+    if (t_ring || t_noRing) return t_ring;
+    Ring* ring = g_ringFls == FLS_OUT_OF_INDEXES ? NULL : HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(Ring));
+    if (ring && !FlsSetValue(g_ringFls, ring)) {
+        HeapFree(GetProcessHeap(), 0, ring);
+        ring = NULL;
+    }
+    t_noRing = !ring;
+    return t_ring = ring;
+}
+
 __declspec(dllexport) void hm_free(void* p) {
     if (!p) return;
     if (t_deferDepth > 0 && queue(p)) return;
-    release(p);
+    if (!mi_is_in_heap_region(p)) {
+        HeapFree(*g_crtHeap, 0, p);
+        return;
+    }
+    Ring* ring = mi_usable_size(p) <= QUARANTINE_MAX_SIZE ? threadRing() : NULL;
+    if (ring) {
+        void** slot = &ring->slots[ring->next++ & (QUARANTINE - 1)];
+        void* oldest = *slot;
+        *slot = p;
+        if (!oldest) return;
+        p = oldest;
+    }
+    mi_free(p);
 }
 
 __declspec(dllexport) size_t hm_msize(void* p) {
