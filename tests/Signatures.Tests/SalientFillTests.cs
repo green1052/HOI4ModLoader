@@ -12,7 +12,7 @@ public class SalientFillTests
     };
 
     private static int Cut(int[] neck, Dictionary<int, List<int>> map) =>
-        SalientFill.Cut(neck, id => map[id], id => id is 1 or 2 ? SalientFill.Ours : id == 9 ? SalientFill.Neutral : SalientFill.Theirs, id => id is 6 or 7 ? 2 : 0, 3);
+        SalientFill.Cut(neck, id => [.. map[id]], id => id is 1 or 2 ? SalientFill.Ours : id == 9 ? SalientFill.Neutral : SalientFill.Theirs, id => id is 6 or 7 ? 2 : 0, 3);
 
     [Fact]
     public void TakingTheNeckCutsOffTheSalient() => Assert.Equal(4, Cut([5], Map));

@@ -498,7 +498,7 @@ public unsafe partial class FrontLine
     /// <summary>We ordered it in the last two game hours: that order is still being carried out.</summary>
     private bool Ordered(nint unit) => _opOrdered.TryGetValue(unit, out var hour) && Game.Hour - hour is >= 0 and < 2;
 
-    private static List<int> Around(int id) => Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [];
+    private static int[] Around(int id) => Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [];
 
     private int EnemyUnits(nint country, int tag, nint province) =>
         Enemy(country, tag, province) ? Province.Divisions(province) : 0;

@@ -367,10 +367,10 @@ public unsafe partial class AiAssist
             var target = Game.Id(to);
             // While a feint runs only it attacks (and pins next to it); then the axis, and a pincer's second arm.
             if (FeintCore(general, tag, hour) is { } feint)
-                return feint.Contains(target) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(feint.Contains);
+                return feint.Contains(target) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Any(feint.Contains);
             var second = SecondCore(general, tag, hour);
             bool OnArm(int id) => axis.Core.Contains(id) || second != null && second.Contains(id);
-            return OnArm(target) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(OnArm);
+            return OnArm(target) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Any(OnArm);
         }
         return true;
     }

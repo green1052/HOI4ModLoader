@@ -87,14 +87,9 @@ public unsafe partial class AiAssist
     /// <summary>One search's view of the map around a theatre's line: neighbours and sides, read once per province.</summary>
     private sealed class SalientMap(nint country, int tag)
     {
-        private readonly Dictionary<int, List<int>> _neighbours = [];
         private readonly Dictionary<int, int> _sides = [];
 
-        public List<int> Neighbours(int id)
-        {
-            if (!_neighbours.TryGetValue(id, out var ids)) _neighbours[id] = ids = Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [];
-            return ids;
-        }
+        public int[] Neighbours(int id) => Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [];
 
         /// <summary>Ours or allied, enemy-held, neutral land, or none (sea, wasteland).</summary>
         private int Side(int id)
@@ -136,7 +131,7 @@ public static class SalientFill
     /// <paramref name="maxSize"/> provinces without neutral land, provided another region next to it stays open (the neck is what
     /// links them to the enemy's main ground: no pocket already). 0 otherwise.
     /// </summary>
-    public static int Cut(int[] neck, Func<int, List<int>> neighbours, Func<int, int> side, Func<int, int> divisions, int maxSize)
+    public static int Cut(int[] neck, Func<int, int[]> neighbours, Func<int, int> side, Func<int, int> divisions, int maxSize)
     {
         var fills = new Dictionary<int, int>(); // province id -> the fill that reached it (0: the neck)
         foreach (var id in neck) fills[id] = 0;

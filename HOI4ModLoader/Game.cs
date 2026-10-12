@@ -258,14 +258,27 @@ public static unsafe class Game
         return 0;
     }
 
-    /// <summary>Ids of the provinces next to <paramref name="province"/> (land and sea).</summary>
-    public static List<int> Neighbours(nint province)
+    /// <summary>
+    /// Ids of the provinces next to <paramref name="province"/> (land and sea). The map's adjacency never changes, so each
+    /// province's list is read once and shared: callers must not change it. Any thread (a race fills a slot twice, alike).
+    /// </summary>
+    public static int[] Neighbours(nint province)
     {
+        var id = Id(province);
+        var cache = _neighbours;
+        if ((uint)id < (uint)cache.Length && cache[id] is { } known) return known;
         var (data, count) = AdjacencyList(province);
-        var ids = new List<int>(count);
-        for (var i = 0; i < count; i++) ids.Add(*(int*)(data + i * AdjacencySize + NeighbourId));
+        var ids = new int[count];
+        for (var i = 0; i < count; i++) ids[i] = *(int*)(data + i * AdjacencySize + NeighbourId);
+        if (id >= 0)
+        {
+            if (id >= cache.Length) _neighbours = cache = cache.Length > id ? cache : [.. cache, .. new int[]?[Math.Max(id + 1, cache.Length * 2) - cache.Length]];
+            cache[id] = ids;
+        }
         return ids;
     }
+
+    private static volatile int[]?[] _neighbours = new int[]?[16384];
 
     /// <summary>The province's adjacency entries (AdjacencySize bytes each), none when it has no adjacency data.</summary>
     private static (nint Data, int Count) AdjacencyList(nint province)
