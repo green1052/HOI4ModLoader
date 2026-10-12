@@ -276,7 +276,7 @@ internal static unsafe class SettingsMods
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), stepped);
             var shownValue = Gui.FindTextBox(container, "hoimod_setting_value");
             Shown(shownValue, !isBool);
-            if (!isBool) Gui.SetText(shownValue, value == "" ? Loc.Get("HOIMOD_SETTING_NONE", "(none)") : Gui.Literal(value));
+            if (!isBool) Gui.SetText(shownValue, value == "" ? Loc.Get("HOIMOD_SETTING_NONE", "(none)") : Gui.Literal(Fit(value))); // the tooltip has it whole
         }
     }
 
@@ -288,7 +288,7 @@ internal static unsafe class SettingsMods
 
     /// <summary>
     /// Changes a number by a step that fits its size (1 for 0..99, 10 for 100..999, ...), or a text setting with choices to
-    /// the next or previous one (wrapping around); Shift: 10 steps.
+    /// the next or previous one (wrapping around); Shift: 10 steps; Ctrl (choices): to the next one with another initial.
     /// </summary>
     private static void Step(nint row, int direction)
     {
@@ -297,8 +297,7 @@ internal static unsafe class SettingsMods
         if (Loader.Config(_plugin).ChoicesOf(section, key) is { Count: > 0 } choices)
         {
             var at = Math.Max(0, choices.ToList().FindIndex(c => c.Equals(value, StringComparison.OrdinalIgnoreCase)));
-            var next = ((at + direction * (Gui.ShiftHeld ? 10 : 1)) % choices.Count + choices.Count) % choices.Count;
-            Save(section, key, choices[next], description);
+            Save(section, key, choices[Gui.CtrlHeld ? NextInitial(choices, at, direction) : Wrap(at + direction * (Gui.ShiftHeld ? 10 : 1), choices.Count)], description);
         }
         else if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole))
         {
@@ -310,6 +309,38 @@ internal static unsafe class SettingsMods
             var step = number == 0 ? 0.1 : Math.Pow(10, Math.Floor(Math.Log10(Math.Abs(number))) - 1);
             Save(section, key, Math.Round(number + direction * step * (Gui.ShiftHeld ? 10 : 1), 6).ToString(CultureInfo.InvariantCulture), description);
         }
+    }
+
+    private static int Wrap(int i, int count) => (i % count + count) % count;
+
+    /// <summary>
+    /// The first choice from <paramref name="at"/> on in <paramref name="direction"/> whose initial differs (going back: the
+    /// first of that initial's run), wrapping around; for Hangul the initial consonant.
+    /// </summary>
+    internal static int NextInitial(IReadOnlyList<string> choices, int at, int direction)
+    {
+        static char Initial(string s) => s.Length == 0 ? '\0' : s[0] is >= '가' and <= '힣' ? (char)(0x1100 + (s[0] - '가') / 588) : char.ToUpperInvariant(s[0]);
+        var i = at;
+        for (var step = 1; step < choices.Count; step++)
+        {
+            i = Wrap(at + direction * step, choices.Count);
+            if (Initial(choices[i]) != Initial(choices[at])) break;
+        }
+        if (direction < 0) // to the start of that run
+            while (Initial(choices[Wrap(i - 1, choices.Count)]) == Initial(choices[i]) && Wrap(i - 1, choices.Count) != at) i = Wrap(i - 1, choices.Count);
+        return i;
+    }
+
+    /// <summary>A value cut to fit its box (about 15 Latin letters; a Hangul or CJK one counts double).</summary>
+    internal static string Fit(string value)
+    {
+        var width = 0;
+        for (var i = 0; i < value.Length; i++)
+        {
+            width += value[i] >= 0x1100 ? 2 : 1;
+            if (width > 15) return value[..Math.Max(1, i - 1)] + "..";
+        }
+        return value;
     }
 
     [UnmanagedCallersOnly]

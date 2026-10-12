@@ -26,8 +26,10 @@ public class FontsTests
     {
         using (var gdi = new Fonts.Gdi("Malgun Gothic", 20, false)) Assert.Contains("맑은 고딕", gdi.FamilyNames());
         using (var gdi = new Fonts.Gdi("No Such Font 12345", 20, false)) Assert.DoesNotContain("No Such Font 12345", gdi.FamilyNames());
-        Assert.Contains("맑은 고딕", Fonts.Gdi.Families(129));
-        Assert.DoesNotContain(Fonts.Gdi.Families(129), f => f.StartsWith('@'));
+        var hangul = Fonts.Gdi.Families(129, '가');
+        Assert.Contains("맑은 고딕", hangul);
+        Assert.DoesNotContain("Segoe UI", hangul); // listed for Hangul, but only through font linking
+        Assert.DoesNotContain(hangul, f => f.StartsWith('@'));
         Assert.Equal("Malgun Gothic", Fonts.Fonts.FamilyName(File.ReadAllBytes(@"C:\Windows\Fonts\malgun.ttf")));
     }
 }

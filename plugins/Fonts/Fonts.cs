@@ -29,17 +29,17 @@ public sealed class Fonts : Plugin
         var header = Config.Bind("Fonts", "HeaderFont", "", "The same for titles (the fonts named *header*). Empty: Font.").Trim();
         var size = Math.Clamp(Config.Bind("Fonts", "SizePercent", 100,
             "Glyph size against the original font's line height (%): bigger or smaller text in the same lines."), 50, 150);
-        var keep = Config.Bind("Fonts", "Keep", "typewriter",
-            "Fonts that stay the game's own: comma-separated parts of their file names (e.g. typewriter,mapfont).").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var typewriter = Config.Bind("Fonts", "Typewriter", false,
+            "Also redraw the typewriter fonts (documents and reports); off: they keep the game's own look.");
         var dir = FontDir();
-        // The settings menu's arrows step through the installed fonts that have the language's characters.
-        var installed = new Lazy<IReadOnlyList<string>>(() => ["", .. Gdi.Families(dir switch
+        // The settings menu's arrows step through the installed fonts that really have the language's characters.
+        var installed = new Lazy<IReadOnlyList<string>>(() => ["", .. dir switch
         {
-            "gfx/fonts/korean" => 129,   // HANGEUL_CHARSET
-            "gfx/fonts/japanese" => 128, // SHIFTJIS_CHARSET
-            "gfx/fonts/chinese" => 134,  // GB2312_CHARSET
-            _ => 1,                      // DEFAULT_CHARSET: all
-        })]);
+            "gfx/fonts/korean" => Gdi.Families(129, '가'),   // HANGEUL_CHARSET
+            "gfx/fonts/japanese" => Gdi.Families(128, 'あ'), // SHIFTJIS_CHARSET
+            "gfx/fonts/chinese" => Gdi.Families(134, '中'),  // GB2312_CHARSET
+            _ => Gdi.Families(1, 'A'),                       // DEFAULT_CHARSET: all
+        }]);
         Config.Choices("Fonts", "Font", () => installed.Value);
         Config.Choices("Fonts", "HeaderFont", () => installed.Value);
         if (font == "" || !Loader.AtStartup) return; // a reload (a setting changed in the menu): the game read its fonts already
@@ -47,7 +47,7 @@ public sealed class Fonts : Plugin
 
         var gameDir = Path.GetDirectoryName(Loader.ModsDir)!;
         var fnts = Directory.GetFiles(Path.Combine(gameDir, dir), "*.fnt")
-            .Where(f => !keep.Any(k => Path.GetFileName(f).Contains(k, StringComparison.OrdinalIgnoreCase))).Order().ToList();
+            .Where(f => typewriter || !Path.GetFileName(f).Contains("typewriter", StringComparison.OrdinalIgnoreCase)).Order().ToList();
         var faces = new[] { font, header }.Distinct().ToDictionary(spec => spec, Face);
         foreach (var (spec, face) in faces)
         {
@@ -341,8 +341,12 @@ internal sealed unsafe class Gdi : IDisposable
         Face = new string(name, 0, Math.Max(0, GetTextFaceW(_dc, 64, name) - 1));
     }
 
-    /// <summary>Installed outline (TrueType/OpenType) families with characters of <paramref name="charSet"/>, sorted; vertical "@" variants left out.</summary>
-    public static List<string> Families(byte charSet)
+    /// <summary>
+    /// Installed outline (TrueType/OpenType) families listed for <paramref name="charSet"/> that have a glyph for
+    /// <paramref name="sample"/> (Windows lists some for a script they only reach through font linking), sorted; vertical
+    /// "@" variants left out.
+    /// </summary>
+    public static List<string> Families(byte charSet, char sample)
     {
         var dc = CreateCompatibleDC(0);
         var logFont = stackalloc byte[92]; // LOGFONTW, an empty face name: every family
@@ -356,7 +360,14 @@ internal sealed unsafe class Gdi : IDisposable
             handle.Free();
             DeleteDC(dc);
         }
-        return [.. found.Order(StringComparer.CurrentCulture)];
+        return [.. found.Where(f => Has(f, sample)).Order(StringComparer.CurrentCulture)];
+    }
+
+    private static bool Has(string face, char c)
+    {
+        using var gdi = new Gdi(face, 20, false);
+        ushort index;
+        return GetGlyphIndicesW(gdi._dc, &c, 1, &index, 1 /* mark missing */) != GdiError && index != 0xFFFF;
     }
 
     [UnmanagedCallersOnly]
