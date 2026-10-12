@@ -37,7 +37,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | AutoConstruction | Auto construction targets per building, auto supply, auto production | ✅ |
 | AutoTrade | Imports resources you are short of, cuts imports you no longer need, draws your trade routes | ✅ |
 | FrontLine | Front line micro (rotation, plugging, escape, attacks, reserves) plus battle plan and operation (blitz, pincer) hotkeys | ✅ |
-| ArmySupport | Air wings and railway guns for field marshals, railway gun positioning, airbase capacity, auto rebase | ✅ (field marshals: spread over armies; railway gun positioning: single player) |
+| ArmySupport | Air wings and railway guns for field marshals, railway gun positioning, airbase capacity, auto rebase, auto ground crews | ✅ (field marshals: spread over armies; railway gun positioning: single player) |
 | ChecksumPatcher | Keeps achievements with mods | ✅ |
 | Fonts | The game's text in an installed font or a .ttf/.otf file | ✅ |
 | Reroll | A fresh random seed at every load, so reloading doesn't replay the same dice | Single player only |
@@ -84,6 +84,7 @@ Front line micro a player does by hand, with the battle plan UI's own commands (
 - **Railway gun positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. The penalty and sea transfer are settings.
 - **Airbase capacity:** with air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
 - **Auto rebase:** a wing whose airbase reaches less than a share of its mission region (setting, 100% by default; 0 turns it off) flies to a usable airbase with room that reaches more, keeping its mission. Wings attached to an army are left to the game, which already does this.
+- **Auto ground crews** (off by default): More Ground Crews (+10 % air efficiency in a region for command power, given back when turned off) goes on where your air wings fought hardest in the last two days (10+ planes lost and shot down where enemy planes are active), two regions at most, while command power stays above the reserve (setting, 50 by default), and off again where they stopped fighting for three days or command power falls under the reserve. Only the regions it turned on are turned off; one you turn off yourself is left alone for the rest of the game. Your own commands (multiplayer works).
 - **Army organizer:** select divisions (drag a box, or click armies' and field marshals' cards) and press **Ctrl+Alt+G**. They are split into armies of at most the game's army size for a general (24 in vanilla), divisions standing near each other together; a whole army of at least half that size stays as it is. Each new army gets the best idle general, and all of them join the army group most of the divisions came from, or a new army group under the best idle field marshal. Armies without an idle general are left without one. The army list's own commands (multiplayer works). Setting: on/off.
 
 ### ChecksumPatcher
@@ -119,6 +120,7 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 - **Encirclement:** enemy salients are cut at their base instead of pushed head-on: where enemy ground bulges into the AI's line through a neck of one or two provinces and taking it cuts off 3+ enemy divisions for less than it costs, the local attacks and close air support of both flanks go for the neck until the pocket closes (a week at most).
 - **Railway guns:** the AI's railway guns go to the armies on its breakthrough axis first and stay there.
 - **Supply hubs:** where an AI country's divisions are low on supply, the railway from the hub feeding them to the capital is upgraded a level (one a week, the same hub's again after 60 days), cheap next to a hub. From 1941 on, where the divisions of an AI country with 60+ civilian factories starve with no hub within 3 provinces, it also builds one (weekly, two a month at most); a hub costs 20000, so earlier or poorer it doesn't. Vanilla's AI already upgrades and links existing hubs.
+- **Ground crews:** the AI spends spare command power on More Ground Crews (+10 % air efficiency in a region; 20 command power, given back when turned off), which vanilla's AI never uses: every two days, in the regions where its air wings fought hardest in the last three days (10+ planes lost and shot down where enemy planes are active), two at most, while 50 command power is left after the cost. Off again where its wings stopped fighting for a week, or one a pass while command power is under 50.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, never the checksum, so players without the loader can join the same game.
