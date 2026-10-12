@@ -5,7 +5,6 @@ namespace FrontLine;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
-
     [VTable] public const string LandCombat = "CLandCombat";
 }
 
@@ -14,10 +13,13 @@ public static class Signatures
 /// - Rotation: a worn-out division on a front line (low organisation or strength, not fighting, enemy next to it) comes off
 ///   the battle plan and rests a few provinces back, when another of our divisions on that front holds the same province
 ///   (so no province is left empty) and few enough of that front are resting.
-/// - Plugging: a defence of ours that is being lost gets the nearest fresh division (resting, unassigned, or from a quiet
-///   part of a front where another of ours stays) sent into the battle, where it joins the defence.
+/// - Plugging: a defence of ours that is being lost (or whose organisation runs out within two days at its rate of loss) gets
+///   fresh divisions that can walk there in time, sent into the battle, where they join the defence; a line province facing
+///   twice its divisions gets one before the attack (thicken), and empty ground of ours around a fresh breach is manned
+///   (cordon: defence in depth).
 /// - Escape: a front division in a salient whose way back narrows to a neck of one or two provinces next to the enemy
-///   pulls back through it, before the pocket closes.
+///   pulls back through it, before the pocket closes; a pocket mostly out of supply attacks toward friendly lines (breakout).
+/// - Lure (AI only): a defence being lost with both shoulders held and mobile divisions near is let go, to cut it off.
 /// - Attack: fresh divisions take empty enemy provinces next to the line and attack enemy divisions already surrounded with
 ///   at least as many of them (more behind forts), best targets first: pocket closing, then victory points, supply hubs,
 ///   airfields and ports, then front shortening; none their supply can't follow or that lengthen the front for nothing.
@@ -29,9 +31,10 @@ public static class Signatures
 ///   the crisis pin idle enemy stacks next to it with cheap attacks so they can't be moved in.
 /// - Ctrl+Alt+E activates every battle plan, Ctrl+Alt+H halts them (the plan window's own play button, for every group).
 /// - Ctrl+Alt+B / Ctrl+Alt+P: a blitz or a pincer with the selected armies (Operations.cs).
-/// Divisions taken off a front go back onto it once their job is done (rested, crisis over, post given up); one short of
-/// equipment or manpower goes back after MaxRestHours once its organisation is back. A reload forgets them: they stay where they are.
-/// With [AI] ApplyToAI (single player), AI countries get the same micro, each with its own bookkeeping (Side).
+/// Divisions taken off a front go back onto it once their job is done (rested, crisis over, post given up, the threat gone);
+/// one that can't recover goes back after MaxRestHours. The player's are written to cache\frontline_held.txt, so a load puts
+/// them back on their plan. With [AI] ApplyToAI (single player), AI countries get the same micro (not rotation: their front
+/// orders took the resting ones straight back), each with its own bookkeeping (Side).
 /// </summary>
 [Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class FrontLine : Plugin
@@ -44,25 +47,28 @@ public unsafe partial class FrontLine : Plugin
     private const int CombatsOfGameState = 0x268, DefenderOfCombat = 0x30, ProvinceOfCombat = 0x38, ProgressSlot = 25;
     private const int DivisionsOfSide = 0x20, ReservesOfSide = 0x100;
     private const int MaxRestSearch = 6, MaxPlugsPerTurn = 2, MaxEscapesPerTurn = 2, MaxAttacksPerTurn = 2;
-    private const int RestDepth = 1;          // provinces behind the line a division rests (none of its neighbours enemy): the nearest such, org recovers as fast there
     private const int MaxSwapsPerArmy = 2;    // sent to rest at a time, so a front never changes all at once
-    private const int MaxRestHours = 14 * 24; // short of equipment or manpower, strength may never come back: organisation is enough then
+    private const int MaxRestHours = 14 * 24; // resting this long, it goes back whatever its state (supply may never let it recover)
+    private const int GuardHours = 7 * 24;    // a plugging or thicken helper holds its defence that long at most
     private const long PendingMs = 30_000;    // a unit we gave orders to is left alone meanwhile (multiplayer: a round trip)
     private const long AiBudgetMs = 20;       // AI countries' turns per tick, round robin: the rest wait for the next tick
 
     private static readonly int[] PlanKeys = ['E', 'H']; // with Ctrl+Alt held: activate, halt
     private readonly bool[] _down = new bool[PlanKeys.Length];
 
-
     /// <summary>
-    /// What a division we moved does for us. Rest: rests (rotation, escape, plugging) and goes back once rested. Operation:
-    /// a blitz's or pincer's (Operations.cs). Done: its operation is over; it goes back as soon as it can take orders.
+    /// What a division we moved does for us. Rest: rests (rotation; an escape, Post = the province it left, while that
+    /// salient's neck is still closing) and goes back once rested. Guard: holds a defence it was sent into (plugging,
+    /// thicken) while enemy divisions stand next to it. Reserve, Counter, Depth, Cordon: fire brigade, second line and
+    /// breach walls (Defense.cs). Shuffle, Pin: a losing front's help (Shuffle.cs). Operation: a blitz's or pincer's
+    /// (Operations.cs). Done: its task is over; it goes back as soon as it can take orders.
     /// </summary>
-    private enum Job { Rest, Reserve, Counter, Depth, Shuffle, Pin, Operation, Done, Cordon }
+    private enum Job { Rest, Reserve, Counter, Depth, Shuffle, Pin, Operation, Done, Cordon, Guard }
 
     /// <summary>
     /// A division we moved. Group/Order: the order it goes back onto (0: none). Post: the province it holds (Reserve, Counter,
-    /// Depth, Shuffle) or attacks from (Pin). Target: what it attacks (Counter, Pin) or backs (Depth). Front: the front it serves.
+    /// Depth, Shuffle, Cordon, Guard), attacks from (Pin) or escaped from (Rest). Target: what it attacks (Counter, Pin), backs
+    /// (Depth) or walls in (Cordon). Front: the front it serves.
     /// </summary>
     private readonly record struct Held(Job Job, nint Group, int Order, int Since, int Post, int Target, (nint, int) Front);
 
@@ -114,7 +120,9 @@ public unsafe partial class FrontLine : Plugin
             "And this strength (%); after two weeks resting, organisation alone is enough (equipment or manpower may be short)."), 0, 100);
         _maxResting = Math.Clamp(Config.Bind("Rotation", "MaxRestingPercent", 25, "At most this share (%) of a front's divisions rests at once."), 1, 100);
         _plugging = Config.Bind("Plugging", "Plugging", true,
-            "Send the nearest fresh division into a defence of ours that is being lost; it joins the battle and goes back to its front afterwards.");
+            "Send fresh divisions into a defence of ours that is being lost (past LosingPercent, or its organisation gone within two days at its rate of loss), "
+            + "only ones that can walk there in time, two when it falls within a day; a line province facing twice its divisions gets one before the attack, "
+            + "and our empty provinces around ground the enemy took in the last two days are manned (cordon: defence in depth). They go back to their front once the threat is gone.");
         _losing = Math.Clamp(Config.Bind("Plugging", "LosingPercent", 50, "A defence counts as being lost when the attacker holds this share (%) of the battle's organisation (the battle bar)."), 50, 100);
         _plugRadius = Math.Clamp(Config.Bind("Plugging", "PlugRadius", 6, "How far (provinces) a helper may come from."), 1, MaxRestSearch);
         _lure = Config.Bind("Plugging", "Lure", true,
@@ -128,20 +136,20 @@ public unsafe partial class FrontLine : Plugin
             + "Best targets first: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front; none our supply can't follow (unless it closes a pocket) or that lengthen the front by more than two provinces for nothing.");
         _odds = Math.Max(0, Config.Bind("Attack", "AttackOdds", 200,
             "Also attack an enemy province its neighbours of ours can outgun this many times (%: 200 = twice its defenders' power, more behind forts, in rough ground or across a river), with fresh divisions from all of them, each keeping one. "
-            + "Your divisions only on a battle plan that is running. 0: off."));
+            + "Your divisions only on a battle plan that is running. 0: off (mop-up too)."));
         _fireBrigade = Config.Bind("FireBrigade", "FireBrigade", true,
             "Keep a few armored or motorized divisions per front a province behind the line, off its battle plan. Where the enemy breaks in (a province of ours lost in the last two days, a landing, enemy troops in our provinces), "
             + "the nearest ones counterattack with enough to win (forts counted, each counting double), then go back to their post. An AI country without spare mobile divisions uses infantry.");
         _depth = Config.Bind("DepthDefense", "DepthDefense", true,
             "Key line provinces (ports, victory points, river crossings, cities and mountains) get a second division a province behind them, from spare divisions of a front; it stays while the line holds there.");
         _shuffle = Config.Bind("Shuffle", "Shuffle", true,
-            "When a front is losing (three provinces lost in two days or defences being lost, or facing twice its divisions), spare fresh divisions of quiet fronts reinforce its most pressed provinces and go back to their own front a day after the crisis. "
+            "When a front is losing (its line provinces lost in two days and defences being lost three or more together, or facing twice its divisions), spare fresh divisions of quiet fronts reinforce its most pressed provinces and go back to their own front a day after the crisis. "
             + "Meanwhile fresh divisions next to the crisis attack idle enemy stacks of one or two divisions (one attacker each, while its organisation holds) so they are locked in combat and can't be moved in. "
             + "A front that only faces an encircled pocket keeps twice the pocket's divisions (two at least); the rest go onto their army's biggest other front.");
         if (Config.Bind("Keys", "BattlePlanKeys", true, "Ctrl+Alt+E activates every battle plan at once, Ctrl+Alt+H halts them."))
             MainThread.Every(TimeSpan.FromMilliseconds(30), PollKeys);
         _ai = Config.Bind("AI", "ApplyToAI", false,
-            "Single player: AI countries get the same front line micro (rotation, plugging, escape, attack, fire brigade, depth defence and shuffle, with the settings above). "
+            "Single player: AI countries get the same front line micro (plugging, escape, attack, fire brigade, depth defence and shuffle, with the settings above; not rotation: their front orders took resting divisions straight back), and the lure. "
             + "AI Assist's own rotation, escape, reserves, second line and local attacks stand aside meanwhile, and its regrouping hooks leave these divisions alone; without AI Assist the AI's regrouping may take them back.");
         var operations = BindOperations();
         var micro = _rotation || _plugging || _escape || _attack || _fireBrigade || _depth || _shuffle;
@@ -159,6 +167,7 @@ public unsafe partial class FrontLine : Plugin
             _breakouts.Clear();
             _aiTurnHour.Clear();
             _lured.Clear();
+            _orgSeen.Clear();
             _orders.Clear();
             _operations.Clear();
             _opOrdered.Clear();
@@ -308,7 +317,7 @@ public unsafe partial class FrontLine : Plugin
         }
         _eta.Clear();
         _losingNow = _plugging || _shuffle ? LosingDefences(tag) : [];
-        if (_fireBrigade || _depth || _shuffle) Survey(country, tag, fronts.Values);
+        if (_fireBrigade || _depth || _shuffle || _plugging) Survey(country, tag, fronts.Values); // the lines, lost ground (cordon's breaches)
 
         Return(tag);
         // Not for the AI: its front orders take a division off its order straight back, so it walked to rest and back on and
@@ -337,6 +346,7 @@ public unsafe partial class FrontLine : Plugin
     {
         var landCombat = Sig.VTable(Signatures.LandCombat);
         var losing = new Dictionary<nint, double>();
+        foreach (var (key, seen) in _orgSeen.ToArray()) if (key.Item1 == tag && Game.Hour - seen.Hour is < 0 or >= 24) _orgSeen.Remove(key); // battles over
         foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState))
         {
             if (combat == 0 || *(nint*)combat != landCombat) continue;
@@ -397,12 +407,15 @@ public unsafe partial class FrontLine : Plugin
     }
 
     /// <summary>
-    /// Divisions we hold go back onto their front once their job is done; resting ones once rested. Ones the player gave
+    /// Divisions we hold go back onto their front once their job is done: resting ones once rested (or after MaxRestHours,
+    /// whatever their state: supply may never let them recover), escaped ones once their salient's neck no longer closes,
+    /// guards once no enemy division stands next to their post (or it is lost, or a week has passed). Ones the player gave
     /// other orders (or moved to another army) are forgotten. Run by the operations' turns too (Done), whose orders
-    /// (_orders) may be a turn old or empty: our commands' round trips (PendingMs) outlast that.
+    /// (_orders) may be the last turn's, another country's: our commands' round trips (PendingMs) outlast that.
     /// </summary>
     private void Return(int tag)
     {
+        var country = Game.Country(tag);
         foreach (var (unit, held) in _held.ToArray())
         {
             if (_pending.ContainsKey(unit)) continue; // our command is still on its way
@@ -417,9 +430,19 @@ public unsafe partial class FrontLine : Plugin
                 Release(unit, tag);
                 continue;
             }
-            if (held.Job != Job.Rest || Division.Walking(unit) || Org(unit) < _returnOrg) continue;
-            if (Str(unit) < _returnStrength && Game.Hour - held.Since < MaxRestHours) continue;
-            if (Release(unit, tag)) Log.Info($"a rested division ({Org(unit):0}% organisation, {Str(unit):0}% strength) is back on its front");
+            if (Division.Walking(unit) || country == 0) continue;
+            var post = Game.Province(held.Post);
+            if (held.Job == Job.Guard)
+            {
+                var holding = post != 0 && Province.Controller(post) == tag && EnemiesNext(country, tag, post) > 0 && Game.Hour - held.Since < GuardHours;
+                if (!holding && !Division.Fighting(unit)) Release(unit, tag);
+                continue;
+            }
+            if (held.Job != Job.Rest) continue;
+            var overdue = Game.Hour - held.Since >= MaxRestHours;
+            if (!overdue && post != 0 && Province.Controller(post) == tag && Neck(country, tag, post) >= 0) continue; // escaped: its salient still closing
+            if (!overdue && (Org(unit) < _returnOrg || Str(unit) < _returnStrength)) continue;
+            if (Release(unit, tag)) Log.Info($"a division ({Org(unit):0}% organisation, {Str(unit):0}% strength) is back on its front after {Game.Hour - held.Since} hours off it");
         }
     }
 
@@ -449,7 +472,6 @@ public unsafe partial class FrontLine : Plugin
         }
     }
 
-    /// <summary>Our defences being lost get the nearest fresh division: resting, unassigned, or spare in a quiet part of a front.</summary>
     /// <summary>
     /// Defences being lost (the attacker past LosingPercent of the battle, or the defenders' organisation running out within
     /// EarlyPlugHours at its rate of loss) get fresh divisions that can walk there before it runs out, the soonest to fall
@@ -472,8 +494,7 @@ public unsafe partial class FrontLine : Plugin
             {
                 var helper = TakeInTime(tag, province, _plugRadius, helpers, eta);
                 if (helper == 0) break;
-                Send(helper, id, Job.Rest); // arriving, it joins the defence as a reserve
-                sent.Add(helper);
+                if (Send(helper, id, Job.Guard, id)) sent.Add(helper); // arriving, it joins the defence as a reserve
             }
             if (sent.Count == 0) continue;
             _sent[id] = ([.. sent], false);
@@ -511,7 +532,7 @@ public unsafe partial class FrontLine : Plugin
             var helper = Take(tag, province, MaxRestSearch, helpers);
             if (helper == 0) continue;
             var id = Game.Id(province);
-            Send(helper, id, Job.Rest); // arriving, it joins the defence as a reserve
+            if (!Send(helper, id, Job.Guard, id)) continue;
             _sent[id] = ([helper], false);
             thickened++;
             Log.Info($"plugging: a fresh division thickens a thin spot ({ours} of ours against {enemy} enemy division(s) next to it)");
@@ -546,7 +567,8 @@ public unsafe partial class FrontLine : Plugin
         }
         if (reserves < MinLureReserves || attackers > 2 * reserves) return false;
         var id = Game.Id(province);
-        if (!_lured.TryGetValue(id, out var at) || Game.Hour - at is < 0 or >= LureHours)
+        foreach (var (lured, hour) in _lured.ToArray()) if (Game.Hour - hour is < 0 or >= LureHours) _lured.Remove(lured);
+        if (!_lured.TryGetValue(id, out var at))
         {
             _lured[id] = Game.Hour;
             Log.Info($"  #{tag} lure: lets {attackers} enemy division(s) into province {id} (both shoulders held, {reserves} mobile division(s) within {LureRadius})");
@@ -587,15 +609,8 @@ public unsafe partial class FrontLine : Plugin
     }
 
     /// <summary>The pool's division closest to <paramref name="target"/> (breadth first over our provinces), taken out of the pool; 0 if none in reach.</summary>
-    private static nint Take(int tag, nint target, int radius, Dictionary<nint, List<nint>> pool)
-    {
-        if (pool.Count == 0) return 0; // nothing to take: no search of the whole radius (stretched AIs, every turn)
-        var at = Search(tag, target, radius, (p, _) => pool.ContainsKey(p));
-        if (at == 0) return 0;
-        var unit = pool[at].MaxBy(Org);
-        if (pool[at].Remove(unit) && pool[at].Count == 0) pool.Remove(at);
-        return unit;
-    }
+    private static nint Take(int tag, nint target, int radius, Dictionary<nint, List<nint>> pool) =>
+        TakeInTime(tag, target, radius, pool, double.PositiveInfinity);
 
     /// <summary>Our provinces breadth first from <paramref name="from"/> (not itself), up to <paramref name="radius"/> steps: the first one <paramref name="found"/> (given its depth), or 0.</summary>
     private static nint Search(int tag, nint from, int radius, Func<nint, int, bool> found)
@@ -619,9 +634,13 @@ public unsafe partial class FrontLine : Plugin
         return 0;
     }
 
-    /// <summary>Moves the unit for <paramref name="job"/> (off its order first, unless pinning), booked so no other feature takes it.</summary>
-    private void Send(nint unit, int province, Job job, int post = 0, int target = 0, (nint, int) front = default)
+    /// <summary>
+    /// Moves the unit for <paramref name="job"/> (off its order first, unless pinning), booked so no other feature takes it.
+    /// False, and nothing done, when its way runs through enemy divisions (<see cref="Commands.ClearWay"/>).
+    /// </summary>
+    private bool Send(nint unit, int province, Job job, int post = 0, int target = 0, (nint, int) front = default)
     {
+        if (!Commands.ClearWay(unit, province)) return false;
         var location = Division.Location(unit);
         _orders.TryGetValue(unit + MemberOfUnit, out var order);
         if (_holding.TryGetValue((order, location), out var n)) _holding[(order, location)] = n - 1; // one fewer holds it
@@ -635,6 +654,7 @@ public unsafe partial class FrontLine : Plugin
         Commands.Move(unit, province, _force);
         _pending[unit] = _now + PendingMs;
         if (_force) _recent[unit] = Game.Hour;
+        return true;
     }
 
     /// <summary>Logs who was sent where, for what; [Debug] AiActionArrows: an arrow from where the unit stands to where it was sent.</summary>
@@ -685,7 +705,7 @@ public unsafe partial class FrontLine : Plugin
         && (_held.ContainsKey(unit) || !_recent.ContainsKey(unit)); // an AI division its front order took back: not again for RepeatHours
 
     // The AI's front orders put a division we took off straight back on: sent again it walked to and fro (rotation, escape
-    // in Shandong every few hours). Once back on its order, it is left alone for three days.
+    // in Shandong every few hours). An AI division we sent isn't sent again for three days from then, unless still ours.
     private const int RepeatHours = 72;
     private Dictionary<nint, int> _recent = [];
 
@@ -696,20 +716,20 @@ public unsafe partial class FrontLine : Plugin
     private static double Org(nint unit) => Division.Organisation(unit) * 100.0 / Native.FixedPoint;
     private static double Str(nint unit) => Division.Strength(unit) * 100.0 / Native.FixedPoint;
 
-    /// <summary>A province of ours at least RestDepth steps behind the unit, with no enemy-held neighbour, reached through our own provinces; -1 if none nearby.</summary>
+    /// <summary>The nearest province of ours behind the unit with no enemy-held neighbour, reached through our own provinces; -1 if none nearby.</summary>
     // ponytail: looks at who holds provinces, not at enemy units inside ours (paratroopers, a breakthrough in progress).
     private int RestProvince(nint country, int tag, nint unit)
     {
         var location = Division.Location(unit);
-        var rest = location == 0 ? 0 : Search(tag, location, MaxRestSearch, (p, depth) => depth >= RestDepth && !NextToEnemy(country, tag, p));
+        var rest = location == 0 ? 0 : Search(tag, location, MaxRestSearch, (p, _) => !NextToEnemy(country, tag, p));
         return rest == 0 ? -1 : Game.Id(rest);
     }
 
-    /// <summary>Enemy divisions stand next to the unit: only then is a worn division at risk on the line (it recovers as fast there otherwise).</summary>
     /// <summary>Enemy divisions in the provinces next to <paramref name="province"/>.</summary>
     private static int EnemiesNext(nint country, int tag, nint province) =>
         Game.Neighbours(province).Sum(n => Game.Province(n) is var p && p != 0 && Province.Enemy(country, tag, p) ? Province.Divisions(p) : 0);
 
+    /// <summary>Enemy divisions stand next to the unit: only then is a worn division at risk on the line (it recovers as fast there otherwise).</summary>
     private bool InContact(nint country, int tag, nint unit)
     {
         var location = Division.Location(unit);
@@ -755,7 +775,7 @@ public unsafe partial class FrontLine : Plugin
             var group = Game.Resolve(groupRef);
             if (unit == 0 || group == 0 || Division.Commander(unit) != tag || Division.Group(unit) != group || OrderOf(unit, group) != 0
                 || !Division.Ready(unit, tag, headquarters: true) || !Commands.Assign(unit, group, order)) continue; // an HQ an older version took
-            _pending[unit] = Environment.TickCount64 + PendingMs;
+            SideOf(tag).Pending[unit] = Environment.TickCount64 + PendingMs; // its side's: Begin hasn't swapped it in yet
             restored++;
         }
         if (restored > 0) Log.Info($"put {restored} division(s) the last game had taken off their battle plan back onto it");

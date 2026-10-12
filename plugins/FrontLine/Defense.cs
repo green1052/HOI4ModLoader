@@ -8,7 +8,7 @@ public unsafe partial class FrontLine
 
     private const int NeckWidth = 2, MaxNeckSearch = 8, MaxSalient = 20;
     private const int MaxCutOff = 30, MaxBreakoutDistance = 6, BreakoutHours = 24, BreakoutOrg = 30;
-    private readonly Dictionary<int, int> _breakouts = []; // pocket (its lowest province id) -> game hour of its last breakout
+    private readonly Dictionary<(int, int), int> _breakouts = []; // (tag, pocket's lowest province id) -> game hour of its last breakout
 
     /// <summary>
     /// Our divisions in ground of ours (and allies') cut off from the rest by land and sea, up to MaxCutOff provinces, most of
@@ -18,7 +18,7 @@ public unsafe partial class FrontLine
     private void Breakout(nint country, int tag, nint[] units)
     {
         var hour = Game.Hour;
-        foreach (var (key, at) in _breakouts.ToArray()) if (hour - at is < 0 or > 30 * 24) _breakouts.Remove(key);
+        foreach (var (key, at) in _breakouts.ToArray()) if (hour - at is < 0 or >= BreakoutHours) _breakouts.Remove(key);
         var walked = new HashSet<int>();
         foreach (var unit in units)
         {
@@ -28,7 +28,7 @@ public unsafe partial class FrontLine
             if (region == null) continue; // part of the main body
             if (region.Any(p => Game.Neighbours(p).Any(n => Game.Province(n) is var q && q != 0 && Province.Controller(q) == 0)))
                 continue; // on the coast: the sea keeps it supplied and reachable (a colony, a beachhead), no pocket
-            var key = region.Min(Game.Id);
+            var key = (tag, region.Min(Game.Id));
             if (_breakouts.TryGetValue(key, out var last) && hour - last is >= 0 and < BreakoutHours) continue;
             var target = WayOut(country, tag, region);
             if (target == 0) continue; // nothing friendly near: an overseas holding, not a pocket
@@ -109,7 +109,7 @@ public unsafe partial class FrontLine
             if (escaped.TryGetValue(Game.Id(location), out var since) && since != Game.Hour) continue; // this turn's own escapes go on
             if (!necks.TryGetValue(location, out var to)) necks[location] = to = Neck(country, tag, location);
             if (to < 0) continue;
-            Send(unit, to, Job.Rest);
+            if (!Send(unit, to, Job.Rest, Game.Id(location))) continue; // post: where it escaped from, held off its order while that salient closes
             escaped[Game.Id(location)] = Game.Hour;
             escapes++;
             Log.Info("escape: a division pulls back from a salient about to be cut off");

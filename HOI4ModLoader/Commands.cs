@@ -122,9 +122,10 @@ public static unsafe class Commands
 
     /// <summary>
     /// A land path from the unit to <paramref name="target"/> through no province holding divisions at war with it (the
-    /// target may: an attack); true too when the search gives up, so long walks are left to the game.
+    /// target may: an attack); true too when the search gives up, so long walks are left to the game. What
+    /// <see cref="Move"/> checks first.
     /// </summary>
-    private static bool ClearWay(nint unit, int target)
+    public static bool ClearWay(nint unit, int target)
     {
         var from = Division.Location(unit);
         var tag = Division.Commander(unit);
