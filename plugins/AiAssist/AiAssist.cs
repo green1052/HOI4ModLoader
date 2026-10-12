@@ -77,7 +77,7 @@ public unsafe partial class AiAssist : Plugin
             + "at least five provinces away, so its reserves move there; the push waits meanwhile.") && _axis;
         _timing = Config.Bind("AI", "OffensiveTiming", true,
             "Needs HoldTheLine. The AI starts a battle plan's offensive only once its divisions are ready: not while they average under 60% organisation, "
-            + "nor while over 30% of them are still on their way to the line.") && _holdLine;
+            + "nor while over 30% of them are still on their way to the line, nor while the enemy holds over 70% of the air over most of them, nor while most of them stand in mud.") && _holdLine;
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
             + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "

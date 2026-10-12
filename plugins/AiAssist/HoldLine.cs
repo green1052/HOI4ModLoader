@@ -551,6 +551,8 @@ public unsafe partial class AiAssist
         if (port > 0) return 1000 + port;
         var key = 3 * Math.Min(Province.VictoryPoints(province), 30);
         if ((Province.TerrainCategory(province) & (Province.Mountain | Province.Urban)) != 0) key += 25;
+        // The wall around an enemy pocket (Yantai's six divisions in one province): a hole there lets it break out.
+        if (Game.Neighbours(province).Any(id => Game.Province(id) is var e && e != 0 && Province.Divisions(e) > 0 && Province.Encircled(country, tag, e))) key += KeyHole;
         foreach (var id in Game.Neighbours(province))
         {
             var p = Game.Province(id);
@@ -722,7 +724,51 @@ public unsafe partial class AiAssist
         return !_timing || order == 0 || TimeToAttack(order, *(int*)tag, hour);
     }
 
-    private const int MinAttackOrg = 60, MaxGatheringPercent = 30;
+    private const int MinAttackOrg = 60, MaxGatheringPercent = 30, MaxEnemyAirPercent = 70;
+    private const int RegionOfProvince = 0xC8; // CProvince -> its strategic region
+    // The weather manager (gamestate+0x688): province records of 0x180 bytes by province id at +0x10, the mud flag at +0x130
+    // (the set_mud console command 0x140284FC0 sets it).
+    private const int WeatherOfGameState = 0x688, ProvincesOfWeather = 0x10, WeatherRecordSize = 0x180, MudOfWeather = 0x130;
+
+    /// <summary>Most of the order's divisions stand in muddy provinces. AI threads, read only.</summary>
+    private static bool Muddy(ReadOnlySpan<nint> members)
+    {
+        var weather = Game.State == 0 ? 0 : *(nint*)(Game.State + WeatherOfGameState);
+        var records = weather == 0 ? 0 : *(nint*)(weather + ProvincesOfWeather);
+        if (records == 0) return false;
+        var muddy = 0;
+        foreach (var member in members)
+            if (Division.Location(member - MemberOfUnit) is var at && at != 0 && *(byte*)(records + (nint)Game.Id(at) * WeatherRecordSize + MudOfWeather) != 0) muddy++;
+        return muddy * 2 > members.Length;
+    }
+
+    /// <summary>
+    /// The enemy's share (%) of air superiority over most of the order's divisions, when over MaxEnemyAirPercent; 0 otherwise
+    /// (or with no air war there). From the country's strategic air records (as AirRetreat reads them). AI threads.
+    /// </summary>
+    private static int EnemyAirOver(ReadOnlySpan<nint> members, int tag)
+    {
+        var air = Game.StrategicAir(tag);
+        if (air == 0) return 0;
+        var records = Native.PdxArray<byte>(air + SuperiorityRecords);
+        int over = 0, counted = 0;
+        long shares = 0;
+        foreach (var member in members)
+        {
+            var at = Division.Location(member - MemberOfUnit);
+            var region = at == 0 ? 0 : *(nint*)(at + RegionOfProvince);
+            var id = region == 0 ? 0 : *(int*)(region + SuperiorityIdOfRegion);
+            if (id <= 0 || id >= records.Length) continue;
+            var record = *(nint*)(air + SuperiorityRecords) + (nint)id * SuperiorityRecordSize;
+            long ours = *(long*)(record + OurSuperiority), enemy = *(long*)(record + EnemySuperiority);
+            if (enemy <= 0) continue;
+            counted++;
+            var share = enemy * 100 / (ours + enemy);
+            shares += share;
+            if (share > MaxEnemyAirPercent) over++;
+        }
+        return over * 2 > members.Length && counted > 0 ? (int)(shares / counted) : 0;
+    }
     private static bool _timing;
     private static int _waited;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> WaitedAt = new(); // order -> hour last logged
@@ -745,6 +791,8 @@ public unsafe partial class AiAssist
         }
         var why = org < (long)MinAttackOrg * members.Length ? $"its divisions are at {org / members.Length}% organisation"
             : walking * 100 > MaxGatheringPercent * members.Length ? $"{walking} of its {members.Length} divisions are still on their way"
+            : EnemyAirOver(members, tag) is var air and > 0 ? $"the enemy holds {air}% of the air over it"
+            : Muddy(members) ? "most of its divisions stand in mud"
             : null;
         if (why == null) return true;
         Interlocked.Increment(ref _waited);
