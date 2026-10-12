@@ -1,5 +1,5 @@
 ﻿l_korean:
     com.green1052.queues.name:0 "대기열"
-    com.green1052.queues.desc:0 "기술, 중점, 정보부 업그레이드를 Shift+클릭해 예약하면 자리가 비는 대로 시작합니다. 고문, 국민정신, 법, 결정은 정치력이 모이는 대로 실행합니다."
+    com.green1052.queues.desc:0 "기술·중점·정보부 업그레이드를 예약해 두면 자리가 나는 대로 시작합니다.\n- Shift+클릭: 예약/취소(순서 번호 표시)\n- 고문·국민정신·법·결정은 정치력이 모이는 대로 실행\n멀티에서도 동작."
     com.green1052.queues.PoliticalPower:0 "정치력 대기열"
-    com.green1052.queues.PoliticalPower.desc:0 "국민정신, 법, 고문, 결정을 Shift+클릭해 예약하면 정치력이 모이는 대로 실행합니다."
+    com.green1052.queues.PoliticalPower.desc:0 "국민정신·법·고문·결정을 Shift+클릭해 예약하면 정치력이 모이는 대로 실행합니다."

@@ -1,6 +1,6 @@
 l_english:
     com.green1052.autotrade.auto:0 "Auto"
-    com.green1052.autotrade.desc:0 "Shift+click a resource in the trade view: its shortage is imported from your subjects, your faction, then the biggest seller, and imports it no longer needs are cut back. Ctrl+Alt+C draws your trade routes on any map mode."
+    com.green1052.autotrade.desc:0 "Shift+click a resource in the trade view to turn auto trade on or off for it.\n- Shortages are imported from your subjects, then your faction, then the biggest seller\n- Imports no longer needed are cut, in reverse order\n- Ctrl+Alt+C: your trade routes on any map mode\nWorks in multiplayer."
     com.green1052.autotrade.Surplus:0 "Surplus to keep"
-    com.green1052.autotrade.Surplus.desc:0 "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals. Imports are cut once the balance is a whole import step above it."
+    com.green1052.autotrade.Surplus.desc:0 "Import until the balance is this much, not just 0 (a buffer for new factories and lost deals).\nImports are cut once the balance is a whole import step above it."
     com.green1052.autotrade.AlliesFirst:0 "Allies first"
