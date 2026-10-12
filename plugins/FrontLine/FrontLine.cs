@@ -74,6 +74,7 @@ public unsafe partial class FrontLine : Plugin
         public readonly Dictionary<int, (nint[] Units, bool Attack)> Sent = [];
         public readonly Dictionary<int, (int Hour, (nint, int) Front)> LastSeen = [];
         public readonly Dictionary<(nint, int), int> Crisis = [];
+        public readonly Dictionary<nint, int> Recent = []; // AI divisions we sent: unit -> game hour
     }
 
     private readonly Dictionary<int, Side> _sides = [];                     // tag -> its bookkeeping
@@ -218,7 +219,8 @@ public unsafe partial class FrontLine : Plugin
     {
         _game.Check();
         var side = SideOf(tag);
-        (_pending, _held, _sent, _lastSeen, _crisis) = (side.Pending, side.Held, side.Sent, side.LastSeen, side.Crisis);
+        (_pending, _held, _sent, _lastSeen, _crisis, _recent) = (side.Pending, side.Held, side.Sent, side.LastSeen, side.Crisis, side.Recent);
+        foreach (var (unit, hour) in _recent.ToArray()) if (Game.Hour - hour is < 0 or >= RepeatHours) _recent.Remove(unit);
         _force = tag != Game.ControlledTag;
         var country = Game.Country(tag);
         units = [];
@@ -533,6 +535,7 @@ public unsafe partial class FrontLine : Plugin
         });
         Commands.Move(unit, province, _force);
         _pending[unit] = _now + PendingMs;
+        if (_force) _recent[unit] = Game.Hour;
     }
 
     /// <summary>Logs who was sent where, for what; [Debug] AiActionArrows: an arrow from where the unit stands to where it was sent.</summary>
@@ -579,7 +582,13 @@ public unsafe partial class FrontLine : Plugin
 
     /// <summary><see cref="Division.Ready"/> (can take orders now), and not just ordered.</summary>
     private bool Ready(nint unit, int tag, long now) =>
-        Division.Ready(unit, tag) && !(_pending.TryGetValue(unit, out var until) && now < until) && !Jobs.Taken(unit, Info.Id); // AI Assist's posts stay
+        Division.Ready(unit, tag) && !(_pending.TryGetValue(unit, out var until) && now < until) && !Jobs.Taken(unit, Info.Id) // AI Assist's posts stay
+        && (_held.ContainsKey(unit) || !_recent.ContainsKey(unit)); // an AI division its front order took back: not again for RepeatHours
+
+    // The AI's front orders put a division we took off straight back on: sent again it walked to and fro (rotation, escape
+    // in Shandong every few hours). Once back on its order, it is left alone for three days.
+    private const int RepeatHours = 72;
+    private Dictionary<nint, int> _recent = [];
 
     /// <summary>Ready, and doing no job for us.</summary>
     private bool Free(nint unit, int tag, long now) => Ready(unit, tag, now) && !_held.ContainsKey(unit);
