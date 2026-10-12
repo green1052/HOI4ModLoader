@@ -103,14 +103,53 @@ public static unsafe class Commands
     private const int MoveSize = 0x88;
     private static delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;
 
-    /// <summary>Moves <paramref name="unit"/> to <paramref name="province"/> (clearing its queue, as the AI moves units) if the game accepts it.</summary>
+    /// <summary>
+    /// Moves <paramref name="unit"/> to <paramref name="province"/> (clearing its queue, as the AI moves units) if the game accepts
+    /// it and the province can be reached by land without passing enemy divisions: the game's path goes straight through them,
+    /// and the unit attacked whatever stood on its way (a pocket between it and its post).
+    /// </summary>
     public static bool Move(nint unit, int province, bool force = false)
     {
+        if (!ClearWay(unit, province)) return false;
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment
         if (_move == null) _move = (delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint>)Sig.Find(MoveSig);
         var cmd = Allocator.AllocZeroed(MoveSize);
         _move(cmd, unit, province, 1, 2, 0, 0, 0, 0, 0);
         return TryPost(cmd, force);
+    }
+
+    private const int MaxWaySearch = 4000; // provinces looked at before giving up (and moving anyway)
+
+    /// <summary>
+    /// A land path from the unit to <paramref name="target"/> through no province holding divisions at war with it (the
+    /// target may: an attack); true too when the search gives up, so long walks are left to the game.
+    /// </summary>
+    private static bool ClearWay(nint unit, int target)
+    {
+        var from = Division.Location(unit);
+        var tag = Division.Commander(unit);
+        var country = Game.Country(tag);
+        if (from == 0 || country == 0 || Game.Id(from) == target) return true;
+        var seen = new HashSet<int> { Game.Id(from) };
+        var queue = new Queue<nint>();
+        queue.Enqueue(from);
+        while (queue.Count > 0 && seen.Count < MaxWaySearch)
+            foreach (var id in Game.Neighbours(queue.Dequeue()))
+            {
+                if (!seen.Add(id)) continue;
+                if (id == target) return true;
+                var p = Game.Province(id);
+                if (p == 0 || Province.Controller(p) == 0 || Hostile(country, p)) continue; // sea, wasteland, or enemy troops on the way
+                queue.Enqueue(p);
+            }
+        return queue.Count > 0;
+    }
+
+    private static bool Hostile(nint country, nint province)
+    {
+        foreach (var u in Province.Units(province))
+            if (u != 0 && Division.IsLand(u) && Game.AtWar(country, Division.Commander(u))) return true;
+        return false;
     }
 
     /// <summary>COrderUnassignCommand ctor (mem[0x50], CArmy* unit, COrdersGroup* group, bool ungroup, bool alsoParent): off every order, into the army's reserve.</summary>
