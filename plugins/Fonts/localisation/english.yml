@@ -1,7 +1,7 @@
 ﻿l_english:
-    com.green1052.fonts.desc:0 "The game's text in a font you choose: pick an installed font from the Font setting's list, or set the path of a .ttf/.otf file in the config file (HOI4ModLoader\config\com.green1052.fonts.cfg). Takes effect when the game is restarted."
+    com.green1052.fonts.desc:0 "The game's text in a font you choose: pick an installed font from the list the Font setting's right arrow opens, or set the path of a .ttf/.otf file in the config file (HOI4ModLoader\config\com.green1052.fonts.cfg). Takes effect when the game is restarted."
     com.green1052.fonts.Font:0 "Font"
-    com.green1052.fonts.Font.desc:0 "The font for the game's text: its list button shows the installed fonts, 8 a page, to tick one (characters a font lacks keep the game's own glyphs); the config file also takes the path of a .ttf/.otf/.ttc file. (none): the game's own fonts. Takes effect when the game is restarted."
+    com.green1052.fonts.Font.desc:0 "The font for the game's text: its right arrow lists the installed fonts, 8 a page, to tick one (characters a font lacks keep the game's own glyphs); the config file also takes the path of a .ttf/.otf/.ttc file. (none): the game's own fonts. Takes effect when the game is restarted."
     com.green1052.fonts.HeaderFont:0 "Title font"
     com.green1052.fonts.HeaderFont.desc:0 "The same for titles (the fonts named *header*). (none): Font."
     com.green1052.fonts.SizePercent:0 "Size (%)"

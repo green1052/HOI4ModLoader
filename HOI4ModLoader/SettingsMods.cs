@@ -12,7 +12,7 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// A "Mods" tab in the game's settings window: a checkbox per plugin to switch it on or off (hover for what it does), and
-/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers, a list to pick from for text with choices; pages of 8, with arrows by
+/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers, ▶ to a list to pick from for text with choices; pages of 8, with arrows by
 /// the title when there are more). Changes are written to the
 /// plugin's config and every plugin reloads. The tab comes from the GuiPatch above (built from the
 /// installed game's interface\settings.gui at startup); without it nothing changes.
@@ -136,7 +136,6 @@ internal static unsafe class SettingsMods
             BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), &OnDecrease, row);
             BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), &OnIncrease, row);
             BindCheckBox(Gui.Find(container, CheckBoxSlot, "hoimod_setting_check"), &OnSettingToggle, row);
-            BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_pick"), &OnPick, row);
             var setting = row;
             Gui.SetTooltip(Gui.FindTextBox(container, "hoimod_setting_label"),
                 () => _pick == null && _first + setting < _entries.Count ? SettingTooltip(_entries[_first + setting]) : "");
@@ -290,8 +289,7 @@ internal static unsafe class SettingsMods
             Shown(check, isBool);
             if (isBool) Check(check, on);
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), stepped);
-            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), stepped);
-            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_pick"), listed);
+            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), stepped || listed); // listed: opens the choices
             var shownValue = Gui.FindTextBox(container, "hoimod_setting_value");
             Shown(shownValue, !isBool);
             if (!isBool) Gui.SetText(shownValue, Display(value)); // the tooltip has it whole
@@ -310,17 +308,20 @@ internal static unsafe class SettingsMods
 
     private static string Display(string value) => value == "" ? Loc.Get("HOIMOD_SETTING_NONE", "(none)") : Gui.Literal(Fit(value));
 
-    /// <summary>A text setting's list button: its choices in the rows, a page at a time, starting at the current one's page.</summary>
-    [UnmanagedCallersOnly]
-    private static void OnPick(nint row) => Guard(() =>
+    /// <summary>
+    /// A text setting with choices (its ▶): the choices in the rows, a page at a time, starting at the current one's page.
+    /// False: the row's setting has none.
+    /// </summary>
+    private static bool OpenChoices(nint row)
     {
-        if (_plugin == null || _pick != null || _first + row >= _entries.Count) return;
+        if (_plugin == null || _pick != null || _first + row >= _entries.Count) return false;
         var (section, key, value, description) = _entries[_first + (int)row];
-        if (Loader.Config(_plugin).ChoicesOf(section, key) is not { Count: > 0 } choices) return;
+        if (Loader.Config(_plugin).ChoicesOf(section, key) is not { Count: > 0 } choices) return false;
         _pick = (section, key, description, choices);
         _pickFirst = Math.Max(0, choices.ToList().FindIndex(c => c.Equals(value, StringComparison.OrdinalIgnoreCase))) / SettingRows * SettingRows;
         ShowChoices();
-    });
+        return true;
+    }
 
     /// <summary>The picked setting's choices: one a row, the current one ticked; ticking another sets it.</summary>
     private static void ShowChoices()
@@ -341,7 +342,6 @@ internal static unsafe class SettingsMods
             Check(check, choices[index].Equals(current, StringComparison.OrdinalIgnoreCase));
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), false);
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), false);
-            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_pick"), false);
             Shown(Gui.FindTextBox(container, "hoimod_setting_value"), false);
         }
     }
@@ -350,7 +350,10 @@ internal static unsafe class SettingsMods
     private static void OnDecrease(nint row) => Guard(() => Step(row, -1));
 
     [UnmanagedCallersOnly]
-    private static void OnIncrease(nint row) => Guard(() => Step(row, +1));
+    private static void OnIncrease(nint row) => Guard(() =>
+    {
+        if (!OpenChoices(row)) Step(row, +1);
+    });
 
     /// <summary>Changes a number by a step that fits its size (1 for 0..99, 10 for 100..999, ...); Shift: 10 steps.</summary>
     private static void Step(nint row, int direction)
@@ -369,14 +372,14 @@ internal static unsafe class SettingsMods
         }
     }
 
-    /// <summary>A value cut to fit its box (about 14 Latin letters; a Hangul or CJK one counts double).</summary>
+    /// <summary>A value cut to fit its box (about 15 Latin letters; a Hangul or CJK one counts double).</summary>
     internal static string Fit(string value)
     {
         var width = 0;
         for (var i = 0; i < value.Length; i++)
         {
             width += value[i] >= 0x1100 ? 2 : 1;
-            if (width > 14) return value[..Math.Max(1, i - 1)] + "..";
+            if (width > 15) return value[..Math.Max(1, i - 1)] + "..";
         }
         return value;
     }

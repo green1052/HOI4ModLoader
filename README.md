@@ -90,7 +90,7 @@ Front line micro a player does by hand, with the battle plan UI's own commands (
 Keeps achievements available when mods change the checksum (Ironman already works with mods). Patched in memory only.
 
 ### Fonts
-The game's text in a font you choose, with no font mod to make: pick an installed font from the Font setting's list (Settings → Mods → Fonts: its list button shows the installed fonts, a page at a time), or set `Font` in `HOI4ModLoader\config\com.green1052.fonts.cfg` to the path of a `.ttf`/`.otf`/`.ttc` file, and restart the game.
+The game's text in a font you choose, with no font mod to make: pick an installed font from the Font setting's list (Settings → Mods → Fonts: its ▶ lists the installed fonts, a page at a time, to tick one), or set `Font` in `HOI4ModLoader\config\com.green1052.fonts.cfg` to the path of a `.ttf`/`.otf`/`.ttc` file, and restart the game.
 - At startup every bitmap font of the game's language (`gfx\fonts\korean` for Korean, `gfx\fonts` for English, ...) is drawn anew with it by Windows: the same characters, line height and baseline, sized so its letters are as tall as the original's, as bold as the original, and with a dark outline and shadow as strong as the original's where it has one. Characters the font lacks keep the original glyph. Fonts whose texture is compressed (the map labels, a few others) stay as they are.
 - The first start with new settings takes some seconds (Korean: about 10); the result is cached in `HOI4ModLoader\cache\fonts` until the settings or the game's fonts change.
 - Settings: `HeaderFont` (titles; empty: the same font), `SizePercent` (glyph size in the same lines), `Typewriter` (redraw the typewriter fonts of documents and reports too; off by default).
