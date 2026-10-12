@@ -88,10 +88,16 @@ public unsafe partial class FrontLine
         return 0;
     }
 
+    // The front order fills a salient again with fresh divisions, which escaped in turn: an endless stream to and fro (Japan
+    // around Beiping). So a province divisions escaped from is left to the front order for a week.
+    private const int EscapeAgainHours = 7 * 24;
+
     /// <summary>Front divisions in a salient about to be cut off pull back through its neck, where another of their front holds their province.</summary>
     private void Escape(nint country, int tag, nint[] units)
     {
         var escapes = 0;
+        var escaped = SideOf(tag).EscapedFrom;
+        foreach (var (id, hour) in escaped.ToArray()) if (Game.Hour - hour is < 0 or >= EscapeAgainHours) escaped.Remove(id);
         var necks = new Dictionary<nint, int>(); // province -> where its divisions escape to (-1: no closing neck)
         foreach (var unit in units)
         {
@@ -100,9 +106,11 @@ public unsafe partial class FrontLine
             var location = Division.Location(unit);
             if (location == 0) continue;
             if (_holding.GetValueOrDefault((order, location)) < 2) continue; // alone there: pulling it out opens the line
+            if (escaped.TryGetValue(Game.Id(location), out var since) && since != Game.Hour) continue; // this turn's own escapes go on
             if (!necks.TryGetValue(location, out var to)) necks[location] = to = Neck(country, tag, location);
             if (to < 0) continue;
             Send(unit, to, Job.Rest);
+            escaped[Game.Id(location)] = Game.Hour;
             escapes++;
             Log.Info("escape: a division pulls back from a salient about to be cut off");
         }
@@ -167,7 +175,8 @@ public unsafe partial class FrontLine
 
     // ---- Fire brigade: mobile reserves a province behind the line counterattack break-ins ----
 
-    private const int ReserveLine = 6, MaxReserves = 3, MinReserveLine = 3, MaxPostsPerTurn = 1, FireRadius = 3, MaxCountersPerTurn = 2;
+    private const int ReserveLine = 4, MaxReserves = 4, MinReserveLine = 3, MaxPostsPerTurn = 2, FireRadius = 3, MaxCountersPerTurn = 2;
+    private const int ReserveReach = 12; // provinces a mobile reserve may come from: armour is few and often far (Germany's in Poland)
 
     /// <summary>
     /// Reserves back from a counterattack return to their post; ones whose post the line moved away from (or onto) go back to
@@ -290,7 +299,7 @@ public unsafe partial class FrontLine
             var post = Post(country, tag, front.Line, posts);
             if (post == 0) continue;
             pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Division.Motorized(u) && Org(u) >= 80 && Str(u) >= 70);
-            var unit = Take(tag, post, FireRadius + 3, pool);
+            var unit = Take(tag, post, ReserveReach, pool);
             if (unit == 0 && _force)
             {
                 infantry ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Org(u) >= 80 && Str(u) >= 70);
@@ -306,7 +315,62 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>Provinces our reserves and second-line divisions stand on.</summary>
-    private HashSet<int> Posts() => _held.Values.Where(h => h.Job is Job.Reserve or Job.Counter or Job.Depth).Select(h => h.Post).ToHashSet();
+    private HashSet<int> Posts() => _held.Values.Where(h => h.Job is Job.Reserve or Job.Counter or Job.Depth or Job.Cordon).Select(h => h.Post).ToHashSet();
+
+    // ---- Cordon (defence in depth): a breach is walled in, not fed ----
+
+    private const int CordonHours = 48, MaxCordonsPerTurn = 4, CordonRadius = 6, CordonKeepHours = 7 * 24;
+
+    /// <summary>
+    /// Defence in depth, as the Red Army fought it: ground of ours the enemy took in the last two days gets our empty provinces
+    /// around it manned (the breach's shoulders and its tip), so the breakthrough runs into a wall and its corridor stays
+    /// narrow, until its supply fails; the fire brigade and the cut at the salient's neck deal with what got in. A wall
+    /// division holds its post while the breach next to it is the enemy's, a week at most, then goes back to its front.
+    /// </summary>
+    private void Cordon(nint country, int tag, nint[] units)
+    {
+        foreach (var (unit, held) in _held.ToArray())
+        {
+            if (held.Job != Job.Cordon || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
+            var breach = Game.Province(held.Target);
+            var post = Game.Province(held.Post);
+            if (breach == 0 || post == 0 || Province.Controller(post) != tag || !Enemy(country, tag, breach) || Game.Hour - held.Since >= CordonKeepHours)
+            {
+                if (Release(unit, tag)) Log.Info("cordon: the breach is closed, a wall division goes back to its front");
+            }
+            else if (Division.Location(unit) != post)
+            {
+                Commands.Move(unit, held.Post, _force);
+                _pending[unit] = _now + PendingMs;
+            }
+        }
+
+        var hour = Game.Hour;
+        var walls = new Dictionary<nint, nint>(); // empty province of ours next to a breach -> the breach
+        var manned = _held.Values.Where(h => h.Job == Job.Cordon).Select(h => h.Post).ToHashSet();
+        foreach (var (id, seen) in _lastSeen)
+        {
+            if (hour - seen.Hour is <= 0 or >= CordonHours || Game.Province(id) is not (var breach and not 0) || !Enemy(country, tag, breach)) continue;
+            foreach (var n in Game.Neighbours(breach))
+                if (Game.Province(n) is var wall && wall != 0 && Province.Controller(wall) == tag && !manned.Contains(n)
+                    && !Province.Units(wall).ToArray().Any(u => u != 0 && Division.Commander(u) == tag))
+                    walls.TryAdd(wall, breach);
+        }
+        if (walls.Count == 0) return;
+        Dictionary<nint, List<nint>>? pool = null;
+        var posted = 0;
+        // The provinces most surrounded by enemy ground first: the tip of the breach and its shoulders.
+        foreach (var (wall, breach) in walls.OrderByDescending(w => Game.Neighbours(w.Key).Count(n => Game.Province(n) is var e && e != 0 && Enemy(country, tag, e))))
+        {
+            if (posted == MaxCordonsPerTurn) break;
+            pool ??= Pool(country, tag, units, true, u => Org(u) >= 60 && Str(u) >= 50);
+            var unit = Take(tag, wall, CordonRadius, pool);
+            if (unit == 0) continue;
+            Send(unit, Game.Id(wall), Job.Cordon, Game.Id(wall), Game.Id(breach));
+            posted++;
+            Log.Info("cordon: a division walls in an enemy breach");
+        }
+    }
 
     /// <summary>A province of ours right behind <paramref name="line"/> (next to it, no enemy next to it), free of posts, next to the most of it; 0 if none.</summary>
     private nint Post(nint country, int tag, HashSet<nint> line, HashSet<int> taken)

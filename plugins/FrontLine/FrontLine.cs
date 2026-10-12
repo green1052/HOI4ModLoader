@@ -58,7 +58,7 @@ public unsafe partial class FrontLine : Plugin
     /// What a division we moved does for us. Rest: rests (rotation, escape, plugging) and goes back once rested. Operation:
     /// a blitz's or pincer's (Operations.cs). Done: its operation is over; it goes back as soon as it can take orders.
     /// </summary>
-    private enum Job { Rest, Reserve, Counter, Depth, Shuffle, Pin, Operation, Done }
+    private enum Job { Rest, Reserve, Counter, Depth, Shuffle, Pin, Operation, Done, Cordon }
 
     /// <summary>
     /// A division we moved. Group/Order: the order it goes back onto (0: none). Post: the province it holds (Reserve, Counter,
@@ -75,6 +75,7 @@ public unsafe partial class FrontLine : Plugin
         public readonly Dictionary<int, (int Hour, (nint, int) Front)> LastSeen = [];
         public readonly Dictionary<(nint, int), int> Crisis = [];
         public readonly Dictionary<nint, int> Recent = []; // AI divisions we sent: unit -> game hour
+        public readonly Dictionary<int, int> EscapedFrom = []; // province divisions escaped from -> game hour
     }
 
     private readonly Dictionary<int, Side> _sides = [];                     // tag -> its bookkeeping
@@ -114,8 +115,8 @@ public unsafe partial class FrontLine : Plugin
         _maxResting = Math.Clamp(Config.Bind("Rotation", "MaxRestingPercent", 25, "At most this share (%) of a front's divisions rests at once."), 1, 100);
         _plugging = Config.Bind("Plugging", "Plugging", true,
             "Send the nearest fresh division into a defence of ours that is being lost; it joins the battle and goes back to its front afterwards.");
-        _losing = Math.Clamp(Config.Bind("Plugging", "LosingPercent", 60, "A defence counts as being lost when the attacker holds this share (%) of the battle's organisation (the battle bar)."), 50, 100);
-        _plugRadius = Math.Clamp(Config.Bind("Plugging", "PlugRadius", 4, "How far (provinces) a helper may come from."), 1, MaxRestSearch);
+        _losing = Math.Clamp(Config.Bind("Plugging", "LosingPercent", 50, "A defence counts as being lost when the attacker holds this share (%) of the battle's organisation (the battle bar)."), 50, 100);
+        _plugRadius = Math.Clamp(Config.Bind("Plugging", "PlugRadius", 6, "How far (provinces) a helper may come from."), 1, MaxRestSearch);
         _lure = Config.Bind("Plugging", "Lure", true,
             "AI only (ApplyToAI): a defence being lost is let go, to draw the attacker in, when both its shoulders are held and not being lost and 2+ fresh mobile divisions "
             + "stand within 3 provinces against at most twice as many attackers; AI Assist's encirclement then cuts the salient at its neck and the fire brigade counterattacks.");
@@ -305,6 +306,7 @@ public unsafe partial class FrontLine : Plugin
             front.Units.Add(unit);
             _holding[(order, location)] = _holding.GetValueOrDefault((order, location)) + 1;
         }
+        _eta.Clear();
         _losingNow = _plugging || _shuffle ? LosingDefences(tag) : [];
         if (_fireBrigade || _depth || _shuffle) Survey(country, tag, fronts.Values);
 
@@ -314,6 +316,7 @@ public unsafe partial class FrontLine : Plugin
         if (_rotation && !_force) foreach (var group in groups) RotateArmy(country, tag, group);
         if (_plugging) Plug(country, tag, units);
         if (_fireBrigade) Counterattack(country, tag, fronts.Values);
+        if (_plugging) Cordon(country, tag, units);
         if (_escape)
         {
             Escape(country, tag, units);
@@ -345,9 +348,52 @@ public unsafe partial class FrontLine : Plugin
             if (*(int*)(defender + ReservesOfSide + 0xC) > 0) continue; // a reserve already waits to step in
             long progress;
             ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress); // attacker's share
-            if (progress * 100.0 / Native.FixedPoint >= _losing) losing[province] = progress * 100.0 / Native.FixedPoint;
+            var share = progress * 100.0 / Native.FixedPoint;
+            var eta = CollapseHours(tag, province, defending);
+            if (share >= _losing || eta < EarlyPlugHours) losing[province] = share;
+            _eta[province] = eta;
         }
         return losing;
+    }
+
+    private const int EarlyPlugHours = 48, UrgentPlugHours = 24, MotorizedHoursPerProvince = 10, InfantryHoursPerProvince = 20;
+    private readonly Dictionary<nint, double> _eta = [];                                // the turn's defences -> hours until their organisation runs out
+    private readonly Dictionary<(int, nint), (int Hour, double Org)> _orgSeen = [];    // (tag, battle province) -> its defenders' organisation, last hour seen
+
+    /// <summary>
+    /// Hours until the defenders' organisation runs out at the rate it fell since the last game hour seen (how hard the attack
+    /// breaks through), infinite while it holds or recovers.
+    /// </summary>
+    private double CollapseHours(int tag, nint province, ReadOnlySpan<nint> defending)
+    {
+        double org = 0;
+        foreach (var unit in defending) if (unit != 0) org += Org(unit);
+        var hour = Game.Hour;
+        var key = (tag, province);
+        var eta = double.PositiveInfinity;
+        if (_orgSeen.TryGetValue(key, out var seen) && hour - seen.Hour is > 0 and < 24 && seen.Org > org)
+            eta = org / ((seen.Org - org) / (hour - seen.Hour));
+        if (!_orgSeen.TryGetValue(key, out seen) || seen.Hour != hour) _orgSeen[key] = (hour, org);
+        return eta;
+    }
+
+    /// <summary>
+    /// The pool's division closest to <paramref name="target"/> that can walk there within <paramref name="hours"/> (MotorizedHoursPerProvince
+    /// a province for mobile ones, InfantryHoursPerProvince for the rest), taken out of the pool; 0 if none.
+    /// </summary>
+    private static nint TakeInTime(int tag, nint target, int radius, Dictionary<nint, List<nint>> pool, double hours)
+    {
+        if (pool.Count == 0) return 0;
+        nint chosen = 0;
+        var at = Search(tag, target, radius, (p, depth) =>
+        {
+            if (!pool.TryGetValue(p, out var here)) return false;
+            chosen = here.Where(u => depth * (Division.Motorized(u) ? MotorizedHoursPerProvince : InfantryHoursPerProvince) <= hours).MaxBy(Org);
+            return chosen != 0;
+        });
+        if (at == 0) return 0;
+        if (pool[at].Remove(chosen) && pool[at].Count == 0) pool.Remove(at);
+        return chosen;
     }
 
     /// <summary>
@@ -404,23 +450,71 @@ public unsafe partial class FrontLine : Plugin
     }
 
     /// <summary>Our defences being lost get the nearest fresh division: resting, unassigned, or spare in a quiet part of a front.</summary>
+    /// <summary>
+    /// Defences being lost (the attacker past LosingPercent of the battle, or the defenders' organisation running out within
+    /// EarlyPlugHours at its rate of loss) get fresh divisions that can walk there before it runs out, the soonest to fall
+    /// first: two where it falls within UrgentPlugHours, else one. One sent too late is wasted, a defence that holds needs none.
+    /// </summary>
     private void Plug(nint country, int tag, nint[] units)
     {
         var plugs = 0;
         Dictionary<nint, List<nint>>? helpers = null;
-        foreach (var (province, progress) in _losingNow)
+        foreach (var (province, progress) in _losingNow.OrderBy(l => _eta.GetValueOrDefault(l.Key, double.PositiveInfinity)).ToList())
         {
-            if (plugs == MaxPlugsPerTurn) break;
+            if (plugs >= MaxPlugsPerTurn) break;
             var id = Game.Id(province);
-            if (_sent.ContainsKey(id)) continue; // one helper per battle on its way at a time
+            if (_sent.ContainsKey(id)) continue; // its helpers are on their way
             if (_force && _lure && Lure(country, tag, province)) continue;
+            helpers ??= Pool(country, tag, units, true, u => Org(u) >= 70 && Str(u) >= 60);
+            var eta = _eta.GetValueOrDefault(province, double.PositiveInfinity);
+            var sent = new List<nint>();
+            for (var n = eta < UrgentPlugHours ? 2 : 1; n > 0; n--)
+            {
+                var helper = TakeInTime(tag, province, _plugRadius, helpers, eta);
+                if (helper == 0) break;
+                Send(helper, id, Job.Rest); // arriving, it joins the defence as a reserve
+                sent.Add(helper);
+            }
+            if (sent.Count == 0) continue;
+            _sent[id] = ([.. sent], false);
+            plugs += sent.Count;
+            Log.Info($"plugging: {sent.Count} fresh division(s) sent into a defence being lost ({progress:0}% for the attacker, its organisation gone in {(double.IsInfinity(eta) ? "-" : $"{eta:0}h")})");
+        }
+        Thicken(country, tag, units, helpers);
+    }
+
+    private const int MinThinThreat = 3, ThinRatio = 2, MaxThickensPerTurn = 4;
+
+    /// <summary>
+    /// Before the attack: a line province of ours facing ThinRatio times as many enemy divisions as it holds (MinThinThreat or
+    /// more) gets the nearest fresh division within MaxRestSearch (the divisions waiting behind the line for an offensive
+    /// too), the most outnumbered first, MaxThickensPerTurn a turn. The enemy masses against one
+    /// thinly held province and breaks through before plugging (a defence already being lost) can answer (France out of the
+    /// Maginot line against Germany).
+    /// </summary>
+    private void Thicken(nint country, int tag, nint[] units, Dictionary<nint, List<nint>>? helpers)
+    {
+        var thin = new List<(nint Province, int Enemy, int Ours)>();
+        foreach (var at in units.Select(Division.Location).Where(p => p != 0).Distinct())
+        {
+            if (_losingNow.ContainsKey(at) || _sent.ContainsKey(Game.Id(at))) continue;
+            var enemy = EnemiesNext(country, tag, at);
+            if (enemy < MinThinThreat) continue;
+            var ours = Province.Units(at).ToArray().Count(u => u != 0 && Division.IsLand(u) && Division.Commander(u) == tag);
+            if (ours * ThinRatio < enemy) thin.Add((at, enemy, ours));
+        }
+        var thickened = 0;
+        foreach (var (province, enemy, ours) in thin.OrderByDescending(t => t.Enemy / (double)Math.Max(1, t.Ours)))
+        {
+            if (thickened == MaxThickensPerTurn) break;
             helpers ??= Pool(country, tag, units, true, u => Org(u) >= 80 && Str(u) >= 70);
-            var helper = Take(tag, province, _plugRadius, helpers);
+            var helper = Take(tag, province, MaxRestSearch, helpers);
             if (helper == 0) continue;
+            var id = Game.Id(province);
             Send(helper, id, Job.Rest); // arriving, it joins the defence as a reserve
             _sent[id] = ([helper], false);
-            plugs++;
-            Log.Info($"plugging: a fresh division sent into a defence being lost ({progress:0}% for the attacker)");
+            thickened++;
+            Log.Info($"plugging: a fresh division thickens a thin spot ({ours} of ours against {enemy} enemy division(s) next to it)");
         }
     }
 
@@ -462,7 +556,9 @@ public unsafe partial class FrontLine : Plugin
 
     /// <summary>
     /// Divisions that can leave where they stand, by province: idle, free or resting with us, <paramref name="wanted"/>, and
-    /// spare on their front (another of that front stays in the province, no enemy troops next to it) or, with
+    /// spare on their front (behind the line any; on it another of that front stays in the province; next to enemy troops,
+    /// out of battle with two of that front staying, at least as many as the enemy divisions next to it: the AI stacks its
+    /// whole front on the line, so there was never a spare for reserves) or, with
     /// <paramref name="unassigned"/>, on no order at all.
     /// </summary>
     private Dictionary<nint, List<nint>> Pool(nint country, int tag, IEnumerable<nint> units, bool unassigned, Func<nint, bool> wanted)
@@ -477,7 +573,10 @@ public unsafe partial class FrontLine : Plugin
             if (location == 0) continue;
             if (_orders.TryGetValue(unit + MemberOfUnit, out var order))
             {
-                if (!IsFront(order) || left.GetValueOrDefault((order, location)) < 2 || InContact(country, tag, unit) || !wanted(unit)) continue; // needed where it is
+                var stay = left.GetValueOrDefault((order, location)) - 1;
+                if (!IsFront(order) || !wanted(unit)) continue;
+                if (InContact(country, tag, unit) ? stay < 2 || Division.Fighting(unit) || stay < EnemiesNext(country, tag, location)
+                    : stay < 1 && Province.NextToEnemy(country, tag, location)) continue; // needed where it is (behind the line nobody is)
                 left[(order, location)]--;
             }
             else if (!(unassigned || resting) || !wanted(unit)) continue;
@@ -607,6 +706,10 @@ public unsafe partial class FrontLine : Plugin
     }
 
     /// <summary>Enemy divisions stand next to the unit: only then is a worn division at risk on the line (it recovers as fast there otherwise).</summary>
+    /// <summary>Enemy divisions in the provinces next to <paramref name="province"/>.</summary>
+    private static int EnemiesNext(nint country, int tag, nint province) =>
+        Game.Neighbours(province).Sum(n => Game.Province(n) is var p && p != 0 && Province.Enemy(country, tag, p) ? Province.Divisions(p) : 0);
+
     private bool InContact(nint country, int tag, nint unit)
     {
         var location = Division.Location(unit);

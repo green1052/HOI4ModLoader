@@ -32,6 +32,13 @@ public partial class FrontLine
         {
             foreach (var unit in front.Units)
                 if (Division.Location(unit) is var at && at != 0 && NextToEnemy(country, tag, at)) front.Line.Add(at);
+            // Before the war: the AI draws fronts only on borders it expects a war on (its target, the target's guarantors), so
+            // the border its divisions hold is the line: the fire brigade takes its posts behind it before the first attack.
+            if (front.Line.Count == 0)
+                foreach (var unit in front.Units)
+                    if (Division.Location(unit) is var at && at != 0 && Game.Neighbours(at).Any(id => Game.Province(id) is var q && q != 0
+                            && Province.Controller(q) is var c && c > 0 && c != tag && !Friendly(country, tag, q)))
+                        front.Line.Add(at);
             var facing = new HashSet<nint>();
             foreach (var p in front.Line)
             {
