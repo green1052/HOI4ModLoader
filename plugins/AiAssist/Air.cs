@@ -195,13 +195,7 @@ public unsafe partial class AiAssist
     {
         var wing = *(nint*)(mission + WingOfAirMission);
         if (wing == 0) return;
-        var tag = *(int*)(wing + OwnerOfWing);
-        if (tag <= 0)
-        {
-            var equipment = *(nint*)(wing + EquipmentOfWing);
-            var owner = equipment == 0 ? 0 : *(nint*)(equipment + OwnerOfEquipment);
-            tag = owner == 0 ? 0 : *(int*)(owner + TagOfOwner);
-        }
+        var tag = WingOwner(wing);
         if (tag <= 0 || tag == Game.ControlledTag) return;
         var data = (byte*)*(nint*)targets;
         int n = *(int*)(targets + 0xC);
@@ -220,5 +214,15 @@ public unsafe partial class AiAssist
             Buffer.MemoryCopy(dest, data, copy.Length, copy.Length);
         }
         Interlocked.Increment(ref _cas);
+    }
+
+    /// <summary>The wing's country tag, as the game reads it; 0 when it has none.</summary>
+    private static int WingOwner(nint wing)
+    {
+        var tag = *(int*)(wing + OwnerOfWing);
+        if (tag > 0) return tag;
+        var equipment = *(nint*)(wing + EquipmentOfWing);
+        var owner = equipment == 0 ? 0 : *(nint*)(equipment + OwnerOfEquipment);
+        return owner == 0 ? 0 : *(int*)(owner + TagOfOwner);
     }
 }
