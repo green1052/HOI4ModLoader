@@ -11,7 +11,7 @@ public unsafe partial class AiAssist
 
     private const int ArrivalOfUnit = 0x160, FreshHours = 168, FreshWalkHours = 168;
     // TrackFronts (CAIGeneral::UpdateFrontUnitRequests) refreshes a line once a game day, plus a few extra hours: two days keep it between updates.
-    private const int LineFreshHours = 48, MaxBackfills = 2, BackfillRadius = 4, MinBackfillOrg = 60;
+    private const int LineFreshHours = 48, MaxBackfills = 2, BackfillRadius = 8, MinBackfillOrg = 60;
     private const int KeyBackfillRadius = 20, KeyHole = 60;
     // Game hours: a division we sent walks without new orders; a hole or target isn't sent another meanwhile.
     private const long SentHours = 48, GapHours = 168, KeyGapHours = 72;
@@ -62,8 +62,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>The AI's regrouping can't take this division: a reserve, a grad garrison, resting, a new division on its way,
-    /// a paratrooper of ours, the last one of its country in a province enemy divisions can walk into, or one on the wall of
-    /// a pocket (an enemy province with divisions whose neighbours are all ours). AI threads: read only.</summary>
+    /// a paratrooper of ours, the last one of its country in a province on the line (next to enemy ground, troops there or not:
+    /// vanilla strips quiet stretches of a front bare), or one on the wall of a pocket (an enemy province with divisions whose
+    /// neighbours are all ours). AI threads: read only.</summary>
     private static bool Pinned(nint unit)
     {
         if (unit == 0) return false;
@@ -80,8 +81,8 @@ public unsafe partial class AiAssist
         foreach (var id in Game.Neighbours(location))
         {
             var p = Game.Province(id);
-            if (p == 0 || Province.Divisions(p) == 0 || !Province.Enemy(country, tag, p)) continue;
-            if (alone || Province.Surrounded(country, tag, p))
+            if (p == 0 || !Province.Enemy(country, tag, p)) continue;
+            if (alone || Province.Divisions(p) > 0 && Province.Surrounded(country, tag, p))
                 return true; // nothing else holds the province, or a cut-off pocket sits against it
         }
         return false;
@@ -543,7 +544,7 @@ public unsafe partial class AiAssist
         nint fallback = 0;
         foreach (var p in Within([target], radius, q => Province.Controller(q) == tag))
         {
-            if (p == target || line.Contains(p)) continue;
+            if (p == target || line.Contains(p) && !Crowded(tag, p)) continue;
             foreach (var unit in Province.Units(p))
             {
                 if (!Spare(unit, tag) || !reserves && _posted.ContainsKey(unit)) continue;
@@ -552,6 +553,19 @@ public unsafe partial class AiAssist
             }
         }
         return fallback;
+    }
+
+    /// <summary>
+    /// A line province with a division to spare for a hole: three of ours or more (two stay), or two with no enemy divisions
+    /// next to it (vanilla stacks its attacks there while other stretches stand empty).
+    /// </summary>
+    private static bool Crowded(int tag, nint province)
+    {
+        var ours = 0;
+        foreach (var unit in Province.Units(province))
+            if (unit != 0 && Division.IsLand(unit) && Division.Commander(unit) == tag) ours++;
+        var country = Game.Country(tag);
+        return ours >= 3 || ours == 2 && country != 0 && !Province.EnemyDivisionsNext(country, tag, province);
     }
 
     /// <summary>A land division of the tag (not lent) that can take orders now: not fighting, retreating or embarked, not one we sent or rest.</summary>

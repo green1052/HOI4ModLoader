@@ -92,18 +92,36 @@ public static unsafe class Province
     public static bool Surrounded(nint country, int tag, nint province) =>
         Game.Neighbours(province).All(n => Game.Province(n) is var p && (p == 0 || Controller(p) == 0 || !Enemy(country, tag, p)));
 
-    /// <summary>Enemy divisions that taking <paramref name="target"/> cuts off: in enemy provinces next to it whose other land neighbours are all ours or allied.</summary>
-    // ponytail: one-province pockets only; a flood fill bounded by NAI.POCKET_DISTANCE_MAX if bigger encirclements are missed.
+    private const int MaxPocket = 12; // enemy provinces a pocket may span
+
+    /// <summary>
+    /// Enemy divisions that taking <paramref name="target"/> cuts off: in the enemy ground next to it that no longer reaches
+    /// the rest of the enemy's without it (a salient whose neck it is), up to <see cref="MaxPocket"/> provinces.
+    /// </summary>
     public static int Pocket(nint country, int tag, nint target)
     {
         var cut = 0;
-        var targetId = Game.Id(target);
+        var seen = new HashSet<int> { Game.Id(target) };
         foreach (var id in Game.Neighbours(target))
         {
-            var e = Game.Province(id);
-            if (e == 0 || Divisions(e) == 0 || !Enemy(country, tag, e)) continue;
-            if (Game.Neighbours(e).All(n => n == targetId || Game.Province(n) is var q && (q == 0 || Controller(q) == 0 || Friendly(country, tag, q))))
-                cut += Divisions(e);
+            if (seen.Contains(id) || Game.Province(id) is not (var e and not 0) || !Enemy(country, tag, e)) continue;
+            // The enemy ground reached from here without passing the target: closed and small, it is cut off.
+            var region = new List<nint> { e };
+            seen.Add(id);
+            var closed = true;
+            for (var i = 0; i < region.Count && closed; i++)
+            foreach (var n in Game.Neighbours(region[i]))
+            {
+                if (seen.Contains(n) || Game.Province(n) is not (var p and not 0) || !Enemy(country, tag, p)) continue;
+                seen.Add(n);
+                region.Add(p);
+                if (region.Count > MaxPocket)
+                {
+                    closed = false;
+                    break;
+                }
+            }
+            if (closed) cut += region.Sum(Divisions);
         }
         return cut;
     }
