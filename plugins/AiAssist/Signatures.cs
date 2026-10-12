@@ -8,12 +8,6 @@ public static class Signatures
     /// <summary>PostAICommand(command, int* postingTag) -> bool: every AI command, from every AI path; an invalid one is deleted and 0 returned.</summary>
     [Signature] public const string PostAICommand = "40 53 48 83 EC 40 80 3D ? ? ? ? 00 48 8B D9 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 75 ? 48 8B CA E8";
 
-    /// <summary>
-    /// CArmy::SetPath(unit, CPdxArray&lt;CProvince*&gt;* path, ?, bool clear, uint moveType) -> moveType: every land move of every
-    /// division (orders, AI regrouping, strategic redeployment, commands) ends here; appends the path's province ids at +0x200.
-    /// </summary>
-    [Signature] public const string SetPath = "48 89 5C 24 ? 44 88 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 8B 41 08 4C 8B EA C6 81 AC 02 00 00 00 4C 8B F1 85 C0 74";
-
     /// <summary>The AI theatre distribution: collect divisions it may move to other fronts (ctx, CPdxArray&lt;{CArmy*, slot*}&gt;* out): every army member on no order.</summary>
     [Signature] public const string CollectReassignableUnits = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 98 00 00 00 4C 8B FA";
 
