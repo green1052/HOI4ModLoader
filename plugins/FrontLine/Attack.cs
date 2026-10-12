@@ -28,7 +28,7 @@ public unsafe partial class FrontLine
             if (ready.Count == 0) continue;
             foreach (var id in Game.Neighbours(from))
             {
-                if (_sent.ContainsKey(id)) continue;
+                if (_sent.ContainsKey(id) || Game.AdjacencyType(from, id) == Province.Impassable) continue;
                 var target = Game.Province(id);
                 if (target == 0 || !Enemy(country, tag, target)) continue;
                 var defenders = Province.Divisions(target);
@@ -104,9 +104,9 @@ public unsafe partial class FrontLine
             foreach (var nid in Game.Neighbours(target))
             {
                 var from = Game.Province(nid);
-                if (from == 0 || !_at.TryGetValue(from, out var here) || here.Count <= Keep(from)) continue;
+                if (from == 0 || !_at.TryGetValue(from, out var here) || here.Count <= Keep(from) || Game.AdjacencyType(from, id) == Province.Impassable) continue;
                 if (!mopUp && pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue;
-                var river = Game.AdjacencyType(from, id) >= Province.River ? 1.5 : 1;
+                var river = Game.AdjacencyType(from, id) is Province.River or Province.LargeRiver ? 1.5 : 1;
                 attackers.AddRange(here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= 70 && Str(u) >= 70 && (_force || mopUp || OnRunningPlan(u)))
                     .OrderByDescending(Division.Power).Take(here.Count - Keep(from)).Select(u => (u, Division.Power(u) / river)));
             }

@@ -123,7 +123,7 @@ public unsafe partial class FrontLine : Plugin
             + "Your divisions only on a battle plan that is running. 0: off."));
         _fireBrigade = Config.Bind("FireBrigade", "FireBrigade", true,
             "Keep a few armored or motorized divisions per front a province behind the line, off its battle plan. Where the enemy breaks in (a province of ours lost in the last two days, a landing, enemy troops in our provinces), "
-            + "the nearest ones counterattack with enough to win (forts counted, each counting double), then go back to their post.");
+            + "the nearest ones counterattack with enough to win (forts counted, each counting double), then go back to their post. An AI country without spare mobile divisions uses infantry.");
         _depth = Config.Bind("DepthDefense", "DepthDefense", true,
             "Key line provinces (ports, victory points, river crossings, cities and mountains) get a second division a province behind them, from spare divisions of a front; it stays while the line holds there.");
         _shuffle = Config.Bind("Shuffle", "Shuffle", true,

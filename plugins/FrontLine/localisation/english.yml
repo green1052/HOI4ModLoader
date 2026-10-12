@@ -25,7 +25,7 @@ l_english:
     com.green1052.frontline.AttackOdds:0 "Assault odds (%)"
     com.green1052.frontline.AttackOdds.desc:0 "Also attack an enemy province its neighbours of ours can outgun this many times (%: 200 = twice its defenders' power, more behind forts, in rough ground or across a river), with fresh divisions from all of them, each keeping one. Your divisions only on a battle plan that is running. 0: off."
     com.green1052.frontline.FireBrigade:0 "Fire brigade"
-    com.green1052.frontline.FireBrigade.desc:0 "Keep a few armored or motorized divisions per front a province behind the line, off its battle plan. Where the enemy breaks in (a province of ours lost in the last two days, a landing, enemy troops in our provinces), the nearest ones counterattack with enough to win (forts counted, each counting double), then go back to their post."
+    com.green1052.frontline.FireBrigade.desc:0 "Keep a few armored or motorized divisions per front a province behind the line, off its battle plan. Where the enemy breaks in (a province of ours lost in the last two days, a landing, enemy troops in our provinces), the nearest ones counterattack with enough to win (forts counted, each counting double), then go back to their post. An AI country without spare mobile divisions uses infantry."
     com.green1052.frontline.DepthDefense:0 "Defence in depth"
     com.green1052.frontline.DepthDefense.desc:0 "Key line provinces (ports, victory points, river crossings, cities and mountains) get a second division a province behind them, from spare divisions of a front; it stays while the line holds there."
     com.green1052.frontline.Shuffle:0 "Front shuffle"

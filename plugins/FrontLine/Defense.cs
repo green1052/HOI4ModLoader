@@ -262,7 +262,8 @@ public unsafe partial class FrontLine
 
     /// <summary>
     /// Fronts with a line of MinReserveLine provinces or more keep one mobile reserve per ReserveLine of them (up to
-    /// MaxReserves) on posts a province behind the line covering most of it, taken from spare fresh armored or motorized divisions.
+    /// MaxReserves) on posts a province behind the line covering most of it, taken from spare fresh armored or motorized divisions;
+    /// an AI country without spare mobile ones uses infantry (Spain's: else nothing ever answers a break-in).
     /// </summary>
     private void PostReserves(nint country, int tag, IEnumerable<Front> all)
     {
@@ -270,6 +271,7 @@ public unsafe partial class FrontLine
         var posts = Posts();
         Dictionary<nint, List<nint>>? pool = null;
         var posted = 0;
+        Dictionary<nint, List<nint>>? infantry = null;
         foreach (var front in fronts.OrderByDescending(f => f.Line.Count))
         {
             if (posted == MaxPostsPerTurn || front.Line.Count < MinReserveLine) return;
@@ -279,12 +281,17 @@ public unsafe partial class FrontLine
             if (post == 0) continue;
             pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Division.Motorized(u) && Org(u) >= 80 && Str(u) >= 70);
             var unit = Take(tag, post, FireRadius + 3, pool);
+            if (unit == 0 && _force)
+            {
+                infantry ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Org(u) >= 80 && Str(u) >= 70);
+                unit = Take(tag, post, FireRadius + 3, infantry);
+            }
             if (unit == 0) continue;
             var id = Game.Id(post);
             Send(unit, id, Job.Reserve, id, 0, front.Key);
             posts.Add(id);
             posted++;
-            Log.Info("fire brigade: a mobile division takes up a reserve post behind the line");
+            Log.Info($"fire brigade: a {(Division.Motorized(unit) ? "mobile" : "infantry")} division takes up a reserve post behind the line");
         }
     }
 
@@ -370,7 +377,7 @@ public unsafe partial class FrontLine
         foreach (var id in Game.Neighbours(province))
         {
             var p = Game.Province(id);
-            if (p == 0 || !Enemy(country, tag, p) || Game.AdjacencyType(province, id) < Province.River) continue;
+            if (p == 0 || !Enemy(country, tag, p) || Game.AdjacencyType(province, id) is not (Province.River or Province.LargeRiver)) continue; // impassable: no attack at all
             key += 40; // the enemy has to cross a river to take it
             break;
         }

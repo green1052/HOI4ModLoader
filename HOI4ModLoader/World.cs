@@ -155,7 +155,7 @@ public static unsafe class Province
     {
         var weight = 2 * Divisions(target) + FortLevel(target);
         if ((TerrainCategory(target) & (Mountain | Urban | Marsh | Jungle)) != 0) weight += 3;
-        if (Game.AdjacencyType(from, Game.Id(target)) >= River) weight += 2;
+        if (Game.AdjacencyType(from, Game.Id(target)) is River or LargeRiver) weight += 2;
         return weight;
     }
 
