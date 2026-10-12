@@ -48,6 +48,8 @@ public sealed unsafe partial class Image
     private readonly (int Begin, int End)[] _functions;
     private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = []; // code sections with patched bytes put back
     private readonly Dictionary<object, object> _lookups = [];                        // FindAll and VTable results, or what they threw
+    private readonly string _version;                                                  // the exe's link time and size: a game update changes it
+    private Dictionary<string, string>? _stored;                                       // the running game's results from earlier starts (Stored)
 
     private Image(nint b, bool relocated = true)
     {
@@ -56,6 +58,7 @@ public sealed unsafe partial class Image
         int count = *(ushort*)(nt + 6);
         var opt = nt + 24;
         _pointerBase = relocated ? b : *(long*)(opt + 24);
+        _version = $"{*(uint*)(nt + 8):x8}-{*(int*)(opt + 56):x8}"; // IMAGE_FILE_HEADER.TimeDateStamp, IMAGE_OPTIONAL_HEADER64.SizeOfImage
         var sec = opt + *(ushort*)(nt + 20);
         for (var i = 0; i < count; i++, sec += 40)
             _sections.Add((b + *(int*)(sec + 12), *(int*)(sec + 8), (*(uint*)(sec + 36) & 0x20000000) != 0)); // IMAGE_SCN_MEM_EXECUTE
@@ -93,12 +96,66 @@ public sealed unsafe partial class Image
         {
             if (!_lookups.TryGetValue(key, out var result))
             {
-                try { result = find(); }
-                catch (InvalidOperationException e) { result = e; }
+                var name = key.ToString()!; // (pattern, count, anchor) or a class name
+                if (Stored()?.TryGetValue(name, out var line) == true) result = Parse<T>(line);
+                else
+                {
+                    try { result = find(); }
+                    catch (InvalidOperationException e) { result = e; }
+                    Store(name, result);
+                }
                 _lookups[key] = result;
             }
             return result is Exception error ? throw new InvalidOperationException(error.Message) : (T)result;
         }
+    }
+
+    // ---- Lookups of the running game saved per exe version: a scan gives the same answer for the same exe (about 3 s a start) ----
+
+    private string StoreFile => Path.Combine(Loader.ModsDir, "cache", $"signatures-{_version}.txt");
+
+    /// <summary>Earlier starts' results for this exe ("key, tab, result" lines), or null for an image mapped as data (tests scan).</summary>
+    private Dictionary<string, string>? Stored()
+    {
+        if (this != Game) return null;
+        if (_stored != null) return _stored;
+        _stored = [];
+        try
+        {
+            foreach (var line in File.Exists(StoreFile) ? File.ReadAllLines(StoreFile) : [])
+                if (line.IndexOf('\t') is var tab and > 0) _stored[line[..tab]] = line[(tab + 1)..];
+        }
+        catch (IOException) { _stored.Clear(); } // unreadable: scan
+        return _stored;
+    }
+
+    /// <summary>Appends a result: RVAs in hex (space-separated for FindAll), or "!" and the error.</summary>
+    private void Store(string name, object result)
+    {
+        if (Stored() is not { } stored || name.Contains('\t') || name.Contains('\n')) return;
+        var value = result switch
+        {
+            Exception e => "!" + e.Message.Replace('\n', ' '),
+            nint[] hits => string.Join(' ', hits.Select(h => (h - _base).ToString("x"))),
+            nint hit => (hit - _base).ToString("x"),
+            _ => null,
+        };
+        if (value == null) return;
+        stored[name] = value;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(StoreFile)!);
+            File.AppendAllText(StoreFile, $"{name}\t{value}\n");
+        }
+        catch (IOException) { } // read-only folder: scan again next start
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private object Parse<T>(string value)
+    {
+        if (value.StartsWith('!')) return new InvalidOperationException(value[1..]);
+        var hits = value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(h => _base + (nint)Convert.ToInt64(h, 16)).ToArray();
+        return typeof(T) == typeof(nint[]) ? hits : hits[0];
     }
 
     private nint[] Search(string pattern, int count, string? anchor)
@@ -118,15 +175,22 @@ public sealed unsafe partial class Image
     {
         var pat = pattern.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Select(t => t.StartsWith('?') ? -1 : Convert.ToInt32(t, 16)).ToArray();
-        var first = Array.FindIndex(pat, b => b >= 0);
+        // The longest run of concrete bytes is searched for (vectorized IndexOf of a span), then the rest compared: a lone first
+        // byte like 48 occurs millions of times in .text, a run of several rarely.
+        var (first, length) = (-1, 0);
+        for (int i = 0, run = 0; i < pat.Length; i++)
+        {
+            run = pat[i] < 0 ? 0 : run + 1;
+            if (run > length) (first, length) = (i - run + 1, run);
+        }
         if (first < 0) throw new ArgumentException("pattern has no concrete byte", nameof(pattern));
+        var needle = pat.AsSpan(first, length).ToArray().Select(b => (byte)b).ToArray();
         var hits = new List<nint>();
         foreach (var (start, size, code) in _sections)
         {
             if (!code) continue;
             var span = Unpatched(start, size);
-            // Jump between occurrences of the first concrete byte (vectorized IndexOf), then compare the rest.
-            for (int i = first, next; (next = span[i..].IndexOf((byte)pat[first])) >= 0; i++)
+            for (int i = first, next; i < size && (next = span[i..].IndexOf(needle)) >= 0; i++)
             {
                 i += next;
                 var at = i - first;
