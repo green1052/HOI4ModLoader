@@ -31,8 +31,9 @@ public unsafe partial class FrontLine
     /// <summary>
     /// Going back from <paramref name="from"/> over our provinces ring by ring (provinces at the same distance: every way back
     /// crosses each ring), a ring of at most NeckWidth provinces, all next to enemy ground with enemy troops next to one, within
-    /// MaxSalient provinces: the neck of a closing pocket. The way out: the first province past the neck with no enemy next to
-    /// it; -1 when there is no neck, or no safe ground behind it (a coastal strip, an enclave).
+    /// MaxSalient provinces: the neck of a closing pocket, if the enemy next to it is at least as strong as all of ours in the
+    /// salient (else it can't close it: along a coastal strip, every narrow stretch is a "neck"). The way out: the first
+    /// province past the neck with no enemy next to it; -1 when there is no neck, or no safe ground behind it (an enclave).
     /// </summary>
     // ponytail: rings, not a max-flow of disjoint paths; a neck that two rings share unevenly is missed.
     private int Neck(nint country, int tag, nint from)
@@ -40,6 +41,7 @@ public unsafe partial class FrontLine
         if (!NextToEnemy(country, tag, from)) return -1;
         var seen = new HashSet<int> { Game.Id(from) };
         var ring = new List<nint> { from };
+        var salient = new List<nint> { from };
         var (inside, neck) = (1, 0);
         for (var depth = 1; ; depth++)
         {
@@ -50,13 +52,37 @@ public unsafe partial class FrontLine
             if (next.Count == 0) return -1; // cut off already, an island, or a dead end behind the neck
             if (neck == 0)
             {
-                if (next.Count <= NeckWidth && next.All(p => NextToEnemy(country, tag, p)) && next.Any(p => Province.EnemyDivisionsNext(country, tag, p))) neck = depth;
+                if (next.Count <= NeckWidth && next.All(p => NextToEnemy(country, tag, p)) && next.Any(p => Province.EnemyDivisionsNext(country, tag, p)))
+                {
+                    if (EnemyPower(country, tag, next) < OurPower(tag, salient.Concat(next))) return -1; // we hold it
+                    neck = depth;
+                }
                 else if ((inside += next.Count) > MaxSalient || depth == MaxNeckSearch) return -1; // too big for a salient, or no neck near
+                else salient.AddRange(next);
             }
             else if (next.FirstOrDefault(p => !NextToEnemy(country, tag, p)) is var safe && safe != 0) return Game.Id(safe);
             else if (depth - neck == MaxRestSearch) return -1;
             ring = next;
         }
+    }
+
+    /// <summary>Our divisions' power in the provinces.</summary>
+    private static long OurPower(int tag, IEnumerable<nint> provinces) =>
+        provinces.SelectMany(p => Province.Units(p).ToArray()).Where(u => u != 0 && Division.IsLand(u) && Division.Commander(u) == tag).Sum(Division.Power);
+
+    /// <summary>The power of the enemy divisions next to the provinces.</summary>
+    private long EnemyPower(nint country, int tag, IEnumerable<nint> provinces)
+    {
+        var seen = new HashSet<int>();
+        long power = 0;
+        foreach (var p in provinces)
+        foreach (var id in Game.Neighbours(p))
+        {
+            if (!seen.Add(id) || Game.Province(id) is not (var n and not 0)) continue;
+            foreach (var unit in Province.Units(n))
+                if (unit != 0 && Division.IsLand(unit) && AtWar(country, Division.Commander(unit))) power += Division.Power(unit);
+        }
+        return power;
     }
 
     // ---- Fire brigade: mobile reserves a province behind the line counterattack break-ins ----

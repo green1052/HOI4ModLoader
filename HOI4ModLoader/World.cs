@@ -293,6 +293,9 @@ public static unsafe class Division
     /// <summary>Strength (equipment and manpower), 1e5 = full.</summary>
     public static long Strength(nint unit) => Ratio(unit, StrengthSlot);
 
+    /// <summary>A rough fighting power: strength %, worth half again with full organisation (0..100).</summary>
+    public static long Power(nint unit) => Strength(unit) * 100 / Native.FixedPoint * (50 + Organisation(unit) * 100 / Native.FixedPoint / 2) / 100;
+
     private static long Ratio(nint unit, int slot)
     {
         long value;

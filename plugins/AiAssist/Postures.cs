@@ -141,7 +141,7 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>A division's fighting power, 0-100: its strength, counted at half to full by its organisation.</summary>
-    private static long Power(nint unit) => Percent(Division.Strength(unit)) * (50 + Percent(Division.Organisation(unit)) / 2) / 100;
+    private static long Power(nint unit) => Division.Power(unit);
 
     /// <summary>
     /// The grad: a minimum cut between the strong enemies' ground and the tag's core, through its own provinces up to
