@@ -96,8 +96,14 @@ public unsafe partial class AiAssist : Plugin
             "The AI uses its paratroopers (needs BreakthroughAxis): up to four paradrop-capable divisions of an army of the theatre its breakthrough axis is in fly from the airbase nearest the axis that can carry them "
             + "onto an empty enemy province behind the line near the axis (victory points, supply hubs, airfields, pockets first). They jump only when vanilla allows the drop "
             + "(prepared, enough transport planes, air superiority on the route). With no axis drop, behind a beachhead of its own from the last ten days instead (from the airbase nearest it). "
-            + "Vanilla's AI never paradrops. Sheep Mod's AI builds few paratroopers or transport planes: the optional HOI4ModLoader AI Airborne mod (mods\\AiAirborne) makes the majors build some; "
-            + "the log counts which check stopped them.") && _axis;
+            + "Vanilla's AI never paradrops, and Sheep Mod's AI builds few paratroopers or transport planes (see AirborneUnits); the log counts which check stopped them.") && _axis;
+        // Game files count toward the checksum: added at startup only (the game reads them once), so a change waits for a restart.
+        if (Config.Bind("AI", "AirborneUnits", true,
+                "Germany, the UK, the US, Japan, the USSR and Italy research paratroopers and transport planes (from 1938, 30+ military factories), keep about 4% paratrooper divisions and build transport planes "
+                + "(with the paratrooper tech, 40+ military factories), so that StrategicParadrops has something to drop with. An AI strategy file put in front of the game's own at startup: its values only add, "
+                + "so Sheep Mod's deliberate aircraft bans still win. It changes the checksum: turn it off (and restart) to join a multiplayer game of players without it. Takes effect at the next start.")
+            && Loader.AtStartup)
+            AddGameFile("common/ai_strategy/hoimod_ai_airborne.txt");
         _postures = Config.Bind("AI", "DefensivePostures", true,
             "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.3x while it lost line provinces in the last week or is short of divisions) gives up exposed ground and holds its grad: "
             + "the most defensible short line between that enemy and its capital (rivers, mountains, marsh, forests, hills, cities and forts in front, few directions to be attacked from), redrawn weekly, "
@@ -254,6 +260,16 @@ public unsafe partial class AiAssist : Plugin
 
     /// <summary>A ratio (organisation, strength: 1e5 = full) in % of full.</summary>
     private static long Percent(long ratio) => ratio * 100 / Native.FixedPoint;
+
+    /// <summary>One of the embedded gamefiles\* in front of the game's own files (GameFiles.Add).</summary>
+    private static void AddGameFile(string path)
+    {
+        using var stream = typeof(AiAssist).Assembly.GetManifestResourceStream("gamefiles/" + Path.GetFileName(path))
+            ?? throw new FileNotFoundException($"no embedded {path}");
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        GameFiles.Add(path, bytes.ToArray());
+    }
 
     /// <summary>Runs a hook's own logic where Sheep Mod is in the game; an exception is logged (the first only) and the game goes on.</summary>
     private static void Safely(Action action)

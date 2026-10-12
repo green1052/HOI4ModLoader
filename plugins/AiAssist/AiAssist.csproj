@@ -1,1 +1,8 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Game files AI Assist puts in front of the game's own at startup (GameFiles.Add): gamefiles\<name>, embedded as "gamefiles/<name>". -->
+    <ItemGroup>
+        <EmbeddedResource Include="gamefiles\*" LogicalName="gamefiles/%(Filename)%(Extension)" />
+    </ItemGroup>
+
+</Project>

@@ -1,7 +1,7 @@
 #
-# HOI4ModLoader AI Airborne: the major powers' AI researches paratroopers and transport planes, keeps a few paratrooper
-# divisions and builds transport planes, so that AI Assist's strategic paradrops (a HOI4ModLoader plugin) have something
-# to drop with: real divisions, real planes, the vanilla paradrop.
+# Put in front of the game's files by AI Assist ([AI] AirborneUnits): the major powers' AI researches paratroopers and
+# transport planes, keeps a few paratrooper divisions and builds transport planes, so that its strategic paradrops have
+# something to drop with: real divisions, real planes, the vanilla paradrop.
 #
 # AI strategy values of every enabled strategy add up. These only add, and stay small: where Sheep Mod deliberately bans
 # aircraft (-999: France, Italy and the USSR beside the UK/US under 175 divisions, mass-mob and Chinese AIs, minors), the
