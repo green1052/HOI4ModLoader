@@ -26,6 +26,8 @@ l_english:
     com.green1052.aiassist.Pincers.desc:0 "Where the enemy masses divisions, the breakthrough axis becomes two arms that close behind them.\n- Mass: 3+ divisions in a line province, twice the line's average\n- Arms: the thinnest enemy sector on each side, 2-5 line provinces away\n- Kept 3 days while both arms' targets are still the enemy's\nNeeds Breakthrough axis."
     com.green1052.aiassist.Feints:0 "Feints"
     com.green1052.aiassist.Feints.desc:0 "Before a new main push, the AI first attacks elsewhere so the enemy's reserves move there.\n- Feint: the enemy line province with the most divisions, 5+ provinces from the push\n- For 36 hours; the push waits meanwhile, then the feint stops\nNeeds Breakthrough axis."
+    com.green1052.aiassist.OffensiveTiming:0 "Offensive timing"
+    com.green1052.aiassist.OffensiveTiming.desc:0 "A battle plan's offensive starts once its divisions are ready.\n- Not while they average under 60% organisation\n- Not while over 30% of them are still on their way to the line\nNeeds Hold the line."
     com.green1052.aiassist.BeachDefense:0 "Beach defence"
     com.green1052.aiassist.BeachDefense.desc:0 "Answers naval landings at once by sealing off and attacking the beachhead.\n- Free divisions near the landing wall it in and attack into it\n- Beachhead: ground the enemy took from the sea in the last 10 days, or a small enemy pocket on the coast\nVanilla leaves a landing alone until the front collapses"
     com.green1052.aiassist.SupplyAwareAttacks:0 "Supply-aware attacks"

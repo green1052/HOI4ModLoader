@@ -27,6 +27,8 @@
     com.green1052.aiassist.Pincers.desc:0 "적이 사단을 한곳에 모으면 돌파축을 둘로 나눠 그 뒤에서 조입니다.\n- 집결: 전선 프로빈스에 사단 3개 이상, 전선 평균의 2배\n- 두 축: 집결지 양쪽에서 2~5칸 떨어진 가장 얇은 적 구간\n- 두 목표가 적 땅인 동안 3일 유지\n돌파축 설정이 켜져 있어야 합니다."
     com.green1052.aiassist.Feints:0 "기만 공격"
     com.green1052.aiassist.Feints.desc:0 "새 주공 전에 다른 곳을 먼저 쳐서 적 예비대를 그쪽으로 끌어냅니다.\n- 견제 지점: 주공에서 5칸 이상 떨어진, 적 사단이 가장 많은 전선 프로빈스\n- 36시간 동안. 그동안 주공은 대기하고, 끝나면 견제를 멈춤\n돌파축 설정이 켜져 있어야 합니다."
+    com.green1052.aiassist.OffensiveTiming:0 "공세 타이밍"
+    com.green1052.aiassist.OffensiveTiming.desc:0 "전투 계획의 공세는 사단이 준비된 뒤에 시작합니다.\n- 평균 조직력 60% 미만이면 대기\n- 30% 넘는 사단이 아직 전선으로 이동 중이면 대기\n전선 유지 설정이 켜져 있어야 합니다."
     com.green1052.aiassist.BeachDefense:0 "해안 상륙 대응"
     com.green1052.aiassist.BeachDefense.desc:0 "적 상륙에 바로 대응해 교두보를 막고 공격합니다.\n- 상륙장 근처의 쉬는 사단이 교두보를 둘러싸고 안으로 공격\n- 교두보: 적이 10일 안에 바다에서 빼앗은 땅, 또는 해안의 작은 적 고립 지대\n바닐라는 전선이 무너질 때까지 상륙을 방치함"
     com.green1052.aiassist.SupplyAwareAttacks:0 "보급 고려 공격"

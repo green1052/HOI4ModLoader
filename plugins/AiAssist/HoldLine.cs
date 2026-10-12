@@ -718,6 +718,41 @@ public unsafe partial class AiAssist
         if (!_holdLine) return true;
         var hour = Game.Hour;
         if (_dominant.TryGetValue(*(int*)tag, out var seen) && hour - seen is >= 0 and < 2 * BackfillHours) return true; // twice the enemy's power on its line
-        return Manned(*(int*)tag, LineOf(*(int*)tag, hour)); // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
+        if (!Manned(*(int*)tag, LineOf(*(int*)tag, hour))) return false; // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
+        return !_timing || order == 0 || TimeToAttack(order, *(int*)tag, hour);
+    }
+
+    private const int MinAttackOrg = 60, MaxGatheringPercent = 30;
+    private static bool _timing;
+    private static int _waited;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> WaitedAt = new(); // order -> hour last logged
+
+    /// <summary>
+    /// Offensive timing: a battle plan starts once its divisions are ready, not while they still recover their organisation
+    /// (under MinAttackOrg % on average) or walk up to the line (over MaxGatheringPercent % of them on the move). AI threads.
+    /// </summary>
+    private static bool TimeToAttack(nint order, int tag, int hour)
+    {
+        var members = Order.Members(order);
+        if (members.Length == 0) return true;
+        long org = 0;
+        var walking = 0;
+        foreach (var member in members)
+        {
+            var unit = member - MemberOfUnit;
+            org += Percent(Division.Organisation(unit));
+            if (Division.Walking(unit)) walking++;
+        }
+        var why = org < (long)MinAttackOrg * members.Length ? $"its divisions are at {org / members.Length}% organisation"
+            : walking * 100 > MaxGatheringPercent * members.Length ? $"{walking} of its {members.Length} divisions are still on their way"
+            : null;
+        if (why == null) return true;
+        Interlocked.Increment(ref _waited);
+        if (!WaitedAt.TryGetValue(order, out var last) || hour - last is < 0 or >= 24)
+        {
+            WaitedAt[order] = hour;
+            _log?.Info($"#{tag}: holds an offensive of {members.Length} division(s): {why}");
+        }
+        return false;
     }
 }

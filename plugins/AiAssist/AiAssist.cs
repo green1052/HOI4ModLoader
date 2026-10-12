@@ -75,6 +75,9 @@ public unsafe partial class AiAssist : Plugin
         _feints = Config.Bind("AI", "Feints", true,
             "Needs BreakthroughAxis. Before a new main push (a thin sector or a pincer), the AI's local attacks first hit, for a day and a half, the enemy line province with the most divisions "
             + "at least five provinces away, so its reserves move there; the push waits meanwhile.") && _axis;
+        _timing = Config.Bind("AI", "OffensiveTiming", true,
+            "Needs HoldTheLine. The AI starts a battle plan's offensive only once its divisions are ready: not while they average under 60% organisation, "
+            + "nor while over 30% of them are still on their way to the line.") && _holdLine;
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
             + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "
@@ -230,6 +233,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _drives, "drove {0} mobile division(s) through gaps in enemy lines");
         Add(ref _pincered, "opened {0} pincer(s) around massed enemy divisions");
         Add(ref _feinted, "feinted {0} time(s) before a new push");
+        Add(ref _waited, "held {0} offensive(s) until their divisions were ready");
         Add(ref _kept, "kept {0} line defender(s) from strategic redeployment to another front");
         Add(ref _reserved, "posted {0} reserve(s)");
         Add(ref _depth, "posted {0} second-line division(s) behind key line provinces");
