@@ -19,6 +19,7 @@ public unsafe partial class FrontLine
     /// </summary>
     private void Attack(nint country, int tag)
     {
+        _beachheads.Clear();
         var targets = new List<(nint From, int To, int Need, int Defenders, int Pocket, double Value, int Change)>();
         var fresh = new Dictionary<nint, List<nint>>();
         foreach (var (from, here) in _at)
@@ -36,7 +37,7 @@ public unsafe partial class FrontLine
                 if (need == 0 || need > ready.Count || need >= here.Count) continue; // not a pocket, or too strong for what can leave here
                 var pocket = defenders > 0 ? defenders : Province.Pocket(country, tag, target);
                 if (pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue; // our supply can't follow
-                var (value, change) = (Value(target), Province.FrontChange(country, tag, target));
+                var (value, change) = (Value(target) + PortPull(country, tag, from, target), Province.FrontChange(country, tag, target));
                 if (pocket == 0 && value < MinValue && change > 2) continue;      // a much longer front for nothing
                 targets.Add((from, id, need, defenders, pocket, value, change));
             }
@@ -86,7 +87,7 @@ public unsafe partial class FrontLine
                     && (Enemy(country, tag, p) ? Province.Divisions(p) > 0 : Friendly(country, tag, p) && Hostiles(country, p) > 0))
                     candidates.TryAdd(id, p);
         }
-        var plans = new List<(int To, List<nint> Units, int Pocket, double Odds, double Value)>();
+        var plans = new List<(int To, List<nint> Units, int Pocket, double Odds, double Value, int Port)>();
         foreach (var (id, target) in candidates)
         {
             long defence = 0;
@@ -99,6 +100,8 @@ public unsafe partial class FrontLine
             var hard = 1 + Province.FortLevel(target) / 2.0;
             if ((Province.TerrainCategory(target) & (Province.Mountain | Province.Urban | Province.Marsh | Province.Jungle)) != 0) hard *= 1.5;
             var (value, change) = (Value(target), Province.FrontChange(country, tag, target));
+            var port = Game.Neighbours(target).Select(Game.Province).Where(_at.ContainsKey).Select(from => PortPull(country, tag, from, target)).DefaultIfEmpty(0).Max();
+            value += port;
             var pocket = mopUp ? Hostiles(country, target) : Province.Pocket(country, tag, target);
             if (!mopUp && pocket == 0 && value < MinValue && change > 2) continue;
             var attackers = new List<(nint Unit, double Power)>();
@@ -120,11 +123,11 @@ public unsafe partial class FrontLine
                 sent.Add(unit);
                 power += p;
             }
-            if (power >= need) plans.Add((id, sent, pocket, power / (defence * hard), value));
+            if (power >= need) plans.Add((id, sent, pocket, power / (defence * hard), value, port));
         }
 
         var used = new HashSet<nint>();
-        foreach (var plan in plans.OrderByDescending(p => p.Pocket).ThenByDescending(p => p.Odds).ThenByDescending(p => p.Value))
+        foreach (var plan in plans.OrderByDescending(p => p.Pocket).ThenByDescending(p => p.Port).ThenByDescending(p => p.Odds).ThenByDescending(p => p.Value))
         {
             if (max == 0) break;
             if (plan.Units.Any(used.Contains)) continue; // promised to a better one this turn
@@ -145,6 +148,31 @@ public unsafe partial class FrontLine
 
     /// <summary>On an order of a battle plan that is running (the player's go-ahead to attack).</summary>
     private bool OnRunningPlan(nint unit) => _orders.TryGetValue(unit + MemberOfUnit, out var order) && Order.Executing(order);
+
+    private const int BeachheadSize = 12, PortSearch = 4, PortPullValue = 50;
+    private readonly Dictionary<nint, bool> _beachheads = []; // province -> in a landing without a port: per Attack call
+
+    /// <summary>
+    /// From a beachhead (our ground around <paramref name="from"/> is cut off, up to BeachheadSize provinces, with no naval base:
+    /// supply only over the beach) the way to the nearest enemy port is worth the most: PortPullValue for the port, less with
+    /// each step to it through enemy ground (up to PortSearch). 0 elsewhere.
+    /// </summary>
+    private int PortPull(nint country, int tag, nint from, nint target)
+    {
+        if (!_beachheads.TryGetValue(from, out var beachhead))
+            _beachheads[from] = beachhead = Province.Region(from, BeachheadSize, p => Province.Controller(p) == tag) is { } ours
+                                            && ours.All(p => Province.BuildingLevel(p, Buildings.NavalBaseSlot) == 0);
+        if (!beachhead) return 0;
+        var seen = new HashSet<nint> { target };
+        var frontier = new List<nint> { target };
+        for (var depth = 0; depth < PortSearch && frontier.Count > 0; depth++)
+        {
+            if (frontier.Any(p => Province.BuildingLevel(p, Buildings.NavalBaseSlot) > 0)) return PortPullValue - depth * PortPullValue / PortSearch;
+            frontier = frontier.SelectMany(p => Game.Neighbours(p)).Select(Game.Province)
+                .Where(p => p != 0 && Enemy(country, tag, p) && seen.Add(p)).ToList();
+        }
+        return 0;
+    }
 
     /// <summary>What taking the province is worth: victory points, a supply hub, a port, the state's airfields (in full on its main province).</summary>
     private static double Value(nint target)
