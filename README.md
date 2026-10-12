@@ -118,7 +118,7 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 - **Invasion escort** (part of Strategic invasions): the sea regions on a planned landing's route get twice the fighters the air AI wants there (100 at least) and twice the naval bombers. Vanilla's navy already has to win those regions before a landing sails, and its fleets already head there; its air AI never looks at the route.
 - **Encirclement:** enemy salients are cut at their base instead of pushed head-on: where enemy ground bulges into the AI's line through a neck of one or two provinces and taking it cuts off 3+ enemy divisions for less than it costs, the local attacks and close air support of both flanks go for the neck until the pocket closes (a week at most).
 - **Railway guns:** the AI's railway guns go to the armies on its breakthrough axis first and stay there.
-- **Supply hubs:** where AI divisions are low on supply with no hub within 3 provinces, the AI builds one (weekly, two a month at most); vanilla's AI already upgrades and links existing hubs.
+- **Supply hubs:** from 1941 on, where the divisions of an AI country with 60+ civilian factories are low on supply with no hub within 3 provinces, it builds one (weekly, two a month at most); a hub costs 20000, so earlier or poorer it doesn't. Vanilla's AI already upgrades and links existing hubs.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, never the checksum, so players without the loader can join the same game.

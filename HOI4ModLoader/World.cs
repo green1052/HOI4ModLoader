@@ -209,7 +209,7 @@ public static unsafe class Buildings
 
     // CBuildingDatabase (0x3F0 bytes): 0x3A0 supply_node, 0x3A8 rail_way, 0x3B0 infrastructure, 0x3B8 naval_base (the slot
     // DbCallSig reads), 0x3C0 arms_factory, 0x3C8 industrial_complex; 0x298 CPdxArray<CBuildingType*> the air base types.
-    public const int SupplyNodeSlot = 0x3A0, InfrastructureSlot = 0x3B0, AirBaseTypesOffset = 0x298;
+    public const int SupplyNodeSlot = 0x3A0, InfrastructureSlot = 0x3B0, CivilianFactorySlot = 0x3C8, AirBaseTypesOffset = 0x298;
     private const int LevelOfBuilding = 0x40, WorkingLevelOfBuilding = 0x42; // short levels, built and working (bombed-out ones don't count)
 
     private static class Resolved

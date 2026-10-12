@@ -104,7 +104,8 @@ public unsafe partial class AiAssist : Plugin
         var railGuns = Config.Bind("AI", "RailwayGuns", true,
             "The AI's railway guns go to the armies on its breakthrough axis first and stay there: those armies are served first and other armies can't take their guns. Needs BreakthroughAxis.") && _axis;
         var supplyHubs = Config.Bind("AI", "SupplyHubs", true,
-            "Where an AI country's divisions are low on supply with no supply hub within 3 provinces, it builds one (railway-connected provinces first); checked weekly, two a month at most. Vanilla's AI only upgrades and links the hubs it has.");
+            "From 1941 on, where the divisions of an AI country with 60+ civilian factories are low on supply with no supply hub within 3 provinces, it builds one (railway-connected provinces first); checked weekly, two a month at most. "
+            + "A hub costs 20000, so earlier or poorer it doesn't. Vanilla's AI only upgrades and links the hubs it has.");
 
         _log = Log;
         ResolveShared();

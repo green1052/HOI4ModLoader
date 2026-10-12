@@ -135,6 +135,9 @@ public static unsafe class Game
     /// <summary>The game's clock in hours since its start date (0 without a game).</summary>
     public static int Hour => State is var gs && gs != 0 ? *(int*)(gs + HourOfGameState) : 0;
 
+    /// <summary>The game's year: its date counts hours from 1.1.1 in 365-day years.</summary>
+    public static int Year => Hour / (365 * 24) + 1;
+
     /// <summary>The country's tag.</summary>
     public static int Tag(nint country) => *(int*)(country + TagOfCountry);
 

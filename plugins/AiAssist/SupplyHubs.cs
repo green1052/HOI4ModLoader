@@ -4,7 +4,10 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Supply hubs: a new hub where AI divisions starve with none near ----
+    // ---- Supply hubs: a new hub where AI divisions starve with none near, late in the game and for a rich country only ----
+    //
+    // A hub costs 20000 (a railway level 170 + 130 a province): early on, or with few civilian factories, that money is better
+    // spent elsewhere, and the railways of the hubs it has are what vanilla upgrades.
     //
     // The interior minister already upgrades saturated hubs' railways and links cut-off hubs weekly; it never builds a new hub.
     // Ported from AutoConstruction's AutoSupply (BuildHub, FeedingNode), same layouts (HOI4 1.19.3); its railway rules are vanilla's here.
@@ -16,10 +19,11 @@ public unsafe partial class AiAssist
     private const int TokenOfType = 8, LocationOfCommand = 56, BuildingOfCommand = 60, LevelsOfCommand = 72, InsertionOfCommand = 76, ConstructionCommandSize = 0x50;
     private const int IsLowSupplySlot = 43; // CArmy vtable
     private const int HubDistance = 3, HubCheckHours = 7 * 24, HubsPerMonth = 2, MonthHours = 30 * 24, StarvingTried = 5;
+    private const int HubYear = 1941, HubCivilianFactories = 60;
 
     private static delegate* unmanaged<nint, nint, int> _freeLevels;
     private static delegate* unmanaged<nint, nint, nint, byte, byte> _canBuildInProvince;
-    private static int _hubs, _hubWorld = -1;
+    private static int _hubs, _hubWorld = -1, _yearLogged = -2;
     private static readonly Dictionary<int, (int Next, List<int> Queued)> HubPlans = []; // tag -> next check, hours hubs were queued (main thread)
 
     private void LoadSupplyHubs()
@@ -45,6 +49,11 @@ public unsafe partial class AiAssist
         var networks = supply == 0 ? 0 : *(nint*)(supply + CountriesOfSupply);
         if (networks == 0 || type == 0) return;
         var (hour, player) = (Game.Hour, Game.ControlledTag);
+        var year = Game.Year;
+        if (_hubWorld != _yearLogged) Log.Info($"supply hubs: the game's year reads {year} (built from {HubYear}, by countries with {HubCivilianFactories}+ civilian factories)");
+        _yearLogged = _hubWorld;
+        if (year is > 1900 and < HubYear) return; // not late enough (a date that makes no sense: the factories alone decide)
+        Dictionary<int, int>? civilian = null;
         foreach (var country in Game.Countries)
         {
             var tag = country == 0 ? 0 : Game.Tag(country);
@@ -55,10 +64,34 @@ public unsafe partial class AiAssist
             queued.RemoveAll(h => hour - h is < 0 or >= MonthHours);
             HubPlans[tag] = (hour + HubCheckHours, queued);
             if (queued.Count >= HubsPerMonth) continue;
+            civilian ??= CivilianFactories();
+            if (civilian.GetValueOrDefault(tag) < HubCivilianFactories) continue;
             var countrySupply = *(nint*)(networks + 8 * Game.TagIndex(tag));
             var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);
             if (network != 0 && NewHub(country, tag, network, type)) queued.Add(hour);
         }
+    }
+
+    /// <summary>Civilian factories by the tag controlling each state (its main province's controller).</summary>
+    private static Dictionary<int, int> CivilianFactories()
+    {
+        var civilian = new Dictionary<int, int>();
+        var type = Buildings.Type(Buildings.CivilianFactorySlot);
+        if (type == 0) return civilian;
+        if (_provinceCount < 0) // the run of valid ids (the game has no province enumeration), as the beach watch probes it
+            for (int id = 1, misses = 0; misses < 512; id++)
+                if (Game.Province(id) == 0) misses++;
+                else (_provinceCount, misses) = (id, 0);
+        var counted = new HashSet<nint>();
+        for (var id = 1; id <= _provinceCount; id++)
+        {
+            var state = Game.Province(id) is var p && p != 0 ? Province.State(p) : 0;
+            if (state == 0 || !counted.Add(state)) continue;
+            var main = State.MainProvince(state);
+            var tag = main == 0 ? 0 : Province.Controller(main);
+            if (tag > 0) civilian[tag] = civilian.GetValueOrDefault(tag) + Buildings.Level(State.Buildings(state), type);
+        }
+        return civilian;
     }
 
     /// <summary>A hub for the worst-starving area of the country that has none within <see cref="HubDistance"/> provinces.</summary>
