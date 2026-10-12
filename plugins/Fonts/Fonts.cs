@@ -20,7 +20,7 @@ namespace Fonts;
 [Plugin("com.green1052.fonts", "Fonts", "1.0.0")]
 public sealed class Fonts : Plugin
 {
-    private const int Format = 3; // bump when the output changes: every cache is redrawn
+    private const int Format = 4; // bump when the output changes: every cache is redrawn
 
     public override void Load()
     {
@@ -73,6 +73,7 @@ public sealed class Fonts : Plugin
                 }
                 catch (Exception e) { Log.Error($"{name}: {e.Message}"); }
             });
+            Gdi.ForgetShapes();
             Directory.Move(building, cache);
             Log.Info($"drew {drawn} of {fnts.Count} fonts in {clock.ElapsedMilliseconds} ms (cached until the settings or the game's fonts change)");
         }
@@ -339,7 +340,7 @@ internal sealed class Bitmap(int width, int height)
 internal sealed unsafe class Gdi : IDisposable
 {
     public const uint FrPrivate = 0x10;
-    private const uint GgoGray8 = 6, GgoGlyphIndex = 0x80, GdiError = 0xFFFFFFFF;
+    private const uint GgoBitmap = 1, GgoGlyphIndex = 0x80, GdiError = 0xFFFFFFFF;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct GlyphMetrics
@@ -365,11 +366,14 @@ internal sealed unsafe class Gdi : IDisposable
     [DllImport("gdi32")] private static extern uint GetGlyphOutlineW(nint dc, uint glyph, uint format, GlyphMetrics* metrics, uint size, byte* buffer, int* matrix);
 
     private readonly nint _dc, _font;
-    // Glyphs are drawn this many times bigger and averaged down: smooth edges, where GDI's hinting at the real size snaps
-    // strokes to whole pixels (blocky, uneven letters).
-    private const int Scale = 4;
+    // Glyphs are drawn this many times bigger in black and white and averaged down: smooth edges (64 levels), where GDI's
+    // hinting at the real size snaps strokes to whole pixels (blocky, uneven letters). GDI's own grey levels oversample
+    // 8 times again inside, many times the work.
+    private const int Scale = 8;
     private const float Gamma = 0.8f; // averaged edges read thin and grey: denser coverage, as hinted or the game's own glyphs
     private readonly int _embolden;   // big pixels to thicken strokes by: the face has no weight as heavy as asked for
+    private readonly int _height, _weight;
+    private readonly byte[] _buffer = new byte[1 << 20]; // GDI's big glyph, one call each (1 bit a pixel: a map font's is ~0.1 MB)
 
     /// <summary>The face Windows actually picked (it substitutes one it can't find).</summary>
     public readonly string Face;
@@ -377,6 +381,7 @@ internal sealed unsafe class Gdi : IDisposable
     /// <summary><paramref name="face"/> <paramref name="height"/> pixels tall (GDI's: positive the cell, negative the em), of <paramref name="weight"/> (400 regular, 700 bold).</summary>
     public Gdi(string face, int height, int weight)
     {
+        (_height, _weight) = (height, weight);
         _dc = CreateCompatibleDC(0);
         _font = CreateFontW(height * Scale, 0, 0, 0, weight, 0, 0, 0, 1 /* default charset */, 7 /* TrueType only */, 0, 4 /* anti-aliased */, 0, face);
         SelectObject(_dc, _font);
@@ -426,56 +431,34 @@ internal sealed unsafe class Gdi : IDisposable
         return Fonts.FamilyNames(table, 0);
     }
 
+    /// <summary>A glyph's ink at the real size (0..255, gamma applied), where its box sits from the pen, and its advance; W 0: blank.</summary>
+    private sealed record Shape(byte[] Ink, int W, int H, int Left, int Top, int Advance);
+
+    // Shapes by face, size, weight and character: many of the game's fonts come out the same, and drawing is GDI-bound
+    // (Windows draws glyphs nearly one at a time, whatever the threads). Emptied once all fonts are drawn.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, int, int, char), Shape?> Shapes = new();
+
+    public static void ForgetShapes() => Shapes.Clear();
+
     /// <summary>
     /// The character's glyph (metrics against <paramref name="baseline"/>), or null if the face has none. With an outline also a
     /// shadow a pixel down and right, as the game's own outlined fonts have.
     /// </summary>
     public Glyph? Draw(char c, int outline, int baseline, bool darkInk)
     {
-        ushort index;
-        if (GetGlyphIndicesW(_dc, &c, 1, &index, 1 /* mark missing */) == GdiError || index == 0xFFFF) return null;
-        var identity = stackalloc int[] { 0x10000, 0, 0, 0x10000 }; // MAT2: 1, 0, 0, 1 in 16.16
-        GlyphMetrics m;
-        var size = GetGlyphOutlineW(_dc, index, GgoGray8 | GgoGlyphIndex, &m, 0, null, identity);
-        if (size == GdiError) return null;
-        var advance = (int)Math.Round((m.CellIncX + _embolden) / (double)Scale); // a thickened glyph is that much wider
-        if (size == 0 || m.BlackBoxX == 0) return new Glyph(0, [], 0, 0, 0, 0, advance); // a space
-        var coverage = new byte[size];
-        fixed (byte* buffer = coverage)
-            if (GetGlyphOutlineW(_dc, index, GgoGray8 | GgoGlyphIndex, &m, size, buffer, identity) == GdiError) return null;
-        // The big black box (top left from the pen on the baseline, y down) averaged into the real size's pixels.
-        int bigW = (int)m.BlackBoxX, bigH = (int)m.BlackBoxY, pitch = (bigW + 3) & ~3, bigX = m.OriginX, bigY = -m.OriginY;
-        if (_embolden > 0) // each stroke _embolden big pixels wider, half on each side
-        {
-            var k = _embolden;
-            var thick = new byte[(bigW + k) * (bigH + k)];
-            for (var y = 0; y < bigH; y++)
-            for (var x = 0; x < bigW; x++)
-            {
-                var v = coverage[y * pitch + x];
-                if (v == 0) continue;
-                for (var dy = 0; dy <= k; dy++)
-                for (var dx = 0; dx <= k; dx++)
-                    if (thick[(y + dy) * (bigW + k) + x + dx] < v) thick[(y + dy) * (bigW + k) + x + dx] = v;
-            }
-            (coverage, bigW, bigH, pitch, bigX, bigY) = (thick, bigW + k, bigH + k, bigW + k, bigX - k / 2, bigY - k / 2);
-        }
-        int left = (int)Math.Floor(bigX / (double)Scale), top = (int)Math.Floor(bigY / (double)Scale);
-        int w = (int)Math.Ceiling((bigX + bigW) / (double)Scale) - left, h = (int)Math.Ceiling((bigY + bigH) / (double)Scale) - top;
+        if (Shapes.GetOrAdd((Face, _height, _weight, c), _ => Rasterize(c)) is not { } shape) return null;
+        if (shape.W == 0) return new Glyph(0, [], 0, 0, 0, 0, shape.Advance); // a space
         var shadow = outline > 0 ? 1 : 0;
-        int ow = w + 2 * outline + shadow, oh = h + 2 * outline + shadow;
+        int ow = shape.W + 2 * outline + shadow, oh = shape.H + 2 * outline + shadow;
         var fill = new float[ow * oh]; // 0..1
-        for (var y = 0; y < bigH; y++)
-        for (var x = 0; x < bigW; x++)
-        {
-            var cell = ((int)Math.Floor((bigY + y) / (double)Scale) - top + outline) * ow + (int)Math.Floor((bigX + x) / (double)Scale) - left + outline;
-            fill[cell] += Math.Min(64, (int)coverage[y * pitch + x]) / (64f * Scale * Scale);
-        }
+        for (var y = 0; y < shape.H; y++)
+        for (var x = 0; x < shape.W; x++)
+            fill[(y + outline) * ow + x + outline] = shape.Ink[y * shape.W + x] / 255f;
         var pixels = new byte[ow * oh * 4];
         for (var y = 0; y < oh; y++)
         for (var x = 0; x < ow; x++)
         {
-            var f = fill[y * ow + x] = MathF.Pow(fill[y * ow + x], Gamma);
+            var f = fill[y * ow + x];
             var o = 0f; // the outline: the most ink within its radius (a disc), and again a shadow's step up-left
             for (var s = 0; s <= shadow; s++)
             for (var dy = -outline; dy <= outline; dy++)
@@ -488,7 +471,60 @@ internal sealed unsafe class Gdi : IDisposable
             var shade = darkInk ? (byte)0x20 : a > 0 ? (byte)(255 * f / a) : (byte)0;
             (pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]) = (shade, shade, shade, (byte)(255 * a));
         }
-        return new Glyph(0, pixels, ow, oh, left - outline, baseline + top - outline, advance);
+        return new Glyph(0, pixels, ow, oh, shape.Left - outline, baseline + shape.Top - outline, shape.Advance);
+    }
+
+    /// <summary>The character drawn big by GDI, thickened if the face is too light, averaged down to the real size; null: none in the face.</summary>
+    private Shape? Rasterize(char c)
+    {
+        ushort index;
+        if (GetGlyphIndicesW(_dc, &c, 1, &index, 1 /* mark missing */) == GdiError || index == 0xFFFF) return null;
+        var identity = stackalloc int[] { 0x10000, 0, 0, 0x10000 }; // MAT2: 1, 0, 0, 1 in 16.16
+        GlyphMetrics m;
+        uint size;
+        fixed (byte* buffer = _buffer) size = GetGlyphOutlineW(_dc, index, GgoBitmap | GgoGlyphIndex, &m, (uint)_buffer.Length, buffer, identity);
+        if (size == GdiError) return null;
+        var advance = (int)Math.Round((m.CellIncX + _embolden) / (double)Scale); // a thickened glyph is that much wider
+        if (size == 0 || m.BlackBoxX == 0) return new Shape([], 0, 0, 0, 0, advance);
+        // The big black box (top left from the pen on the baseline, y down): 1 bit a pixel, rows padded to 32 bits.
+        int bigW = (int)m.BlackBoxX, bigH = (int)m.BlackBoxY, pitch = bigW, bigX = m.OriginX, bigY = -m.OriginY, row = (bigW + 31) / 32 * 4;
+        var coverage = new byte[bigW * bigH];
+        for (var y = 0; y < bigH; y++)
+        for (var x = 0; x < bigW; x++)
+            coverage[y * bigW + x] = (byte)((_buffer[y * row + (x >> 3)] >> (7 - (x & 7)) & 1) * 64);
+        if (_embolden > 0) // each stroke _embolden big pixels wider, half on each side
+        {
+            // A (k+1)-square max filter, row-wise then column-wise.
+            var k = _embolden;
+            int tw = bigW + k, th = bigH + k;
+            var wide = new byte[tw * bigH];
+            for (var y = 0; y < bigH; y++)
+            for (var x = 0; x < tw; x++)
+            {
+                byte v = 0;
+                for (var d = Math.Max(0, x - k); d <= Math.Min(bigW - 1, x); d++) v = Math.Max(v, coverage[y * pitch + d]);
+                wide[y * tw + x] = v;
+            }
+            var thick = new byte[tw * th];
+            for (var y = 0; y < th; y++)
+            for (var x = 0; x < tw; x++)
+            {
+                byte v = 0;
+                for (var d = Math.Max(0, y - k); d <= Math.Min(bigH - 1, y); d++) v = Math.Max(v, wide[d * tw + x]);
+                thick[y * tw + x] = v;
+            }
+            (coverage, bigW, bigH, pitch, bigX, bigY) = (thick, tw, th, tw, bigX - k / 2, bigY - k / 2);
+        }
+        int left = (int)Math.Floor(bigX / (double)Scale), top = (int)Math.Floor(bigY / (double)Scale);
+        int w = (int)Math.Ceiling((bigX + bigW) / (double)Scale) - left, h = (int)Math.Ceiling((bigY + bigH) / (double)Scale) - top;
+        var sum = new float[w * h];
+        for (var y = 0; y < bigH; y++)
+        for (var x = 0; x < bigW; x++)
+            sum[((int)Math.Floor((bigY + y) / (double)Scale) - top) * w + (int)Math.Floor((bigX + x) / (double)Scale) - left] +=
+                Math.Min(64, (int)coverage[y * pitch + x]) / (64f * Scale * Scale);
+        var ink = new byte[w * h];
+        for (var i = 0; i < ink.Length; i++) ink[i] = (byte)Math.Round(255 * MathF.Pow(Math.Min(1f, sum[i]), Gamma));
+        return new Shape(ink, w, h, left, top, advance);
     }
 
     public void Dispose()

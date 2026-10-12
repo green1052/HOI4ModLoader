@@ -369,14 +369,14 @@ internal static unsafe class SettingsMods
         }
     }
 
-    /// <summary>A value cut to fit its box (about 22 Latin letters; a Hangul or CJK one counts double).</summary>
+    /// <summary>A value cut to fit its box (about 14 Latin letters; a Hangul or CJK one counts double).</summary>
     internal static string Fit(string value)
     {
         var width = 0;
         for (var i = 0; i < value.Length; i++)
         {
             width += value[i] >= 0x1100 ? 2 : 1;
-            if (width > 22) return value[..Math.Max(1, i - 1)] + "..";
+            if (width > 14) return value[..Math.Max(1, i - 1)] + "..";
         }
         return value;
     }
