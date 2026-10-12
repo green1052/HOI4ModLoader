@@ -95,6 +95,7 @@ public unsafe partial class FrontLine : Plugin
     private PerGame _game = null!;
     private bool _rotation, _plugging, _escape, _attack, _fireBrigade, _depth, _shuffle, _ai;
     private double _wornOrg, _wornStrength, _returnOrg, _returnStrength, _losing;
+    private int _odds;
     private int _maxResting, _plugRadius;
 
     public override void Load()
@@ -115,7 +116,10 @@ public unsafe partial class FrontLine : Plugin
             "Pull front divisions back out of a salient whose way back narrows to one or two provinces next to the enemy, through that neck while it is still open.");
         _attack = Config.Bind("Attack", "Attack", true,
             "Take empty enemy provinces next to the line with a fresh division, and attack enemy divisions already surrounded with at least as many fresh ones (more behind forts); a province of ours always keeps one. "
-            + "Best targets first: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front; none our supply can't follow (unless it closes a pocket) or that lengthen the front for nothing.");
+            + "Best targets first: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front; none our supply can't follow (unless it closes a pocket) or that lengthen the front by more than two provinces for nothing.");
+        _odds = Math.Max(0, Config.Bind("Attack", "AttackOdds", 200,
+            "Also attack an enemy province its neighbours of ours can outgun this many times (%: 200 = twice its defenders' power, more behind forts, in rough ground or across a river), with fresh divisions from all of them, each keeping one. "
+            + "Your divisions only on a battle plan that is running. 0: off."));
         _fireBrigade = Config.Bind("FireBrigade", "FireBrigade", true,
             "Keep a few armored or motorized divisions per front a province behind the line, off its battle plan. Where the enemy breaks in (a province of ours lost in the last two days, a landing, enemy troops in our provinces), "
             + "the nearest ones counterattack with enough to win (forts counted, each counting double), then go back to their post.");

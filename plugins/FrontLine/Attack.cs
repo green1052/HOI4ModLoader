@@ -13,9 +13,9 @@ public unsafe partial class FrontLine
     /// Empty enemy provinces next to the line get one fresh division; surrounded enemy divisions at least as many as they are,
     /// more behind forts (as vanilla's local attacks weigh them), or none. A province of ours always keeps one. Targets in
     /// order: closing a pocket (and mopping one up), then value (victory points, supply hubs, airfields, ports), then
-    /// shortening the front; skipped: ones our supply can't follow and worthless ones that lengthen the front (unless they
-    /// close a pocket). Nothing more goes where ours are still on their way or fighting. Plain moves: front divisions go back
-    /// to their front by themselves afterwards.
+    /// shortening the front; skipped: ones our supply can't follow and worthless ones that lengthen the front by more than two
+    /// provinces (unless they close a pocket). Then assaults (<see cref="Assault"/>). Nothing more goes where ours are still on
+    /// their way or fighting. Plain moves: front divisions go back to their front by themselves afterwards.
     /// </summary>
     private void Attack(nint country, int tag)
     {
@@ -37,7 +37,7 @@ public unsafe partial class FrontLine
                 var pocket = defenders > 0 ? defenders : Province.Pocket(country, tag, target);
                 if (pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue; // our supply can't follow
                 var (value, change) = (Value(target), Province.FrontChange(country, tag, target));
-                if (pocket == 0 && value < MinValue && change > 0) continue;      // a longer front for nothing
+                if (pocket == 0 && value < MinValue && change > 2) continue;      // a much longer front for nothing
                 targets.Add((from, id, need, defenders, pocket, value, change));
             }
         }
@@ -62,7 +62,77 @@ public unsafe partial class FrontLine
             Log.Info(t.Defenders == 0 ? $"opportunity: a fresh division takes an empty enemy province (value {t.Value:0}, cuts off {t.Pocket} enemy division(s))"
                 : $"mop-up: {t.Need} fresh division(s) attack {t.Defenders} surrounded enemy division(s)");
         }
+        if (_odds > 0 && attacks < MaxAttacksPerTurn) Assault(country, tag, MaxAttacksPerTurn - attacks);
     }
+
+    /// <summary>
+    /// An enemy province next to the line whose defenders the fresh divisions of our neighbouring provinces outgun _odds % (each
+    /// province keeping one; more behind forts, in mountains, cities, marshes and jungles, across a river): they all attack it.
+    /// The player's divisions only on a battle plan that is running. Supply and front length filters as for empty provinces;
+    /// the strongest odds first.
+    /// </summary>
+    private void Assault(nint country, int tag, int max)
+    {
+        var candidates = new Dictionary<int, nint>(); // enemy province id -> it, next to one of ours with spare fresh divisions
+        foreach (var (from, here) in _at)
+        {
+            if (here.Count < 2) continue;
+            foreach (var id in Game.Neighbours(from))
+                if (!_sent.ContainsKey(id) && Game.Province(id) is var p && p != 0 && Enemy(country, tag, p) && Province.Divisions(p) > 0) candidates.TryAdd(id, p);
+        }
+        var plans = new List<(int To, List<nint> Units, double Odds, double Value)>();
+        foreach (var (id, target) in candidates)
+        {
+            long defence = 0;
+            foreach (var unit in Province.Units(target))
+                if (unit != 0 && Division.IsLand(unit) && AtWar(country, Division.Commander(unit))) defence += Division.Power(unit);
+            if (defence == 0) continue;
+            var hard = 1 + Province.FortLevel(target) / 2.0;
+            if ((Province.TerrainCategory(target) & (Province.Mountain | Province.Urban | Province.Marsh | Province.Jungle)) != 0) hard *= 1.5;
+            var (value, change) = (Value(target), Province.FrontChange(country, tag, target));
+            if (value < MinValue && change > 2) continue;
+            var attackers = new List<(nint Unit, double Power)>();
+            foreach (var nid in Game.Neighbours(target))
+            {
+                var from = Game.Province(nid);
+                if (from == 0 || !_at.TryGetValue(from, out var here) || here.Count < 2 || Province.Starved(country, tag, from, target, SupplyShare)) continue;
+                var river = Game.AdjacencyType(from, id) >= Province.River ? 1.5 : 1;
+                attackers.AddRange(here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= 70 && Str(u) >= 70 && (_force || OnRunningPlan(u)))
+                    .OrderByDescending(Division.Power).Take(here.Count - 1).Select(u => (u, Division.Power(u) / river)));
+            }
+            var need = defence * hard * _odds / 100;
+            var sent = new List<nint>();
+            double power = 0;
+            foreach (var (unit, p) in attackers.OrderByDescending(a => a.Power))
+            {
+                if (power >= need) break;
+                sent.Add(unit);
+                power += p;
+            }
+            if (power >= need) plans.Add((id, sent, power / (defence * hard), value));
+        }
+
+        var used = new HashSet<nint>();
+        foreach (var plan in plans.OrderByDescending(p => p.Odds).ThenByDescending(p => p.Value))
+        {
+            if (max == 0) break;
+            if (plan.Units.Any(used.Contains)) continue; // promised to a better one this turn
+            if (plan.Units.GroupBy(Division.Location).Any(g => _at[g.Key].Count - g.Count() < 1)) continue; // a better one left that province one
+            foreach (var unit in plan.Units)
+            {
+                Commands.Move(unit, plan.To, _force);
+                _pending[unit] = _now + PendingMs;
+                used.Add(unit);
+                _at[Division.Location(unit)].Remove(unit);
+            }
+            _sent[plan.To] = ([.. plan.Units], true);
+            max--;
+            Log.Info($"assault: {plan.Units.Count} fresh division(s) attack a province they outgun {plan.Odds:0.0} to 1");
+        }
+    }
+
+    /// <summary>On an order of a battle plan that is running (the player's go-ahead to attack).</summary>
+    private bool OnRunningPlan(nint unit) => _orders.TryGetValue(unit + MemberOfUnit, out var order) && Order.Executing(order);
 
     /// <summary>What taking the province is worth: victory points, a supply hub, a port, the state's airfields (in full on its main province).</summary>
     private static double Value(nint target)
