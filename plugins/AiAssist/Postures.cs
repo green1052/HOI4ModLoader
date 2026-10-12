@@ -345,7 +345,7 @@ public unsafe partial class AiAssist
     /// <summary>Sends the division into the enemy province (the move becomes an attack), keeping any post, and keeps it in view to break off when worn.</summary>
     private static bool Attack(nint unit, int province, int tag, int hour)
     {
-        if (!Send(unit, province, hour, SentHours, keep: true)) return false;
+        if (!Send(unit, province, hour, SentHours, keep: true, attack: true)) return false;
         Attackers[unit] = tag;
         return true;
     }

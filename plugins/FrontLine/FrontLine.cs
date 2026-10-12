@@ -470,8 +470,21 @@ public unsafe partial class FrontLine : Plugin
         _orders.TryGetValue(unit + MemberOfUnit, out var order);
         if (_holding.TryGetValue((order, location), out var n)) _holding[(order, location)] = n - 1; // one fewer holds it
         Book(unit, job, job == Job.Pin ? 0 : order, post, target, front);
+        Arrow(unit, province, job switch
+        {
+            Job.Rest => (80, 120, 255),
+            Job.Counter or Job.Pin => (220, 60, 220),
+            _ => (60, 220, 60), // a post: reserve, second line, a front's reinforcement
+        });
         Commands.Move(unit, province, _force);
         _pending[unit] = _now + PendingMs;
+    }
+
+    /// <summary>[Debug] AiActionArrows: an arrow from where the unit stands to where it was sent.</summary>
+    private static void Arrow(nint unit, int to, (byte R, byte G, byte B) colour)
+    {
+        var from = Division.Location(unit);
+        if (from != 0) MapArrows.Flash(Game.Id(from), to, colour.R, colour.G, colour.B);
     }
 
     /// <summary>

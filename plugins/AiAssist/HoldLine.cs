@@ -355,9 +355,11 @@ public unsafe partial class AiAssist
     /// sent another meanwhile. A post sent elsewhere stops being one unless <paramref name="keep"/> (the callers that post it
     /// re-post it). Main thread.
     /// </summary>
-    private static bool Send(nint unit, int province, long hour, long gapHours, bool keep = false)
+    private static bool Send(nint unit, int province, long hour, long gapHours, bool keep = false, bool attack = false)
     {
+        var from = Division.Location(unit);
         if (!Commands.Move(unit, province, true)) return false; // posted the way the AI posts its own moves
+        if (from != 0) MapArrows.Flash(Game.Id(from), province, attack ? (byte)255 : (byte)60, attack ? (byte)40 : (byte)220, attack ? (byte)40 : (byte)60); // [Debug] AiActionArrows
         _sent[unit] = hour + SentHours;
         _gap[province] = hour + gapHours;
         if (!keep) _posted.TryRemove(unit, out _);

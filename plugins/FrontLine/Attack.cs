@@ -53,6 +53,7 @@ public unsafe partial class FrontLine
             ready.RemoveRange(0, t.Need);
             foreach (var unit in sent)
             {
+                Arrow(unit, t.To, t.Pocket > 0 ? ((byte)255, (byte)40, (byte)40) : ((byte)255, (byte)140, (byte)0));
                 Commands.Move(unit, t.To, _force);
                 _pending[unit] = _now + PendingMs;
                 here.Remove(unit);
@@ -130,6 +131,7 @@ public unsafe partial class FrontLine
             if (plan.Units.GroupBy(Division.Location).Any(g => _at[g.Key].Count - g.Count() < Keep(g.Key))) continue; // a better one left that province its last
             foreach (var unit in plan.Units)
             {
+                Arrow(unit, plan.To, plan.Pocket > 0 ? ((byte)255, (byte)40, (byte)40) : ((byte)255, (byte)140, (byte)0));
                 Commands.Move(unit, plan.To, _force);
                 _pending[unit] = _now + PendingMs;
                 used.Add(unit);

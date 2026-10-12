@@ -126,7 +126,9 @@ public unsafe partial class AiAssist
     private static bool Rest(nint unit, int province, int tag, int hour)
     {
         TakeOff(unit);
+        var from = Division.Location(unit);
         if (!Commands.Move(unit, province, true)) return false;
+        if (from != 0) MapArrows.Flash(Game.Id(from), province, 80, 120, 255);
         _sent[unit] = hour + SentHours;
         _resting[unit] = (tag, hour);
         _posted.TryRemove(unit, out _);
