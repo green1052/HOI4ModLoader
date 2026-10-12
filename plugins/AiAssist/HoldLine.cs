@@ -46,7 +46,7 @@ public unsafe partial class AiAssist
     private PerGame _game = null!;
     private static int _world = -1; // Game.Generation at the last reset: until it runs after a load, _line points into the old world
     private int _backfillAt = Never;
-    private static int _backfilled, _reserved, _deployed, _returned, _stopped, _depth, _kept;
+    private static int _backfilled, _reserved, _deployed, _returned, _stopped, _depth;
 
     /// <summary>
     /// A division that took up its post only days ago: the theatre shuffle would march it somewhere else and back
@@ -206,7 +206,6 @@ public unsafe partial class AiAssist
             if (dominant) _dominant[tag] = hour;
             else _dominant.TryRemove(tag, out _);
             if (fresh.Count > 0) Deploy(country, tag, fresh, grad, line, hour);
-            if (grad == null) KeepDefenders(country, tag, line, hour);
             var sent = 0;
             var fronts = new Dictionary<nint, HashSet<nint>>(); // AI front -> the armies standing on it
             foreach (var (province, key) in Holes(country, tag, grad, line).Select(p => (p, Key(country, tag, p))).OrderByDescending(h => h.Item2))
@@ -232,27 +231,6 @@ public unsafe partial class AiAssist
             if (grad == null) Depth(country, tag, line, hour);
         }
         ShareJobs();
-    }
-
-    /// <summary>
-    /// Divisions walking off a line province that needs them (<see cref="Pinned"/>: its last defender, or no more than the enemy
-    /// divisions next to it) to somewhere else than the line or a neighbour: stopped and posted there. Vanilla re-tasks whole
-    /// armies to another front (a port, then by sea), which neither the front requests nor the reassignment filter see. Main thread.
-    /// </summary>
-    private static void KeepDefenders(nint country, int tag, HashSet<nint> line, long hour)
-    {
-        foreach (var unit in Game.Units(country).ToArray())
-        {
-            if (unit == 0 || !Division.IsLand(unit) || Division.Commander(unit) != tag || !Division.Walking(unit) || Division.Fighting(unit) || Division.Retreating(unit)
-                || _posted.ContainsKey(unit) || _fresh.ContainsKey(unit) || Jobs.Taken(unit) || Division.IsHeadquarters(unit)) continue;
-            var location = Division.Location(unit);
-            if (location == 0 || !line.Contains(location)) continue;
-            var path = unit + Division.PathOffset; // CPdxArray<int> of province ids, the next hop first (CArmy::UpdateMovement)
-            var to = Game.Province(((int*)*(nint*)path)[*(int*)(path + 0xC) - 1]);
-            if (to == 0 || line.Contains(to) || Game.Neighbours(location).Contains(Game.Id(to)) || !Pinned(unit)) continue; // along the line, or a step (an attack)
-            if (!Station(unit, Game.Id(location), tag, hour, GapHours, PostKind.Helper)) continue;
-            Interlocked.Increment(ref _kept);
-        }
     }
 
     /// <summary>The line's provinces short of defenders (one each, or what the grad wants) that nobody is walking to yet.</summary>
