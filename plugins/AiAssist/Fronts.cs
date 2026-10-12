@@ -46,12 +46,12 @@ public unsafe partial class AiAssist
 
     /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
     private static bool CantBeInvaded(nint country, int tag) =>
-        PortHolders is { } ports && HasLine(tag) && !ports.Any(holder => Game.AtWar(country, holder));
+        _portHolders is { } ports && HasLine(tag) && !ports.Any(holder => Game.AtWar(country, holder));
 
     /// <summary>A tracked line of the tag's. Enumerates the dictionary lock-free (Values locks every bucket and copies).</summary>
     private static bool HasLine(int tag)
     {
-        foreach (var e in _line) if (e.Value.Tag == tag) return true;
+        foreach (var e in Line) if (e.Value.Tag == tag) return true;
         return false;
     }
     private static int _stationed;
@@ -200,8 +200,8 @@ public unsafe partial class AiAssist
                 foreach (var army in Native.PdxArray(front + ArmiesOfAiFront))
                     if (army != 0) (armies ??= []).Add(new OrdersGroup(army).Ref);
             // The attack gate and the backfill read this; a front with no threat left drops out at once.
-            if (threatened.Count > 0) _line[front] = (hour, tag, threatened);
-            else _line.TryRemove(front, out _);
+            if (threatened.Count > 0) Line[front] = (hour, tag, threatened);
+            else Line.TryRemove(front, out _);
             if (_axis && hostile) // the day's breakthrough axis: the enemy province on this theatre's line that is easiest to take
             {
                 foreach (var our in threatened)
@@ -245,7 +245,7 @@ public unsafe partial class AiAssist
         if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
         foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) AxisArmies.TryRemove(g, out _);
         // Fronts come and go all game: drop the stale lines (matched by value, so one refreshed meanwhile stays).
-        foreach (var entry in _line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) _line.TryRemove(entry);
+        foreach (var entry in Line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) Line.TryRemove(entry);
     }
 
     /// <summary>

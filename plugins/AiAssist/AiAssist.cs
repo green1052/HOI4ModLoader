@@ -144,14 +144,14 @@ public unsafe partial class AiAssist : Plugin
         {
             // Everything cached across games must go: a new world frees the old one's fronts,
             // provinces and units, and a cached pointer into it is a crash.
-            _sent.Clear();
-            _gap.Clear();
-            _posted.Clear();
-            _home.Clear();
-            _dominant.Clear();
-            _combat.Clear();
-            _resting.Clear();
-            _fresh.Clear();
+            Sent.Clear();
+            Gap.Clear();
+            Posted.Clear();
+            Home.Clear();
+            DominantSince.Clear();
+            Combat.Clear();
+            Resting.Clear();
+            FreshDivisions.Clear();
             Known.Clear();
             Axes.Clear();
             SecondArms.Clear();
@@ -161,7 +161,7 @@ public unsafe partial class AiAssist : Plugin
             Routes.Clear();
             Holds.Clear();
             ClearParadrops();
-            _line.Clear();
+            Line.Clear();
             FrontCache.Clear();
             Encircled.Clear();
             HoldSince.Clear();
@@ -187,7 +187,7 @@ public unsafe partial class AiAssist : Plugin
         if (productionLines) LoadProductionLines(stickyDays);
         if (_axis) LoadCas();
         if (_holdLine || _axis) LoadFronts();
-        if (_holdLine || _strategicInvasions || _paradrops) LoadPostAICommand(); // one hook; each part runs under its own setting
+        if (_holdLine || _strategicInvasions || _paradrops) LoadPostAiCommand(); // one hook; each part runs under its own setting
         if (_holdLine)
         {
             _ = Sig.Find(Commands.UnassignSig);

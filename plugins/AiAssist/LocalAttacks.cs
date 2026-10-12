@@ -98,19 +98,19 @@ public unsafe partial class AiAssist
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Hour, int World, HashSet<nint> Provinces)> ThinLines = new();
 
     /// <summary>
-    /// <paramref name="from"/> is on one of the tag's fronts (<see cref="_line"/>) that stands under ~1.2 divisions per threatened
+    /// <paramref name="from"/> is on one of the tag's fronts (<see cref="Line"/>) that stands under ~1.2 divisions per threatened
     /// province it holds: attacking from there widens the holes. Rebuilt once per game hour; AI threads, read only.
     /// </summary>
     private static bool OnThinLine(int tag, nint from)
     {
         var (hour, world) = (Game.Hour, Game.Generation);
-        if (world != _world) return false; // a load the reset hasn't caught up with: _line is the old world's
+        if (world != _world) return false; // a load the reset hasn't caught up with: Line is the old world's
         if (!ThinLines.TryGetValue(tag, out var thin) || thin.Hour != hour || thin.World != world)
         {
             var country = Game.Country(tag);
             if (country == 0) return false;
             var provinces = new HashSet<nint>();
-            foreach (var e in _line)
+            foreach (var e in Line)
             {
                 if (e.Value.Tag != tag || hour - e.Value.Hour is < 0 or >= LineFreshHours) continue;
                 var (held, standing) = (0, 0);
@@ -325,7 +325,7 @@ public unsafe partial class AiAssist
             {
                 if (spare == 0) break;
                 var target = Game.Province(id);
-                if (target == 0 || _gap.ContainsKey(id) || Province.Divisions(target) > 0 || !Province.Enemy(country, tag, target)
+                if (target == 0 || Gap.ContainsKey(id) || Province.Divisions(target) > 0 || !Province.Enemy(country, tag, target)
                     || _supplyAware && Province.Starved(country, tag, here.Key, target, _supplyShare)) continue; // supply must follow it there, as with local attacks
                 if (!Send(fresh[--spare], id, now, SentHours)) continue;
                 Interlocked.Increment(ref _taken);

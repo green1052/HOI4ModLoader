@@ -14,8 +14,8 @@ public partial class AiAssist
 
     // Divisions we took off their front to rest or escape, with their tag and since when: the theatre shuffle and army balancing
     // leave them until rested, then they go back on their order. Never dereferenced unless still one of the tag's units.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> _resting = new();
-    private static readonly Dictionary<nint, int> _combat = []; // unit -> last game hour seen in combat (main thread; never dereferenced)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> Resting = new();
+    private static readonly Dictionary<nint, int> Combat = []; // unit -> last game hour seen in combat (main thread; never dereferenced)
     private int _microAt = Never;
     private static int _rested, _escaped, _fireBrigade;
 
@@ -39,7 +39,7 @@ public partial class AiAssist
             var units = Array.FindAll(Game.Units(country).ToArray(), u => u != 0);
             if (_holdLine)
             {
-                foreach (var unit in units) if (Division.Fighting(unit)) _combat[unit] = hour;
+                foreach (var unit in units) if (Division.Fighting(unit)) Combat[unit] = hour;
                 Release(tag, units, hour);
                 BreakOff(country, tag, units, hour);
                 if (!MicroElsewhere)
@@ -60,12 +60,12 @@ public partial class AiAssist
     /// </summary>
     private static void Release(int tag, nint[] units, int hour)
     {
-        foreach (var (unit, rest) in _resting)
+        foreach (var (unit, rest) in Resting)
         {
             if (rest.Tag != tag) continue;
-            if (Array.IndexOf(units, unit) < 0) _resting.TryRemove(unit, out _);
+            if (Array.IndexOf(units, unit) < 0) Resting.TryRemove(unit, out _);
             else if (!Division.Walking(unit) && (Percent(Division.Organisation(unit)) >= RestedOrg && Percent(Division.Strength(unit)) >= RestedStrength || hour - rest.Hour is < 0 or >= MaxRestHours)
-                     && _resting.TryRemove(unit, out _))
+                     && Resting.TryRemove(unit, out _))
                 Return(unit, tag);
         }
     }
@@ -90,7 +90,7 @@ public partial class AiAssist
             if (!left.TryGetValue(location, out var here)) here = left[location] = Standing(country, tag, location);
             if (here < 2) continue; // alone there: it holds on
             var worn = (Percent(Division.Organisation(unit)) < WornOrg || Percent(Division.Strength(unit)) < WornStrength)
-                && _combat.TryGetValue(unit, out var fought) && hour - fought is >= 0 and < CombatHours; // worn by battle, not by supply
+                && Combat.TryGetValue(unit, out var fought) && hour - fought is >= 0 and < CombatHours; // worn by battle, not by supply
             if (!narrow.TryGetValue(location, out var closing)) closing = narrow[location] = Closing(country, tag, location);
             if (closing && Grads.TryGetValue(tag, out var grad) && grad.Fortresses.Contains(Game.Id(location))) closing = false; // a fortress city on the grad holds to the last
             if (!closing && !(worn && Province.EnemyDivisionsNext(country, tag, location))) continue;
@@ -114,7 +114,7 @@ public partial class AiAssist
         {
             if (unit == 0 || Division.Commander(unit) != tag || !Division.IsLand(unit)) continue;
             all++;
-            if (_resting.ContainsKey(unit)) resting++;
+            if (Resting.ContainsKey(unit)) resting++;
         }
         return (resting + 1) * 100 <= all * MaxRestingPercent;
     }
@@ -129,9 +129,9 @@ public partial class AiAssist
         var from = Division.Location(unit);
         if (!Commands.Move(unit, province, true)) return false;
         if (from != 0) MapArrows.Flash(Game.Id(from), province, 80, 120, 255);
-        _sent[unit] = hour + SentHours;
-        _resting[unit] = (tag, hour);
-        _posted.TryRemove(unit, out _);
+        Sent[unit] = hour + SentHours;
+        Resting[unit] = (tag, hour);
+        Posted.TryRemove(unit, out _);
         return true;
     }
 
@@ -213,13 +213,13 @@ public partial class AiAssist
         var ready = new Dictionary<nint, List<nint>>(); // province -> reserves there ready to strike
         foreach (var unit in units)
         {
-            if (!_posted.TryGetValue(unit, out var post) || post.Tag != tag || post.Kind is not (PostKind.Reserve or PostKind.Depth)
+            if (!Posted.TryGetValue(unit, out var post) || post.Tag != tag || post.Kind is not (PostKind.Reserve or PostKind.Depth)
                 || Attackers.ContainsKey(unit) || !Movable(unit, tag) || Division.Walking(unit)) continue;
             var location = Division.Location(unit);
             if (location == 0) continue;
             if (Game.Id(location) != post.Province)
             {
-                if (Commands.Move(unit, post.Province, true)) _sent[unit] = hour + SentHours;
+                if (Commands.Move(unit, post.Province, true)) Sent[unit] = hour + SentHours;
                 continue;
             }
             if (Percent(Division.Organisation(unit)) < ReadyOrg || Percent(Division.Strength(unit)) < ReadyStrength) continue;
@@ -267,10 +267,10 @@ public partial class AiAssist
     private static int BreakIn(nint country, int tag, nint p, int hour)
     {
         var self = Game.Id(p);
-        if (!_gap.ContainsKey(self) && Hostiles(country, p) > 0) return self;
+        if (!Gap.ContainsKey(self) && Hostiles(country, p) > 0) return self;
         foreach (var id in Game.Neighbours(p))
         {
-            if (_gap.ContainsKey(id)) continue;
+            if (Gap.ContainsKey(id)) continue;
             var e = Game.Province(id);
             if (e == 0 || !Province.Enemy(country, tag, e)) continue;
             var (ours, theirs) = (0, 0);

@@ -279,7 +279,7 @@ public unsafe partial class AiAssist
             foreach (var n in Game.Neighbours(g))
             {
                 var e = Game.Province(n);
-                if (e == 0 || _gap.ContainsKey(n) || Province.Divisions(e) == 0 || !Province.Enemy(country, tag, e) || !Exhausted(e)) continue;
+                if (e == 0 || Gap.ContainsKey(n) || Province.Divisions(e) == 0 || !Province.Enemy(country, tag, e) || !Exhausted(e)) continue;
                 var attackers = new List<nint>();
                 foreach (var a in Game.Neighbours(e)) attackers.AddRange(FreshSpares(country, tag, grad, a));
                 foreach (var a in Game.Neighbours(e)) // reserves behind the grad provinces facing it
@@ -295,7 +295,7 @@ public unsafe partial class AiAssist
                 foreach (var r in Game.Neighbours(e)) // pin its neighbours: they can't shift into the fight while under attack
                 {
                     var q = Game.Province(r);
-                    if (q == 0 || _gap.ContainsKey(r) || Province.Divisions(q) == 0 || !Province.Enemy(country, tag, q)) continue;
+                    if (q == 0 || Gap.ContainsKey(r) || Province.Divisions(q) == 0 || !Province.Enemy(country, tag, q)) continue;
                     foreach (var a in Game.Neighbours(q))
                     {
                         var from = Game.Province(a);
@@ -333,7 +333,7 @@ public unsafe partial class AiAssist
         foreach (var p in Within([held], ReserveReach, q => Province.Controller(q) == tag))
             if (p != held)
                 foreach (var unit in Province.Units(p))
-                    if (_posted.TryGetValue(unit, out var post) && post.Tag == tag && post.Kind is (PostKind.Reserve or PostKind.Depth) && Fresh(unit, tag)) found.Add(unit);
+                    if (Posted.TryGetValue(unit, out var post) && post.Tag == tag && post.Kind is (PostKind.Reserve or PostKind.Depth) && Fresh(unit, tag)) found.Add(unit);
         return found;
     }
 
@@ -358,16 +358,16 @@ public unsafe partial class AiAssist
         foreach (var (unit, owner) in Attackers.ToArray())
         {
             if (owner != tag) continue;
-            if (Array.IndexOf(units, unit) < 0 || !Division.Fighting(unit) && !_sent.ContainsKey(unit))
+            if (Array.IndexOf(units, unit) < 0 || !Division.Fighting(unit) && !Sent.ContainsKey(unit))
             {
                 Attackers.Remove(unit); // gone, or its attack is over
                 continue;
             }
             if (!Division.Fighting(unit) || Percent(Division.Organisation(unit)) >= WornOrg) continue;
-            if (_posted.TryGetValue(unit, out var post) && post.Kind is (PostKind.Reserve or PostKind.Depth))
+            if (Posted.TryGetValue(unit, out var post) && post.Kind is (PostKind.Reserve or PostKind.Depth))
             {
                 if (!Commands.Move(unit, post.Province, true)) continue; // back to its post, behind the line: it rests there
-                _sent[unit] = hour + SentHours;
+                Sent[unit] = hour + SentHours;
             }
             else
             {

@@ -6,7 +6,7 @@ namespace AiAssist;
 public static class Signatures
 {
     /// <summary>PostAICommand(command, int* postingTag) -> bool: every AI command, from every AI path; an invalid one is deleted and 0 returned.</summary>
-    [Signature] public const string PostAICommand = "40 53 48 83 EC 40 80 3D ? ? ? ? 00 48 8B D9 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 75 ? 48 8B CA E8";
+    [Signature] public const string PostAiCommand = "40 53 48 83 EC 40 80 3D ? ? ? ? 00 48 8B D9 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 75 ? 48 8B CA E8";
 
     /// <summary>
     /// CAIGeneral::UpdateAreaDefense(general): gives every army on its area defence fronts (front+0x104 set, armies at +0x60)

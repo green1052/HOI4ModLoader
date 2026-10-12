@@ -22,9 +22,9 @@ public unsafe partial class AiAssist
 
     [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
     private IHook<CollectFn>? _collect;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, HashSet<nint> Provinces)> _line = new(); // AI front -> its threatened provinces, refreshed daily
-    private static readonly Dictionary<nint, long> _sent = []; // unit -> game hour until: a division we sent is left alone while it walks (main thread)
-    private static readonly Dictionary<int, long> _gap = [];   // province id -> game hour until: a hole or target a division is walking to (main thread)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, HashSet<nint> Provinces)> Line = new(); // AI front -> its threatened provinces, refreshed daily
+    private static readonly Dictionary<nint, long> Sent = []; // unit -> game hour until: a division we sent is left alone while it walks (main thread)
+    private static readonly Dictionary<int, long> Gap = [];   // province id -> game hour until: a hole or target a division is walking to (main thread)
 
     private enum PostKind { Reserve, Garrison, Helper, Depth, Drive }
 
@@ -33,15 +33,15 @@ public unsafe partial class AiAssist
 
     // Reserves, grad garrisons, line helpers and second-line divisions: the theatre shuffle and army balancing leave them. AI threads
     // only ask whether a unit is in it; never dereferenced unless still one of the tag's units.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, Posting> _posted = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, Posting> Posted = new();
     // Divisions we took off their orders, with the order they were on: put back on it when we let them go, else vanilla's regrouping
     // sends them to some far front and back (main thread; never dereferenced unless still one of the tag's units).
-    private static readonly Dictionary<nint, (int Tag, long Group, int Order)> _home = [];
+    private static readonly Dictionary<nint, (int Tag, long Group, int Order)> Home = [];
     // New divisions we sent where they were needed, with their tag and since when: the theatre shuffle and army balancing leave
     // them while they walk (FreshlyArrived keeps them a week once there). Never dereferenced.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> _fresh = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> FreshDivisions = new();
     // Tags that outgun the enemy on their line two to one, with the hour seen: their attacks go ahead however thin the line (AI threads read).
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> _dominant = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> DominantSince = new();
     private static readonly Dictionary<int, HashSet<nint>> Known = []; // tag -> its land divisions at its last backfill pass (main thread)
     private PerGame _game = null!;
     private static int _world = -1; // Game.Generation at the last reset: until it runs after a load, _line points into the old world
@@ -70,8 +70,8 @@ public unsafe partial class AiAssist
         if (unit == 0) return false;
         var tag = Division.Commander(unit);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
-        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit) || Paratrooper(unit) || Jobs.Taken(unit)
-            || _fresh.TryGetValue(unit, out var fresh) && Game.Hour - fresh.Hour is >= 0 and < FreshWalkHours) return true;
+        if (Posted.ContainsKey(unit) || Resting.ContainsKey(unit) || Paratrooper(unit) || Jobs.Taken(unit)
+            || FreshDivisions.TryGetValue(unit, out var fresh) && Game.Hour - fresh.Hour is >= 0 and < FreshWalkHours) return true;
         var country = Game.Country(tag);
         var location = Division.Location(unit);
         if (country == 0 || location == 0) return false;
@@ -95,7 +95,7 @@ public unsafe partial class AiAssist
     {
         if (Game.Generation != _world) return null; // a load the reset hasn't caught up with (AI threads): no line, not a stale one
         HashSet<nint>? line = null;
-        foreach (var e in _line)
+        foreach (var e in Line)
             if (e.Value.Tag == tag && hour - e.Value.Hour is >= 0 and < LineFreshHours)
                 foreach (var province in e.Value.Provinces)
                     if (Province.Controller(province) == tag) (line ??= []).Add(province);
@@ -200,12 +200,12 @@ public unsafe partial class AiAssist
             var line = grad != null ? Held(grad, tag) : LineOf(tag, hour);
             if (line == null || line.Count == 0)
             {
-                _dominant.TryRemove(tag, out _);
+                DominantSince.TryRemove(tag, out _);
                 continue; // no line seen lately: its posts stay while they still back one (PrunePosted)
             }
             var dominant = grad == null && Dominant(country, tag, line);
-            if (dominant) _dominant[tag] = hour;
-            else _dominant.TryRemove(tag, out _);
+            if (dominant) DominantSince[tag] = hour;
+            else DominantSince.TryRemove(tag, out _);
             if (fresh.Count > 0) Deploy(country, tag, fresh, grad, line, hour);
             var sent = 0;
             var fronts = new Dictionary<nint, HashSet<nint>>(); // AI front -> the armies standing on it
@@ -256,7 +256,7 @@ public unsafe partial class AiAssist
 
     /// <summary>The line's provinces short of defenders (one each, or what the grad wants) that nobody is walking to yet.</summary>
     private static IEnumerable<nint> Holes(nint country, int tag, Grad? grad, HashSet<nint> line) =>
-        line.Where(p => !_gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) < (grad?.Want.GetValueOrDefault(Game.Id(p), 1) ?? 1));
+        line.Where(p => !Gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) < (grad?.Want.GetValueOrDefault(Game.Id(p), 1) ?? 1));
 
     /// <summary>
     /// The armies (COrdersGroup) of the tag's divisions standing on the AI fronts this province is on, cached per front; null if it
@@ -265,7 +265,7 @@ public unsafe partial class AiAssist
     private static HashSet<nint>? Armies(int tag, nint province, int hour, Dictionary<nint, HashSet<nint>> cache)
     {
         HashSet<nint>? armies = null;
-        foreach (var (front, e) in _line)
+        foreach (var (front, e) in Line)
         {
             if (e.Tag != tag || hour - e.Hour is < 0 or >= LineFreshHours || !e.Provinces.Contains(province)) continue;
             if (!cache.TryGetValue(front, out var groups)) cache[front] = groups = ArmiesIn(tag, e.Provinces);
@@ -291,7 +291,7 @@ public unsafe partial class AiAssist
     private static void HoldOffensives(nint country, int tag, int hour)
     {
         var done = new HashSet<nint>();
-        foreach (var e in _line.Values)
+        foreach (var e in Line.Values)
         {
             if (e.Tag != tag || hour - e.Hour is < 0 or >= LineFreshHours) continue;
             var held = e.Provinces.Where(p => Province.Controller(p) == tag).ToList();
@@ -317,8 +317,8 @@ public unsafe partial class AiAssist
             if (unit != 0 && Division.IsLand(unit)) units.Add(unit);
         var fresh = Known.TryGetValue(tag, out var old) ? units.Where(u => !old.Contains(u)).ToList() : [];
         Known[tag] = units;
-        foreach (var (unit, since) in _fresh)
-            if (since.Tag == tag && Game.Hour - since.Hour is < 0 or >= FreshWalkHours) _fresh.TryRemove(unit, out _);
+        foreach (var (unit, since) in FreshDivisions)
+            if (since.Tag == tag && Game.Hour - since.Hour is < 0 or >= FreshWalkHours) FreshDivisions.TryRemove(unit, out _);
         return fresh;
     }
 
@@ -339,7 +339,7 @@ public unsafe partial class AiAssist
         }
         if (grad != null || free.Count == 0) return; // on a grad, the old line's fronts are given up
         Dictionary<nint, int>? thinnest = null;
-        foreach (var e in _line)
+        foreach (var e in Line)
         {
             if (e.Value.Tag != tag || hour - e.Value.Hour is < 0 or >= LineFreshHours) continue;
             var held = e.Value.Provinces.Where(p => Province.Controller(p) == tag).ToDictionary(p => p, p => Standing(country, tag, p));
@@ -361,16 +361,16 @@ public unsafe partial class AiAssist
     private static bool Dispatch(nint unit, int province, int tag, int hour)
     {
         if (!Relocate(unit, province, hour, GapHours, remember: false)) return false; // new: its deployment front isn't home
-        _fresh[unit] = (tag, hour);
+        FreshDivisions[unit] = (tag, hour);
         return true;
     }
 
     /// <summary>Drops the bookings whose time is up (game hours): a sent division is free again, a hole may be refilled. Main thread.</summary>
     private static void Expire(long hour)
     {
-        foreach (var (unit, until) in _sent.ToArray()) if (hour >= until) _sent.Remove(unit);
-        foreach (var (province, until) in _gap.ToArray()) if (hour >= until) _gap.Remove(province);
-        foreach (var (unit, at) in _combat.ToArray()) if (hour - at is < 0 or >= CombatHours) _combat.Remove(unit);
+        foreach (var (unit, until) in Sent.ToArray()) if (hour >= until) Sent.Remove(unit);
+        foreach (var (province, until) in Gap.ToArray()) if (hour >= until) Gap.Remove(province);
+        foreach (var (unit, at) in Combat.ToArray()) if (hour - at is < 0 or >= CombatHours) Combat.Remove(unit);
     }
 
     /// <summary>
@@ -383,9 +383,9 @@ public unsafe partial class AiAssist
         var from = Division.Location(unit);
         if (!Commands.Move(unit, province, true)) return false; // posted the way the AI posts its own moves
         if (from != 0) MapArrows.Flash(Game.Id(from), province, attack ? (byte)255 : (byte)60, attack ? (byte)40 : (byte)220, attack ? (byte)40 : (byte)60); // [Debug] AiActionArrows
-        _sent[unit] = hour + SentHours;
-        _gap[province] = hour + gapHours;
-        if (!keep) _posted.TryRemove(unit, out _);
+        Sent[unit] = hour + SentHours;
+        Gap[province] = hour + gapHours;
+        if (!keep) Posted.TryRemove(unit, out _);
         return true;
     }
 
@@ -400,7 +400,7 @@ public unsafe partial class AiAssist
     private static bool Station(nint unit, int province, int tag, long hour, long gapHours, PostKind kind, int guard = 0)
     {
         if (!Relocate(unit, province, hour, gapHours)) return false;
-        _posted[unit] = new Posting(tag, kind, province, guard);
+        Posted[unit] = new Posting(tag, kind, province, guard);
         return true;
     }
 
@@ -409,8 +409,8 @@ public unsafe partial class AiAssist
     {
         var group = Division.Group(unit);
         if (group == 0) return;
-        if (remember && !_home.ContainsKey(unit) && OrderOf(unit, group) is var order and not 0)
-            _home[unit] = (Division.Commander(unit), new OrdersGroup(group).Ref, order);
+        if (remember && !Home.ContainsKey(unit) && OrderOf(unit, group) is var order and not 0)
+            Home[unit] = (Division.Commander(unit), new OrdersGroup(group).Ref, order);
         Commands.Unassign(unit, group, true);
     }
 
@@ -433,7 +433,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private static void Return(nint unit, int tag)
     {
-        if (!_home.Remove(unit, out var home) || home.Tag != tag) return;
+        if (!Home.Remove(unit, out var home) || home.Tag != tag) return;
         var group = GroupOf(home.Group, tag);
         if (group == 0 || Division.Group(unit) != group || _findOrder(group, home.Order) == 0) return;
         if (Commands.Assign(unit, group, home.Order, true)) Interlocked.Increment(ref _returned);
@@ -463,7 +463,7 @@ public unsafe partial class AiAssist
         {
             if (sent == ReserveMoves || covers == 0) break;
             var id = Game.Id(post);
-            if (Standing(country, tag, post) > 0 || _gap.ContainsKey(id)) continue;
+            if (Standing(country, tag, post) > 0 || Gap.ContainsKey(id)) continue;
             var helper = Helper(tag, post, line, ReserveRadius, reserves: false); // not another post's: that only moves the gap
             if (helper == 0 || !Station(helper, id, tag, hour, GapHours, PostKind.Reserve)) continue;
             sent++;
@@ -477,7 +477,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private void Depth(nint country, int tag, HashSet<nint> line, int hour)
     {
-        var backed = _posted.Values.Where(p => p.Tag == tag && p.Kind == PostKind.Depth).Select(p => p.Guard).ToHashSet();
+        var backed = Posted.Values.Where(p => p.Tag == tag && p.Kind == PostKind.Depth).Select(p => p.Guard).ToHashSet();
         if (backed.Count >= Math.Min(ReserveMax, line.Count / ReservePerLine)) return;
         var posted = 0;
         foreach (var (province, _) in line.Where(p => !backed.Contains(Game.Id(p))).Select(p => (p, Key(country, tag, p)))
@@ -486,7 +486,7 @@ public unsafe partial class AiAssist
             if (posted == MaxDepthPosts) return;
             var post = 0;
             foreach (var id in Game.Neighbours(province))
-                if (Game.Province(id) is var q && q != 0 && !line.Contains(q) && Province.Controller(q) == tag && !GivenUp(tag, id) && !_gap.ContainsKey(id)
+                if (Game.Province(id) is var q && q != 0 && !line.Contains(q) && Province.Controller(q) == tag && !GivenUp(tag, id) && !Gap.ContainsKey(id)
                     && !Province.NextToEnemy(country, tag, q) && Standing(country, tag, q) == 0)
                 {
                     post = id;
@@ -519,9 +519,9 @@ public unsafe partial class AiAssist
     private static void Unpin(nint country, int tag)
     {
         HashSet<nint>? units = null;
-        foreach (var (unit, post) in _posted)
+        foreach (var (unit, post) in Posted)
         {
-            if (post.Tag != tag || !_posted.TryRemove(unit, out _)) continue;
+            if (post.Tag != tag || !Posted.TryRemove(unit, out _)) continue;
             if ((units ??= [.. Game.Units(country)]).Contains(unit)) Return(unit, tag);
         }
     }
@@ -533,15 +533,15 @@ public unsafe partial class AiAssist
     private static void PrunePosted(nint country, int tag)
     {
         HashSet<nint>? units = null;
-        foreach (var (unit, post) in _posted)
+        foreach (var (unit, post) in Posted)
         {
             if (post.Tag != tag) continue;
             units ??= [.. Game.Units(country)];
-            if (!units.Contains(unit)) _posted.TryRemove(unit, out _);
-            else if (!PostHolds(country, tag, post) && _posted.TryRemove(unit, out _)) Return(unit, tag);
+            if (!units.Contains(unit)) Posted.TryRemove(unit, out _);
+            else if (!PostHolds(country, tag, post) && Posted.TryRemove(unit, out _)) Return(unit, tag);
         }
-        foreach (var (unit, home) in _home.ToArray())
-            if (home.Tag == tag && !(units ??= [.. Game.Units(country)]).Contains(unit)) _home.Remove(unit);
+        foreach (var (unit, home) in Home.ToArray())
+            if (home.Tag == tag && !(units ??= [.. Game.Units(country)]).Contains(unit)) Home.Remove(unit);
     }
 
     /// <summary>What holding this province of ours is worth: a port (the fleet and supply), victory points, a river in front of it, city or mountain ground.</summary>
@@ -575,7 +575,7 @@ public unsafe partial class AiAssist
             if (p == target || line.Contains(p) && !Crowded(tag, p)) continue;
             foreach (var unit in Province.Units(p))
             {
-                if (!Spare(unit, tag) || !reserves && _posted.ContainsKey(unit)) continue;
+                if (!Spare(unit, tag) || !reserves && Posted.ContainsKey(unit)) continue;
                 if (prefer == null || prefer.Contains(Division.Group(unit))) return unit;
                 if (fallback == 0) fallback = unit;
             }
@@ -599,11 +599,11 @@ public unsafe partial class AiAssist
     /// <summary>A land division of the tag (not lent) that can take orders now: not fighting, retreating or embarked, not one we sent or rest.</summary>
     private static bool Movable(nint unit, int tag)
     {
-        return Division.Ready(unit, tag) && !_sent.ContainsKey(unit) && !_resting.ContainsKey(unit) && !Paratrooper(unit) && !Jobs.Taken(unit, Id);
+        return Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Paratrooper(unit) && !Jobs.Taken(unit, Id);
     }
 
     /// <summary>Our divisions with a job (posted, resting, walking somewhere for us), for the other plugins to leave alone.</summary>
-    private static void ShareJobs() => Jobs.Set(Id, _posted.Keys.Concat(_resting.Keys).Concat(_sent.Keys));
+    private static void ShareJobs() => Jobs.Set(Id, Posted.Keys.Concat(Resting.Keys).Concat(Sent.Keys));
 
     /// <summary>Another plugin (FrontLine) runs the AI's rotation, escape, reserves, second line and local attacks: ours stand aside.</summary>
     private static bool MicroElsewhere => Jobs.AiMicro is { } owner && owner != Id;
@@ -625,12 +625,12 @@ public unsafe partial class AiAssist
     /// The one PostAICommand hook (every AI command): AI order commands that would undo a paradrop of ours (StrategicParadrops),
     /// then the launch gate: invasions by their beach (StrategicInvasions), other attacks by the grad and the line (HoldTheLine).
     /// </summary>
-    private void LoadPostAICommand()
+    private void LoadPostAiCommand()
     {
         _findOrder = (delegate* unmanaged<nint, int, nint>)Sig.Find(Signatures.FindOrder);
         _executeVTable = Sig.VTable(Commands.ExecuteOrder);
         if (_holdLine) _redeployVTable = Sig.VTable("CStrategicRedeploymentCommand"); // here, not on an AI thread
-        _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAICommand), (cmd, tag) =>
+        _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAiCommand), (cmd, tag) =>
         {
             if (*(int*)tag == Game.ControlledTag || !SheepMod.Active) return _post!.OriginalFunction(cmd, tag);
             bool keep;
@@ -719,7 +719,7 @@ public unsafe partial class AiAssist
         if (Grads.ContainsKey(*(int*)tag)) return false; // on its grad (DefensivePostures): no offensives until strong enough again
         if (!_holdLine) return true;
         var hour = Game.Hour;
-        if (_dominant.TryGetValue(*(int*)tag, out var seen) && hour - seen is >= 0 and < 2 * BackfillHours) return true; // twice the enemy's power on its line
+        if (DominantSince.TryGetValue(*(int*)tag, out var seen) && hour - seen is >= 0 and < 2 * BackfillHours) return true; // twice the enemy's power on its line
         if (!Manned(*(int*)tag, LineOf(*(int*)tag, hour))) return false; // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
         return !_timing || order == 0 || TimeToAttack(order, *(int*)tag, hour);
     }

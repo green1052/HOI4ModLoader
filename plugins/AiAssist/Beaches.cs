@@ -51,13 +51,13 @@ public partial class AiAssist
                     foreach (var n in Game.Neighbours(p))
                     {
                         var q = Game.Province(n);
-                        if (q == 0 || beachhead.Contains(n) || _gap.ContainsKey(n) || Province.Controller(q) != tag || Standing(country, tag, q) > 0) continue;
+                        if (q == 0 || beachhead.Contains(n) || Gap.ContainsKey(n) || Province.Controller(q) != tag || Standing(country, tag, q) > 0) continue;
                         var helper = Helper(tag, q, line, ReserveRadius);
                         if (helper == 0 || !Send(helper, n, hour, LandingHours)) continue;
                         if (++sent >= MaxLandingSends) goto nextCountry;
                     }
                     // Crush it: attack into the beachhead itself; the move turns into combat on arrival.
-                    if (!_gap.ContainsKey(id) && Helper(tag, p, line, BeachheadRadius) is var attacker && attacker != 0 && Send(attacker, id, hour, LandingHours)
+                    if (!Gap.ContainsKey(id) && Helper(tag, p, line, BeachheadRadius) is var attacker && attacker != 0 && Send(attacker, id, hour, LandingHours)
                         && ++sent >= MaxLandingSends) goto nextCountry;
                 }
             }
@@ -146,11 +146,11 @@ public partial class AiAssist
             _changed[id] = hour;
             _landed[id] = FromSea(p, taker, before, hour) ? hour : Never;
         }
-        PortHolders = ports;
+        _portHolders = ports;
     }
 
     /// <summary>Countries holding a naval base, from the last controller scan (null before it): the ones that can land troops. Read by AI worker threads.</summary>
-    private static volatile HashSet<int>? PortHolders;
+    private static volatile HashSet<int>? _portHolders;
 
     /// <summary>
     /// Whether <paramref name="p"/>, a coastal province just taken by <paramref name="taker"/>, came from the sea: at the last scan at most
