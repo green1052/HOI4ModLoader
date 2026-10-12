@@ -591,6 +591,53 @@ public unsafe partial class AiAssist
     //      a grad), a landing while its beach is crowded; the AI asks again every hour. Also our paradrops' guard ----
 
     [Function(CallingConventions.Microsoft)] public delegate byte PostFn(nint cmd, nint tag);
+    [Function(CallingConventions.Microsoft)] public delegate long SetPathFn(nint unit, nint path, nint context, byte clear, uint moveType);
+
+    private IHook<SetPathFn>? _setPath;
+    private const int LineWalk = 6; // provinces: a longer walk off a live line goes elsewhere, even to another line
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> KeptAt = new(); // unit -> hour last logged
+
+    /// <summary>
+    /// The AI walking a division off a live line (it stands on the line or right behind it, enemy divisions within two
+    /// provinces) to somewhere at least two provinces behind the line, or more than LineWalk provinces away: the move isn't set, the division stays. Whatever asked
+    /// for it (its army re-tasked to another front, a strategic redeployment, the theatre regrouping) can't empty the front;
+    /// steps along the line, attacks, retreats and our own posts (Jobs) go ahead. Main thread.
+    /// </summary>
+    private void LoadSetPath()
+    {
+        _setPath = Patches.Hook<SetPathFn>(Sig.Find(Signatures.SetPath), (unit, path, context, clear, moveType) =>
+        {
+            var keep = false;
+            Safely(() => keep = LeavesLiveLine(unit, path));
+            return keep ? moveType : _setPath!.OriginalFunction(unit, path, context, clear, moveType);
+        });
+    }
+
+    private static bool LeavesLiveLine(nint unit, nint path)
+    {
+        var count = *(int*)(path + 0xC);
+        if (count == 0 || !Division.IsLand(unit) || Division.Retreating(unit)) return false;
+        var tag = Division.Commander(unit);
+        if (tag <= 0 || tag == Game.ControlledTag || !SheepMod.Active || Jobs.Taken(unit)) return false;
+        var from = Division.Location(unit);
+        var to = ((nint*)*(nint*)path)[count - 1];
+        if (from == 0 || to == 0 || to == from || Game.Neighbours(from).Contains(Game.Id(to))) return false; // a step: along the line, an attack
+        var country = Game.Country(tag);
+        if (country == 0 || count <= LineWalk && NearLine(country, tag, to) || !NearLine(country, tag, from) || !EnemyDivisionsNear(country, tag, from, RedeployEnemyRadius)) return false;
+        var hour = Game.Hour;
+        if (!KeptAt.TryGetValue(unit, out var last) || hour - last is < 0 or >= 24) // the AI asks again and again: once a day in the log
+        {
+            KeptAt[unit] = hour;
+            Interlocked.Increment(ref _kept);
+            _log?.Info($"#{tag}: kept a division in province {Game.Id(from)} on a live line (the AI walked it off to {Game.Id(to)}, {count} provinces)");
+        }
+        return true;
+    }
+
+    /// <summary>Ours and on the line (next to enemy ground) or right behind it.</summary>
+    private static bool NearLine(nint country, int tag, nint province) =>
+        Province.Controller(province) == tag && (Province.NextToEnemy(country, tag, province)
+            || Game.Neighbours(province).Any(id => Game.Province(id) is var p && p != 0 && Province.Controller(p) == tag && Province.NextToEnemy(country, tag, p)));
 
     private IHook<PostFn>? _post;
     private static delegate* unmanaged<nint, int, nint> _findOrder;
