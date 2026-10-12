@@ -8,6 +8,7 @@
         <Project Path="plugins/Fonts/Fonts.csproj" />
         <Project Path="plugins/FrontLine/FrontLine.csproj" />
         <Project Path="plugins/Queues/Queues.csproj" />
+        <Project Path="plugins/Reroll/Reroll.csproj" />
     </Folder>
     <Folder Name="/tests/">
         <Project Path="tests/Signatures.Tests/Signatures.Tests.csproj" />

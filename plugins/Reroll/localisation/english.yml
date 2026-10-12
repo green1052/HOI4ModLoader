@@ -1,0 +1,4 @@
+﻿l_english:
+    com.green1052.reroll.desc:0 "A fresh random seed every time a game starts or a save is loaded: reloading no longer replays the same combat and event dice (random_list, mean time to happen). What was decided before the save (an open event, a scheduled one) stays."
+    com.green1052.reroll.InIronman:0 "In Ironman too"
+    com.green1052.reroll.InIronman.desc:0 "Also in Ironman games (whose point is that nothing is replayed)."
