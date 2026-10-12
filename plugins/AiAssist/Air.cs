@@ -10,7 +10,7 @@ public unsafe partial class AiAssist
 
     private const int RegionEntrySize = 0x4E8, RegionOfEntry = 0x00, KindOfEntry = 0x08, ScoreOfEntry = 0x10, IgnoredRegion = 5;
     private const int SuperiorityRecords = 0xE0, SuperiorityRecordSize = 0xA0, OurSuperiority = 0x00, EnemySuperiority = 0x08;
-    private const int CombatData = 0x170, OwnWings = 0x08, OtherWings = 0x20, WingDataSize = 0x98, HourOfWingData = 0x0C, DamageTaken = 0x38;
+    private const int CombatData = 0x170, OwnWings = 0x08, OtherWings = 0x20; // AirRegions.PlanesLost reads them
     private const int SuperiorityIdOfRegion = 0x60, CombatIdOfRegion = 0x58;
     private const int WindowHours = 168, MinLosses = 20;
     private const long MinShare = 35_000, PullOutShare = 15_000; // our share of the region's air superiority
@@ -26,7 +26,7 @@ public unsafe partial class AiAssist
     /// <summary>The region scoring hook, shared by air retreat, bombing targets and invasion escorts; each runs only under its own setting.</summary>
     private void LoadRegionPriorities()
     {
-        _ = Sig.FindAll(Game.StrategicAirSig, 2)[0] + Sig.Find(Signatures.RegionAirData) + Sig.Find(Signatures.RegionCombatData) // the offsets below are still where they were
+        _ = Sig.FindAll(Game.StrategicAirSig, 2)[0] + Sig.Find(AirRegions.RegionAirDataSig) + Sig.Find(AirRegions.RegionCombatDataSig) // the offsets below are still where they were
             + Sig.Find(Signatures.RegionNeighbours) + Sig.Find(Signatures.StrBombWishes);
         _priorities = Patches.Hook<PrioritiesFn>(Sig.Find(Signatures.UpdateRegionPriorities), (aiObj, country, scratch, buffer, entries, bases, totals, buffer2) =>
         {
@@ -66,27 +66,11 @@ public unsafe partial class AiAssist
             var cid = *(int*)(region + CombatIdOfRegion);
             var stats = cid > 0 && cid < combat.Length ? combat[cid] : 0;
             if (stats == 0) continue;
-            long lost = PlanesLost(stats + OwnWings, since), kills = PlanesLost(stats + OtherWings, since);
+            long lost = AirRegions.PlanesLost(stats + OwnWings, since), kills = AirRegions.PlanesLost(stats + OtherWings, since);
             if (lost < MinLosses || lost * 100 < kills * LossesPerKillPercent) continue;
             *(long*)(entry + ScoreOfEntry) = share < PullOutShare ? 0 : score * share / MinShare;
             Interlocked.Increment(ref _pulled);
         }
-    }
-
-    /// <summary>Planes shot down (by planes, AA or trains) in the wing records since the hour, newest first.</summary>
-    private static long PlanesLost(nint wings, int since)
-    {
-        long planes = 0;
-        var records = *(nint*)wings;
-        for (var j = *(int*)(wings + 0xC) - 1; j >= 0; j--)
-        {
-            var record = records + (nint)j * WingDataSize;
-            if (*(int*)(record + HourOfWingData) < since) break;
-            var damage = *(nint*)(record + DamageTaken);
-            for (int k = 0, m = *(int*)(record + DamageTaken + 0xC); k < m; k++)
-                if (*(int*)(damage + k * 0x18 + 8) is 4 or 5 or 10) planes += *(long*)(damage + k * 0x18 + 0x10);
-        }
-        return planes / Native.FixedPoint;
     }
 
     // ---- Bombing targets: strategic bombers go for the enemy regions right behind the front, not the far hinterland ----

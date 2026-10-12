@@ -35,6 +35,7 @@ namespace AiAssist;
 /// - Railway guns: the armies on the breakthrough axis get the railway guns first and keep them.
 /// - Supply hubs: the railway from the hub feeding starving AI divisions to the capital is upgraded, and (late, rich countries)
 ///   a new hub goes where they starve with none near (vanilla only upgrades and links hubs).
+/// - Ground crews: spare command power goes to More Ground Crews in the regions where the AI's wings fight hardest (vanilla's AI never uses it).
 /// </summary>
 [Plugin(Id, "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
@@ -112,6 +113,9 @@ public unsafe partial class AiAssist : Plugin
             "Where an AI country's divisions are low on supply, the railway from the supply hub feeding them to the capital is upgraded a level (one a week, the same hub's again after 60 days; a railway level costs little next to a hub). "
             + "From 1941 on, where the divisions of an AI country with 60+ civilian factories starve with no supply hub within 3 provinces, it also builds one (railway-connected provinces first); checked weekly, two a month at most. "
             + "A hub costs 20000, so earlier or poorer it doesn't. Vanilla's AI only upgrades and links the hubs it has.");
+        var groundCrews = Config.Bind("AI", "GroundCrews", true,
+            "The AI uses More Ground Crews (+10 % air efficiency in a region for 20 command power, given back when turned off): every two days, in the regions where its wings fought hardest in the last three days "
+            + "(10+ planes lost and shot down where enemy planes are active), two at most, while 50 command power is left after the cost; off again where its wings stopped fighting for a week, or one a pass while command power is under 50. Vanilla's AI never turns them on.");
 
         _log = Log;
         ResolveShared();
@@ -172,6 +176,7 @@ public unsafe partial class AiAssist : Plugin
         if (encircle) LoadEncircle();
         if (railGuns) LoadRailGuns();
         if (supplyHubs) LoadSupplyHubs();
+        if (groundCrews) LoadGroundCrews();
         if (_holdLine || _attackTargets) MainThread.Every(TimeSpan.FromSeconds(1), Micro);
         if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(1), DefendBeachheads);
         MainThread.Every(TimeSpan.FromMinutes(1), LogStats);
@@ -227,6 +232,8 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _gunned, "gave railway guns to {0} new set(s) of axis armies");
         Add(ref _railways, "upgraded {0} railway(s) to hubs of starving AI divisions");
         Add(ref _hubs, "queued {0} supply hub(s) where AI divisions starve");
+        Add(ref _crewsOn, "turned on more ground crews in {0} air region(s)");
+        Add(ref _crewsOff, "turned off more ground crews in {0} air region(s)");
         if (done.Count > 0) Log.Info($"last minute: {string.Join(", ", done)}");
     }
 

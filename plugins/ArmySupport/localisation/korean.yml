@@ -1,6 +1,6 @@
 ﻿l_korean:
     com.green1052.armysupport.name:0 "육군 지원"
-    com.green1052.armysupport.desc:0 "공군과 열차포를 원수에게 배속할 수 있고(멀티: 야전군들에 나눠 배속), 열차포는 전선 바로 뒤에 머물며 바다를 건너지 않습니다. 공항을 Shift+우클릭하면 들어가는 공군만 보내고, 공군을 자동으로 재배치합니다. Ctrl+Alt+G로 선택한 사단들을 야전군으로 나눠 원수 밑에 편성합니다."
+    com.green1052.armysupport.desc:0 "공군과 열차포를 원수에게 배속할 수 있고(멀티: 야전군들에 나눠 배속), 열차포는 전선 바로 뒤에 머물며 바다를 건너지 않습니다. 공항을 Shift+우클릭하면 들어가는 공군만 보내고, 공군을 자동으로 재배치하며, 항공단이 싸우는 지역에 더 많은 지상 근무단을 자동으로 켭니다. Ctrl+Alt+G로 선택한 사단들을 야전군으로 나눠 원수 밑에 편성합니다."
     com.green1052.armysupport.FieldMarshal:0 "원수 배속"
     com.green1052.armysupport.FieldMarshal.desc:0 "공군이나 열차포를 선택한 채 원수 카드를 우클릭하면, 싱글 플레이에서는 원수에게 배속하고(게임 규칙이 바뀝니다) 멀티플레이에서는 그 원수의 야전군들에 나눠 배속합니다."
     com.green1052.armysupport.FrontPenalty:0 "열차포: 최전선 감점"
@@ -9,5 +9,9 @@
     com.green1052.armysupport.NoSeaTransfer.desc:0 "열차포를 바다로 수송하지 않고 자기 철도망 안에서만 움직입니다. 싱글 플레이 전용."
     com.green1052.armysupport.Coverage:0 "자동 재배치 기준 범위(%)"
     com.green1052.armysupport.Coverage.desc:0 "공항에서 임무 지역이 이 비율보다 적게 닿는 공군을, 수용량이 남는 공항 중 더 많이 닿는 곳으로 옮깁니다. 임무는 그대로 이어집니다. 야전군에 배속된 공군은 게임이 직접 옮깁니다. 0이면 끕니다."
+    com.green1052.armysupport.AutoGroundCrews:0 "자동 지상 근무단"
+    com.green1052.armysupport.AutoGroundCrews.desc:0 "최근 이틀 동안 내 항공단이 가장 치열하게 싸운 지역(적 항공기가 활동하는 곳에서 잃고 격추한 항공기 10대 이상)에 더 많은 지상 근무단(지휘력을 써서 한 지역의 항공 효율 +10%, 끄면 지휘력을 돌려받음)을 최대 두 곳까지 켭니다. 사흘 동안 싸움이 없던 지역이나 지휘력이 예비분 아래로 떨어지면 끕니다. 자기가 켠 지역만 끄며, 직접 끈 지역은 건드리지 않습니다."
+    com.green1052.armysupport.GroundCrewsReserve:0 "자동 지상 근무단: 지휘력 예비분"
+    com.green1052.armysupport.GroundCrewsReserve.desc:0 "자동 지상 근무단이 이 아래로는 지휘력을 쓰지 않습니다."
     com.green1052.armysupport.Organize:0 "야전군 편성(Ctrl+Alt+G)"
     com.green1052.armysupport.Organize.desc:0 "사단들을 선택하고 Ctrl+Alt+G를 누르면 게임의 야전군 정원대로, 가까이 있는 사단끼리 묶어 야전군을 나눕니다. 새 야전군마다 놀고 있는 장군 중 가장 뛰어난 사람을 붙이고, 사단 대부분이 속해 있던 집단군에 넣습니다. 그런 집단군이 없으면 새로 만들어 놀고 있는 원수 중 가장 뛰어난 사람에게 맡깁니다."

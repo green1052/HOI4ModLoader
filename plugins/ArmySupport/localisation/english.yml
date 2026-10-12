@@ -1,5 +1,5 @@
 l_english:
-    com.green1052.armysupport.desc:0 "Air wings and railway guns for field marshals (in multiplayer: spread over his armies), railway guns that stay just behind the front line and off the sea, Shift+right-click an airbase to send only the air wings that fit, auto rebase, and Ctrl+Alt+G to organize the selected divisions into armies under a field marshal."
+    com.green1052.armysupport.desc:0 "Air wings and railway guns for field marshals (in multiplayer: spread over his armies), railway guns that stay just behind the front line and off the sea, Shift+right-click an airbase to send only the air wings that fit, auto rebase, auto More Ground Crews where your air wings fight, and Ctrl+Alt+G to organize the selected divisions into armies under a field marshal."
     com.green1052.armysupport.FieldMarshal:0 "Field marshals"
     com.green1052.armysupport.FieldMarshal.desc:0 "Right-click a field marshal's card with air wings or railway guns selected: single player attaches them to him (changes the game), multiplayer spreads them over his armies."
     com.green1052.armysupport.FrontPenalty:0 "Railway guns: front line penalty"
@@ -8,5 +8,9 @@ l_english:
     com.green1052.armysupport.NoSeaTransfer.desc:0 "Never ship railway guns by sea; they only move along their own rail network. Single player."
     com.green1052.armysupport.Coverage:0 "Auto rebase below coverage (%)"
     com.green1052.armysupport.Coverage.desc:0 "Fly a wing reaching less than this much (%) of its mission region to a usable airbase with room that reaches more (wings attached to an army: the game does it); 0: off."
+    com.green1052.armysupport.AutoGroundCrews:0 "Auto ground crews"
+    com.green1052.armysupport.AutoGroundCrews.desc:0 "Turn on More Ground Crews (+10 % air efficiency in a region for command power, given back when turned off) where your air wings fought hardest in the last two days (10+ planes lost and shot down where enemy planes are active), two regions at most, and off again where they stopped fighting for three days or command power falls under the reserve. Only regions it turned on are turned off; one you turn off yourself is left alone."
+    com.green1052.armysupport.GroundCrewsReserve:0 "Auto ground crews: command power reserve"
+    com.green1052.armysupport.GroundCrewsReserve.desc:0 "Command power auto ground crews never spends below."
     com.green1052.armysupport.Organize:0 "Organize armies (Ctrl+Alt+G)"
     com.green1052.armysupport.Organize.desc:0 "Ctrl+Alt+G with divisions selected: split them into armies of the game's army size (neighbours together), each under the best idle general, in the army group most of them came from or a new one under the best idle field marshal."
