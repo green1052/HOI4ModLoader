@@ -69,6 +69,12 @@ public unsafe partial class AiAssist : Plugin
             "Through a gap in the enemy line (empty enemy ground no enemy division covers), fresh mobile divisions of the AI drive up to four provinces deep "
             + "to the most valuable province there (a capital, victory points, a supply hub, airfields), off their battle plan for a week; two at most per target, four per country every three hours. "
             + "Vanilla only takes the next province, so an empty capital behind a broken line stays untaken.");
+        _pincers = Config.Bind("AI", "Pincers", true,
+            "Needs BreakthroughAxis. Where the enemy masses divisions on the line (3+ in a province, twice the line's average), the AI's axis becomes two arms: "
+            + "the thinnest enemy sector on each side of the mass, 2-5 line provinces away, so the attacks close behind it; kept three days while both arms' targets are still the enemy's.") && _axis;
+        _feints = Config.Bind("AI", "Feints", true,
+            "Needs BreakthroughAxis. Before a new main push (a thin sector or a pincer), the AI's local attacks first hit, for a day and a half, the enemy line province with the most divisions "
+            + "at least five provinces away, so its reserves move there; the push waits meanwhile.") && _axis;
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
             + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "
@@ -145,6 +151,8 @@ public unsafe partial class AiAssist : Plugin
             _fresh.Clear();
             Known.Clear();
             Axes.Clear();
+            SecondArms.Clear();
+            Feints.Clear();
             AxisArmies.Clear();
             Beaches.Clear();
             Routes.Clear();
@@ -220,6 +228,8 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _unguarded, "freed {0} coast and home garrison request(s) of countries whose enemies hold no port");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
         Add(ref _drives, "drove {0} mobile division(s) through gaps in enemy lines");
+        Add(ref _pincered, "opened {0} pincer(s) around massed enemy divisions");
+        Add(ref _feinted, "feinted {0} time(s) before a new push");
         Add(ref _kept, "kept {0} line defender(s) from strategic redeployment to another front");
         Add(ref _reserved, "posted {0} reserve(s)");
         Add(ref _depth, "posted {0} second-line division(s) behind key line provinces");

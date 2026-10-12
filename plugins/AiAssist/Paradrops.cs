@@ -278,7 +278,7 @@ public unsafe partial class AiAssist
         if (target == 0 || !DropTarget(country, tag, target) || _isParadropTarget(order, target) == 0)
         {
             // The axis it was planned for (another theatre's targets are out of its planes' range).
-            var core = drop.Core ?? (Axes.TryGetValue(drop.General, out var axis) && axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours ? axis.Core : null);
+            var core = drop.Core ?? (Axes.TryGetValue(drop.General, out var axis) && axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisFreshHours ? axis.Core : null);
             var next = core == null ? 0 : BestTarget(country, tag, core, order);
             if (next != 0 && PostOrderCommand(Signatures.ParadropTargetCommand, drop.Group, drop.Order, next)) drop.Target = next; // vanilla re-checks the route's air on it
             else if (executing) PostOrderCommand(Commands.ExecuteOrder, drop.Group, drop.Order, 0); // nothing safe to land on: hold

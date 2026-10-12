@@ -50,6 +50,7 @@ public unsafe partial class AiAssist
     private static int _stationed;
     private static bool _holdLine, _axis, _beachDefense;
     private const int AxisHours = 24, ThinSectorWeight = 8, SectorHours = 72, SalientHead = -1; // a thin sector is held 3 days unless taken
+    private const int AxisFreshHours = 2 * AxisHours; // the general updates its fronts about once a day (25 hours seen): an axis lives until the next one
     // CAIFront+0x218: its CAIForceConcentration (the game's armoured push), embedded. +0 divisions it was given (0: none), +0x14 its units,
     // +0x20 its army, +0x48 target (optional, set flag +0x78) with its CPdxArray<CProvince*> path at +0x60 (path[0] ours .. path[n-1] the target), +0x84 attack on.
     private const int ConcentrationOfFront = 0x218, UnitsOfConcentration = 0x14, ArmyOfConcentration = 0x20, PathOfConcentration = 0x60, HasTarget = 0x78, AttackOn = 0x84;
@@ -185,7 +186,7 @@ public unsafe partial class AiAssist
             if (hostile)
             {
                 theatre = country;
-                if (_encircle) foreach (var (p, held) in enemyHeld) if (held) (enemyLine ??= []).Add(p);
+                if (_encircle || _pincers || _feints) foreach (var (p, held) in enemyHeld) if (held) (enemyLine ??= []).Add(p);
                 if (_railGuns && threatened.Count > 0) (atWar ??= []).Add((front, threatened));
             }
             if (_paradrops && hostile)
@@ -246,11 +247,12 @@ public unsafe partial class AiAssist
     /// </summary>
     private static void Anchor(nint general, nint country, int tag, nint thinnest, int weight, HashSet<int> line, HashSet<nint>? enemyLine, int hour)
     {
-        var mine = Axes.TryGetValue(general, out var current) && current.Tag == tag && hour - current.Hour is >= 0 and < AxisHours; // this theatre's, refreshed today
+        var mine = Axes.TryGetValue(general, out var current) && current.Tag == tag && hour - current.Hour is >= 0 and < AxisFreshHours; // this theatre's, from its last update
         if (_encircle && enemyLine != null && Salient(general, country, tag, enemyLine, hour) is { } salient)
         {
             var same = mine && current.Head == SalientHead && current.Core == salient.Core;
             Axes[general] = (hour, tag, SalientHead, salient.Core, line, same ? current.Since : hour, salient.Neck[0]);
+            SecondArms.TryRemove(general, out _);
             return;
         }
         if (Spearhead(general) is var head and not 0)
@@ -261,9 +263,31 @@ public unsafe partial class AiAssist
             {
                 if (!same) Interlocked.Increment(ref _spearheads);
                 Axes[general] = (hour, tag, head, core, line, same ? current.Since : hour, head);
+                SecondArms.TryRemove(general, out _);
                 return;
             }
         }
+        // A massed enemy: two arms close behind it, kept three days while both arm targets are still the enemy's.
+        if (_pincers && enemyLine != null)
+        {
+            if (mine && current.Head == PincerHead && hour - current.Since is >= 0 and < SectorHours && SecondArms.TryGetValue(general, out var arm) && arm.Tag == tag
+                && Game.Province(current.Anchor) is var a && a != 0 && Province.Enemy(country, tag, a) && Game.Province(arm.Anchor) is var b && b != 0 && Province.Enemy(country, tag, b))
+            {
+                Axes[general] = (hour, tag, PincerHead, current.Core, line, current.Since, current.Anchor);
+                SecondArms[general] = (hour, tag, arm.Core, arm.Anchor);
+                return;
+            }
+            if (Pincer(enemyLine) is { } pin)
+            {
+                Axes[general] = (hour, tag, PincerHead, Rings(pin.A), line, hour, pin.A);
+                SecondArms[general] = (hour, tag, Rings(pin.B), pin.B);
+                Interlocked.Increment(ref _pincered);
+                _log?.Info($"#{tag}: pincer around {pin.Enemies} enemy division(s) at {pin.Mass}: arms at {pin.A} and {pin.B}");
+                StartFeint(general, tag, pin.A, enemyLine, hour);
+                return;
+            }
+        }
+        SecondArms.TryRemove(general, out _);
         var sticky = mine && current.Head == 0 && hour - current.Since is >= 0 and < SectorHours;
         var (anchor, since) = sticky ? (current.Anchor, current.Since) : (0, hour);
         if (sticky && Game.Province(anchor) is var at && at != 0 && !Province.Enemy(country, tag, at))
@@ -275,6 +299,7 @@ public unsafe partial class AiAssist
         }
         var kept = mine && current.Head == 0 && current.Anchor == anchor;
         Axes[general] = (hour, tag, 0, kept ? current.Core : Rings(anchor), line, since, anchor);
+        if (!kept && !sticky && enemyLine != null) StartFeint(general, tag, anchor, enemyLine, hour); // a new push (not the next step of one): a feint first
     }
 
     /// <summary>The easiest enemy province to take next to <paramref name="taken"/> (a sector we just took), 0 if none.</summary>
@@ -336,9 +361,17 @@ public unsafe partial class AiAssist
     {
         if (Grads.ContainsKey(tag)) return true; // on its grad: no breakthrough; the grad's own filter picks the targets
         var hour = Game.Hour;
-        foreach (var axis in Axes.Values)
-            if (axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours && axis.Line.Contains(Game.Id(from)))
-                return axis.Core.Contains(Game.Id(to)) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(axis.Core.Contains);
+        foreach (var (general, axis) in Axes)
+        {
+            if (axis.Tag != tag || hour - axis.Hour is < 0 or >= AxisFreshHours || !axis.Line.Contains(Game.Id(from))) continue;
+            var target = Game.Id(to);
+            // While a feint runs only it attacks (and pins next to it); then the axis, and a pincer's second arm.
+            if (FeintCore(general, tag, hour) is { } feint)
+                return feint.Contains(target) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(feint.Contains);
+            var second = SecondCore(general, tag, hour);
+            bool OnArm(int id) => axis.Core.Contains(id) || second != null && second.Contains(id);
+            return OnArm(target) || Province.Divisions(to) > 0 && Strong(from, to) && Game.Neighbours(to).Exists(OnArm);
+        }
         return true;
     }
 
@@ -351,6 +384,8 @@ public unsafe partial class AiAssist
         var hour = Game.Hour;
         foreach (var axis in Axes.Values)
             if (axis.Tag == tag && hour - axis.Hour is >= 0 and < 2 * AxisHours && axis.Core.Contains(province)) return true;
+        foreach (var arm in SecondArms.Values)
+            if (arm.Tag == tag && hour - arm.Hour is >= 0 and < 2 * AxisHours && arm.Core.Contains(province)) return true;
         return false;
     }
 }
