@@ -23,7 +23,13 @@ public unsafe partial class AutoTrade
 
     private void LoadOverlay()
     {
-        _map = new PerGame(_arrows.Clear); // a new map: its arrows are new objects
+        // Another game (its map's arrows are new objects) or another country: the old routes go. Arrows made before a
+        // country switch stay with the map, hidden.
+        _map = new PerGame(() =>
+        {
+            foreach (var arrow in _arrows) MapArrows.Hide(arrow);
+            _arrows.Clear();
+        });
         MainThread.Every(TimeSpan.FromMilliseconds(30), Poll);
     }
 
