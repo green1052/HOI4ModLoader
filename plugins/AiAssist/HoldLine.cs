@@ -45,7 +45,7 @@ public unsafe partial class AiAssist
     private static readonly Dictionary<int, HashSet<nint>> Known = []; // tag -> its land divisions at its last backfill pass (main thread)
     private PerGame _game = null!;
     private static int _world = -1; // Game.Generation at the last reset: until it runs after a load, _line points into the old world
-    private int _backfillAt = Never;
+    private int _backfillAt = Never, _keepAt = Never;
     private static int _backfilled, _reserved, _deployed, _returned, _stopped, _depth, _kept;
 
     /// <summary>
@@ -206,7 +206,6 @@ public unsafe partial class AiAssist
             if (dominant) _dominant[tag] = hour;
             else _dominant.TryRemove(tag, out _);
             if (fresh.Count > 0) Deploy(country, tag, fresh, grad, line, hour);
-            if (grad == null) KeepDefenders(country, tag, line, hour);
             var sent = 0;
             var fronts = new Dictionary<nint, HashSet<nint>>(); // AI front -> the armies standing on it
             foreach (var (province, key) in Holes(country, tag, grad, line).Select(p => (p, Key(country, tag, p))).OrderByDescending(h => h.Item2))
@@ -235,23 +234,49 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Divisions walking off a line province that needs them (<see cref="Pinned"/>: its last defender, or no more than the enemy
-    /// divisions next to it) to somewhere else than the line or a neighbour: stopped and posted there. Vanilla re-tasks whole
-    /// armies to another front (a port, then by sea), which neither the front requests nor the reassignment filter see. Main thread.
+    /// Every game hour, per AI country at war on a line (not on a grad): divisions walking off a line province that needs them
+    /// (<see cref="Pinned"/>: its last defender, or no more than the enemy divisions next to it) to somewhere else than the line
+    /// or a neighbour are stopped and posted there, and posts the game walks away anyway are sent back. Vanilla re-tasks whole
+    /// armies to another front (a port, then by sea), which neither the front requests nor the reassignment filter see.
     /// </summary>
+    private void KeepLines()
+    {
+        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _keepAt, 1)) return;
+        _game.Check();
+        var hour = Game.Hour;
+        var player = Game.ControlledTag;
+        foreach (var country in Game.Countries)
+        {
+            var tag = country == 0 ? 0 : Game.Tag(country);
+            if (tag <= 0 || tag == player || Grads.ContainsKey(tag) || LineOf(tag, hour) is not { Count: > 0 } line) continue;
+            KeepDefenders(country, tag, line, hour);
+        }
+        ShareJobs();
+    }
+
     private static void KeepDefenders(nint country, int tag, HashSet<nint> line, long hour)
     {
         foreach (var unit in Game.Units(country).ToArray())
         {
             if (unit == 0 || !Division.IsLand(unit) || Division.Commander(unit) != tag || !Division.Walking(unit) || Division.Fighting(unit) || Division.Retreating(unit)
-                || _posted.ContainsKey(unit) || _fresh.ContainsKey(unit) || Jobs.Taken(unit) || Division.IsHeadquarters(unit)) continue;
+                || _fresh.ContainsKey(unit) || Division.IsHeadquarters(unit)) continue;
             var location = Division.Location(unit);
-            if (location == 0 || !line.Contains(location)) continue;
+            if (location == 0) continue;
             var path = unit + Division.PathOffset; // CPdxArray<int> of province ids, the next hop first (CArmy::UpdateMovement)
             var to = Game.Province(((int*)*(nint*)path)[*(int*)(path + 0xC) - 1]);
-            if (to == 0 || line.Contains(to) || Game.Neighbours(location).Contains(Game.Id(to)) || !Pinned(unit)) continue; // along the line, or a step (an attack)
+            if (to == 0) continue;
+            if (_posted.TryGetValue(unit, out var post) && post.Kind == PostKind.Helper) // reserves walk out to counterattack
+            {
+                if (Game.Id(to) == post.Province || !Send(unit, post.Province, hour, GapHours, keep: true)) continue; // on its way to its post
+                Interlocked.Increment(ref _kept);
+                _log?.Info($"#{tag}: the game walked a posted division off toward province {Game.Id(to)}: sent back to {post.Province}");
+                continue;
+            }
+            if (Jobs.Taken(unit) || !line.Contains(location)) continue;
+            if (line.Contains(to) || Game.Neighbours(location).Contains(Game.Id(to)) || !Pinned(unit)) continue; // along the line, or a step (an attack)
             if (!Station(unit, Game.Id(location), tag, hour, GapHours, PostKind.Helper)) continue;
             Interlocked.Increment(ref _kept);
+            _log?.Info($"#{tag}: a line defender walking off toward province {Game.Id(to)} stays in {Game.Id(location)}");
         }
     }
 
