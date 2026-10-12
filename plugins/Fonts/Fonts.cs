@@ -20,7 +20,7 @@ namespace Fonts;
 [Plugin("com.green1052.fonts", "Fonts", "1.0.0")]
 public sealed class Fonts : Plugin
 {
-    private const int Format = 1; // bump when the output changes: every cache is redrawn
+    private const int Format = 2; // bump when the output changes: every cache is redrawn
 
     public override void Load()
     {
@@ -32,14 +32,8 @@ public sealed class Fonts : Plugin
         var typewriter = Config.Bind("Fonts", "Typewriter", false,
             "Also redraw the typewriter fonts (documents and reports); off: they keep the game's own look.");
         var dir = FontDir();
-        // The settings menu's arrows step through the installed fonts that really have the language's characters.
-        var installed = new Lazy<IReadOnlyList<string>>(() => ["", .. dir switch
-        {
-            "gfx/fonts/korean" => Gdi.Families(129, '가'),   // HANGEUL_CHARSET
-            "gfx/fonts/japanese" => Gdi.Families(128, 'あ'), // SHIFTJIS_CHARSET
-            "gfx/fonts/chinese" => Gdi.Families(134, '中'),  // GB2312_CHARSET
-            _ => Gdi.Families(1, 'A'),                       // DEFAULT_CHARSET: all
-        }]);
+        // The settings menu lists the installed fonts to pick from.
+        var installed = new Lazy<IReadOnlyList<string>>(() => ["", .. Gdi.Families()]);
         Config.Choices("Fonts", "Font", () => installed.Value);
         Config.Choices("Fonts", "HeaderFont", () => installed.Value);
         if (font == "" || !Loader.AtStartup) return; // a reload (a setting changed in the menu): the game read its fonts already
@@ -51,7 +45,7 @@ public sealed class Fonts : Plugin
         var faces = new[] { font, header }.Distinct().ToDictionary(spec => spec, Face);
         foreach (var (spec, face) in faces)
         {
-            using var gdi = new Gdi(face, 20, false);
+            using var gdi = new Gdi(face, 20, 400);
             if (gdi.FamilyNames().Contains(face, StringComparer.OrdinalIgnoreCase)) continue;
             Log.Error($"font \"{spec}\" isn't installed (Windows would draw \"{gdi.Face}\" instead): the game's own fonts stay");
             return;
@@ -164,10 +158,25 @@ public sealed class Fonts : Plugin
                 else dark++;
         var darkInk = dark * 10 > (bright + dark) * 9;
         var outline = !darkInk && dark * 5 > bright + dark ? lineHeight >= 30 ? 2 : 1 : 0;
-        var bold = Regex.IsMatch(name, @"_bold|\d+m?bs?$|header", RegexOptions.IgnoreCase); // b: bold, mbs: medium bold with a shadow
+        // b: bold, mbs: medium bold with a shadow, header: extra bold
+        var weight = Regex.IsMatch(name, @"_bold|\d+bs?$|header", RegexOptions.IgnoreCase) ? 700 : Regex.IsMatch(name, @"\d+mbs$", RegexOptions.IgnoreCase) ? 600 : 400;
+
+        // The size whose sample glyph (Hangul if the font has it, else H) is as tall as the original's: faces differ in how
+        // much of their em a letter takes, so a line height alone draws some far bigger or smaller.
+        var sampleLine = lines.FirstOrDefault(l => l.StartsWith("char id=44032 ")) ?? lines.FirstOrDefault(l => l.StartsWith("char id=72 "));
+        var target = sampleLine == null ? 0 : original.InkRows(Field(sampleLine, "x"), Field(sampleLine, "y"), Field(sampleLine, "width"), Field(sampleLine, "height"), darkInk);
+        double em = lineHeight * 0.75;
+        for (var pass = 0; pass < 3 && target > 0; pass++)
+        {
+            using var probe = new Gdi(face, -(int)Math.Round(em), weight);
+            var drawn = probe.Draw((char)Field(sampleLine!, "id"), 0, 0, false);
+            var rows = drawn == null ? 0 : Bitmap.InkRows(drawn);
+            if (rows == 0) break;
+            em *= (double)target / rows;
+        }
 
         var glyphs = new List<Glyph>();
-        using (var gdi = new Gdi(face, lineHeight * sizePercent / 100, bold))
+        using (var gdi = new Gdi(face, -(int)Math.Round(em * sizePercent / 100), weight))
         {
             foreach (var line in lines.Where(l => l.StartsWith("char ")))
             {
@@ -252,6 +261,35 @@ internal sealed class Bitmap(int width, int height)
         return tga;
     }
 
+    /// <summary>How many rows of the rectangle hold ink: white (or, <paramref name="dark"/>, dark) and at least half opaque.</summary>
+    public int InkRows(int x, int y, int w, int h, bool dark)
+    {
+        var rows = 0;
+        for (var row = y; row < Math.Min(y + h, Height); row++)
+        for (var col = x; col < Math.Min(x + w, Width); col++)
+        {
+            var at = (row * Width + col) * 4;
+            if (Pixels[at + 3] < 128 || Pixels[at] + Pixels[at + 1] + Pixels[at + 2] >= 384 == dark) continue;
+            rows++;
+            break;
+        }
+        return rows;
+    }
+
+    /// <summary>How many rows of the glyph hold ink (at least half opaque).</summary>
+    public static int InkRows(Glyph g)
+    {
+        var rows = 0;
+        for (var row = 0; row < g.Height; row++)
+            for (var col = 0; col < g.Width; col++)
+                if (g.Pixels[(row * g.Width + col) * 4 + 3] >= 128)
+                {
+                    rows++;
+                    break;
+                }
+        return rows;
+    }
+
     /// <summary>The original's glyph, kept as it was.</summary>
     public Glyph Cut(int id, int x, int y, int w, int h, int xOffset, int yOffset, int xAdvance)
     {
@@ -331,27 +369,23 @@ internal sealed unsafe class Gdi : IDisposable
     /// <summary>The face Windows actually picked (it substitutes one it can't find).</summary>
     public readonly string Face;
 
-    /// <summary><paramref name="face"/> with lines <paramref name="lineHeight"/> pixels tall (GDI's cell height).</summary>
-    public Gdi(string face, int lineHeight, bool bold)
+    /// <summary><paramref name="face"/> <paramref name="height"/> pixels tall (GDI's: positive the cell, negative the em), of <paramref name="weight"/> (400 regular, 700 bold).</summary>
+    public Gdi(string face, int height, int weight)
     {
         _dc = CreateCompatibleDC(0);
-        _font = CreateFontW(lineHeight, 0, 0, 0, bold ? 700 : 400, 0, 0, 0, 1 /* default charset */, 7 /* TrueType only */, 0, 4 /* anti-aliased */, 0, face);
+        _font = CreateFontW(height, 0, 0, 0, weight, 0, 0, 0, 1 /* default charset */, 7 /* TrueType only */, 0, 4 /* anti-aliased */, 0, face);
         SelectObject(_dc, _font);
         var name = stackalloc char[64];
         Face = new string(name, 0, Math.Max(0, GetTextFaceW(_dc, 64, name) - 1));
     }
 
-    /// <summary>
-    /// Installed outline (TrueType/OpenType) families listed for <paramref name="charSet"/> that have a glyph for
-    /// <paramref name="sample"/> (Windows lists some for a script they only reach through font linking), sorted; vertical
-    /// "@" variants left out.
-    /// </summary>
-    public static List<string> Families(byte charSet, char sample)
+    /// <summary>Installed outline (TrueType/OpenType) families, sorted; vertical "@" variants left out.</summary>
+    public static List<string> Families()
     {
         var dc = CreateCompatibleDC(0);
         var logFont = stackalloc byte[92]; // LOGFONTW, an empty face name: every family
         new Span<byte>(logFont, 92).Clear();
-        logFont[23] = charSet;              // lfCharSet
+        logFont[23] = 1;                    // lfCharSet: DEFAULT_CHARSET, every family
         var found = new HashSet<string>();
         var handle = GCHandle.Alloc(found);
         try { EnumFontFamiliesExW(dc, logFont, &OnFamily, GCHandle.ToIntPtr(handle), 0); }
@@ -360,14 +394,7 @@ internal sealed unsafe class Gdi : IDisposable
             handle.Free();
             DeleteDC(dc);
         }
-        return [.. found.Where(f => Has(f, sample)).Order(StringComparer.CurrentCulture)];
-    }
-
-    private static bool Has(string face, char c)
-    {
-        using var gdi = new Gdi(face, 20, false);
-        ushort index;
-        return GetGlyphIndicesW(gdi._dc, &c, 1, &index, 1 /* mark missing */) != GdiError && index != 0xFFFF;
+        return [.. found.Order(StringComparer.CurrentCulture)];
     }
 
     [UnmanagedCallersOnly]
@@ -423,6 +450,7 @@ internal sealed unsafe class Gdi : IDisposable
             for (var dx = -outline; dx <= outline; dx++)
                 if (dx * dx + dy * dy <= outline * outline + 1 && x + dx - s >= 0 && x + dx - s < ow && y + dy - s >= 0 && y + dy - s < oh)
                     o = Math.Max(o, fill[(y + dy - s) * ow + x + dx - s]);
+            o *= 0.6f; // the game's own rims are about this see-through
             var a = f + o * (1 - f); // ink over a black rim
             var at = (y * ow + x) * 4;
             var shade = darkInk ? (byte)0x20 : a > 0 ? (byte)(255 * f / a) : (byte)0;

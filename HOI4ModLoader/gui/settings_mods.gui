@@ -606,14 +606,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -656,14 +664,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -706,14 +722,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -756,14 +780,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -806,14 +838,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -856,14 +896,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -906,14 +954,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -956,14 +1012,22 @@ ${1}buttonType = {
                             fixedsize = yes
                             format = left
                         }
+                        # A setting with choices: opens their list (the value is drawn over it).
+                        buttonType = {
+                            name = "hoimod_setting_pick"
+                            position = { x = 226 y = 1 }
+                            spriteType = "GFX_list_button"
+                            clicksound = click_default
+                        }
                         instantTextBoxType = {
                             name = "hoimod_setting_value"
-                            position = { x = 278 y = 5 }
+                            position = { x = 242 y = 6 }
                             font = "hoi_18mbs"
                             text = ""
-                            maxWidth = 120
+                            maxWidth = 180
                             maxHeight = 18
                             format = centre
+                            alwaystransparent = yes
                         }
                         buttonType = {
                             name = "hoimod_setting_decrease"
@@ -986,4 +1050,4 @@ ${1}buttonType = {
                         }
                     }
                 }
-            }
+            }

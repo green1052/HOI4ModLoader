@@ -12,7 +12,7 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// A "Mods" tab in the game's settings window: a checkbox per plugin to switch it on or off (hover for what it does), and
-/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers; pages of 8, with arrows by
+/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers, a list to pick from for text with choices; pages of 8, with arrows by
 /// the title when there are more). Changes are written to the
 /// plugin's config and every plugin reloads. The tab comes from the GuiPatch above (built from the
 /// installed game's interface\settings.gui at startup); without it nothing changes.
@@ -67,6 +67,10 @@ internal static unsafe class SettingsMods
     private static string? _plugin;
     private static List<(string Section, string Key, string Value, string Description)> _entries = [];
     private static int _first; // the entry in the first row (pages of SettingRows)
+
+    /// <summary>A text setting whose choices the rows list instead (its list button), the one ticked; the first choice shown.</summary>
+    private static (string Section, string Key, string Description, IReadOnlyList<string> Choices)? _pick;
+    private static int _pickFirst;
 
     internal static void Install()
     {
@@ -132,9 +136,10 @@ internal static unsafe class SettingsMods
             BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), &OnDecrease, row);
             BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), &OnIncrease, row);
             BindCheckBox(Gui.Find(container, CheckBoxSlot, "hoimod_setting_check"), &OnSettingToggle, row);
+            BindButton(Gui.Find(container, ButtonSlot, "hoimod_setting_pick"), &OnPick, row);
             var setting = row;
             Gui.SetTooltip(Gui.FindTextBox(container, "hoimod_setting_label"),
-                () => _first + setting < _entries.Count ? SettingTooltip(_entries[_first + setting]) : "");
+                () => _pick == null && _first + setting < _entries.Count ? SettingTooltip(_entries[_first + setting]) : "");
         }
         BindButton(Gui.Find(_settings, ButtonSlot, "hoimod_settings_back"), &OnBack, 0);
         _prev = Gui.Find(_settings, ButtonSlot, "hoimod_settings_prev");
@@ -168,6 +173,7 @@ internal static unsafe class SettingsMods
     private static void ShowList()
     {
         _plugin = null;
+        _pick = null;
         Visible(_settings, false);
         Visible(_list, true);
         var plugins = Loader.Known;
@@ -239,11 +245,23 @@ internal static unsafe class SettingsMods
     });
 
     [UnmanagedCallersOnly]
-    private static void OnBack(nint unused) => Guard(ShowList);
+    private static void OnBack(nint unused) => Guard(() =>
+    {
+        if (_pick == null) ShowList();
+        else ShowSettings(); // from a setting's choices back to the settings
+    });
 
     [UnmanagedCallersOnly]
     private static void OnTurnPage(nint direction) => Guard(() =>
     {
+        if (_pick is { } pick)
+        {
+            var choice = _pickFirst + (int)direction * SettingRows;
+            if (choice < 0 || choice >= pick.Choices.Count) return;
+            _pickFirst = choice;
+            ShowChoices();
+            return;
+        }
         var first = _first + (int)direction * SettingRows;
         if (_plugin == null || first < 0 || first >= _entries.Count) return;
         _first = first;
@@ -252,13 +270,11 @@ internal static unsafe class SettingsMods
 
     private static void ShowSettings()
     {
+        _pick = null;
         _entries = Settings(_plugin!);
         if (_first >= _entries.Count) _first = 0;
-        var pages = (_entries.Count + SettingRows - 1) / SettingRows;
-        Shown(_prev, pages > 1);
-        Shown(_next, pages > 1);
-        Shown(_pageText, pages > 1);
-        if (pages > 1) Gui.SetText(_pageText, $"{_first / SettingRows + 1}/{pages}");
+        Gui.SetText(_title, Gui.Literal(Loader.Name(Loader.Known.First(p => p.Id == _plugin))));
+        ShowPages(_first, _entries.Count);
         for (var row = 0; row < SettingRows; row++)
         {
             var container = Rows[row];
@@ -268,15 +284,65 @@ internal static unsafe class SettingsMods
             var (section, key, value, _) = _entries[index];
             Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Gui.Literal(Loc.Get($"{_plugin}.{key}", key)));
             var isBool = bool.TryParse(value, out var on);
-            var stepped = !isBool && (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) || Loader.Config(_plugin!).ChoicesOf(section, key) != null);
+            var listed = !isBool && Loader.Config(_plugin!).ChoicesOf(section, key) != null;
+            var stepped = !isBool && !listed && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
             var check = Gui.Find(container, CheckBoxSlot, "hoimod_setting_check");
             Shown(check, isBool);
             if (isBool) Check(check, on);
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), stepped);
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), stepped);
+            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_pick"), listed);
             var shownValue = Gui.FindTextBox(container, "hoimod_setting_value");
             Shown(shownValue, !isBool);
-            if (!isBool) Gui.SetText(shownValue, value == "" ? Loc.Get("HOIMOD_SETTING_NONE", "(none)") : Gui.Literal(Fit(value))); // the tooltip has it whole
+            if (!isBool) Gui.SetText(shownValue, Display(value)); // the tooltip has it whole
+        }
+    }
+
+    /// <summary>The page arrows and "n/m" for <paramref name="count"/> rows from <paramref name="first"/> on.</summary>
+    private static void ShowPages(int first, int count)
+    {
+        var pages = (count + SettingRows - 1) / SettingRows;
+        Shown(_prev, pages > 1);
+        Shown(_next, pages > 1);
+        Shown(_pageText, pages > 1);
+        if (pages > 1) Gui.SetText(_pageText, $"{first / SettingRows + 1}/{pages}");
+    }
+
+    private static string Display(string value) => value == "" ? Loc.Get("HOIMOD_SETTING_NONE", "(none)") : Gui.Literal(Fit(value));
+
+    /// <summary>A text setting's list button: its choices in the rows, a page at a time, starting at the current one's page.</summary>
+    [UnmanagedCallersOnly]
+    private static void OnPick(nint row) => Guard(() =>
+    {
+        if (_plugin == null || _pick != null || _first + row >= _entries.Count) return;
+        var (section, key, value, description) = _entries[_first + (int)row];
+        if (Loader.Config(_plugin).ChoicesOf(section, key) is not { Count: > 0 } choices) return;
+        _pick = (section, key, description, choices);
+        _pickFirst = Math.Max(0, choices.ToList().FindIndex(c => c.Equals(value, StringComparison.OrdinalIgnoreCase))) / SettingRows * SettingRows;
+        ShowChoices();
+    });
+
+    /// <summary>The picked setting's choices: one a row, the current one ticked; ticking another sets it.</summary>
+    private static void ShowChoices()
+    {
+        var (section, key, _, choices) = _pick!.Value;
+        var current = _entries.FirstOrDefault(e => e.Section == section && e.Key == key).Value ?? "";
+        Gui.SetText(_title, Gui.Literal(Loc.Get($"{_plugin}.{key}", key)));
+        ShowPages(_pickFirst, choices.Count);
+        for (var row = 0; row < SettingRows; row++)
+        {
+            var container = Rows[row];
+            var index = _pickFirst + row;
+            Visible(container, index < choices.Count);
+            if (index >= choices.Count) continue;
+            Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Display(choices[index]));
+            var check = Gui.Find(container, CheckBoxSlot, "hoimod_setting_check");
+            Shown(check, true);
+            Check(check, choices[index].Equals(current, StringComparison.OrdinalIgnoreCase));
+            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), false);
+            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), false);
+            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_pick"), false);
+            Shown(Gui.FindTextBox(container, "hoimod_setting_value"), false);
         }
     }
 
@@ -286,20 +352,12 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnIncrease(nint row) => Guard(() => Step(row, +1));
 
-    /// <summary>
-    /// Changes a number by a step that fits its size (1 for 0..99, 10 for 100..999, ...), or a text setting with choices to
-    /// the next or previous one (wrapping around); Shift: 10 steps; Ctrl (choices): to the next one with another initial.
-    /// </summary>
+    /// <summary>Changes a number by a step that fits its size (1 for 0..99, 10 for 100..999, ...); Shift: 10 steps.</summary>
     private static void Step(nint row, int direction)
     {
         if (_plugin == null || _first + row >= _entries.Count) return;
         var (section, key, value, description) = _entries[_first + (int)row];
-        if (Loader.Config(_plugin).ChoicesOf(section, key) is { Count: > 0 } choices)
-        {
-            var at = Math.Max(0, choices.ToList().FindIndex(c => c.Equals(value, StringComparison.OrdinalIgnoreCase)));
-            Save(section, key, choices[Gui.CtrlHeld ? NextInitial(choices, at, direction) : Wrap(at + direction * (Gui.ShiftHeld ? 10 : 1), choices.Count)], description);
-        }
-        else if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole))
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole))
         {
             var step = (long)Math.Max(1, Math.Pow(10, Math.Floor(Math.Log10(Math.Max(1, Math.Abs(whole)))) - 1));
             Save(section, key, (whole + direction * step * (Gui.ShiftHeld ? 10 : 1)).ToString(CultureInfo.InvariantCulture), description);
@@ -311,34 +369,14 @@ internal static unsafe class SettingsMods
         }
     }
 
-    private static int Wrap(int i, int count) => (i % count + count) % count;
-
-    /// <summary>
-    /// The first choice from <paramref name="at"/> on in <paramref name="direction"/> whose initial differs (going back: the
-    /// first of that initial's run), wrapping around; for Hangul the initial consonant.
-    /// </summary>
-    internal static int NextInitial(IReadOnlyList<string> choices, int at, int direction)
-    {
-        static char Initial(string s) => s.Length == 0 ? '\0' : s[0] is >= '가' and <= '힣' ? (char)(0x1100 + (s[0] - '가') / 588) : char.ToUpperInvariant(s[0]);
-        var i = at;
-        for (var step = 1; step < choices.Count; step++)
-        {
-            i = Wrap(at + direction * step, choices.Count);
-            if (Initial(choices[i]) != Initial(choices[at])) break;
-        }
-        if (direction < 0) // to the start of that run
-            while (Initial(choices[Wrap(i - 1, choices.Count)]) == Initial(choices[i]) && Wrap(i - 1, choices.Count) != at) i = Wrap(i - 1, choices.Count);
-        return i;
-    }
-
-    /// <summary>A value cut to fit its box (about 15 Latin letters; a Hangul or CJK one counts double).</summary>
+    /// <summary>A value cut to fit its box (about 22 Latin letters; a Hangul or CJK one counts double).</summary>
     internal static string Fit(string value)
     {
         var width = 0;
         for (var i = 0; i < value.Length; i++)
         {
             width += value[i] >= 0x1100 ? 2 : 1;
-            if (width > 15) return value[..Math.Max(1, i - 1)] + "..";
+            if (width > 22) return value[..Math.Max(1, i - 1)] + "..";
         }
         return value;
     }
@@ -346,6 +384,11 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnSettingToggle(nint row) => Guard(() =>
     {
+        if (_pick is { } pick) // a choice ticked: it is the setting's value now (ShowSettings, and so the later calls of this click, see the settings again)
+        {
+            if (_pickFirst + row < pick.Choices.Count) Save(pick.Section, pick.Key, pick.Choices[_pickFirst + (int)row], pick.Description);
+            return;
+        }
         if (_plugin == null || _first + row >= _entries.Count) return;
         var (section, key, value, description) = _entries[_first + (int)row];
         var on = (*(int*)(Gui.Find(Rows[row], CheckBoxSlot, "hoimod_setting_check") + CheckState) & 1) != 0;
