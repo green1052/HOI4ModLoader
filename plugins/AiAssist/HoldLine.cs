@@ -629,6 +629,7 @@ public unsafe partial class AiAssist
     {
         _findOrder = (delegate* unmanaged<nint, int, nint>)Sig.Find(Signatures.FindOrder);
         _executeVTable = Sig.VTable(Commands.ExecuteOrder);
+        if (_holdLine) _redeployVTable = Sig.VTable("CStrategicRedeploymentCommand"); // here, not on an AI thread
         _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAICommand), (cmd, tag) =>
         {
             if (*(int*)tag == Game.ControlledTag || !SheepMod.Active) return _post!.OriginalFunction(cmd, tag);
@@ -671,8 +672,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool Redeploys(nint cmd)
     {
-        if (_redeployVTable == 0) _redeployVTable = Sig.VTable("CStrategicRedeploymentCommand");
-        if (*(nint*)cmd != _redeployVTable) return false;
+        if (_redeployVTable == 0 || *(nint*)cmd != _redeployVTable) return false;
         var unit = Game.Resolve(*(long*)(cmd + UnitOfRedeployment));
         if (unit == 0 || !Division.IsLand(unit)) return false;
         var tag = Division.Commander(unit);
@@ -738,7 +738,8 @@ public unsafe partial class AiAssist
         if (records == 0) return false;
         var muddy = 0;
         foreach (var member in members)
-            if (Division.Location(member - MemberOfUnit) is var at && at != 0 && *(byte*)(records + (nint)Game.Id(at) * WeatherRecordSize + MudOfWeather) != 0) muddy++;
+            if (Division.Location(member - MemberOfUnit) is var at && at != 0 && Game.Id(at) is var id && id > 0 && (_provinceCount <= 0 || id <= _provinceCount)
+                && *(byte*)(records + (nint)id * WeatherRecordSize + MudOfWeather) != 0) muddy++; // ids past the map's last: no record
         return muddy * 2 > members.Length;
     }
 
@@ -798,6 +799,7 @@ public unsafe partial class AiAssist
         Interlocked.Increment(ref _waited);
         if (!WaitedAt.TryGetValue(order, out var last) || hour - last is < 0 or >= 24)
         {
+            foreach (var (o, at) in WaitedAt) if (hour - at is < 0 or >= 48) WaitedAt.TryRemove(o, out _); // orders come and go
             WaitedAt[order] = hour;
             _log?.Info($"#{tag}: holds an offensive of {members.Length} division(s): {why}");
         }

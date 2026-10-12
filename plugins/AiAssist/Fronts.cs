@@ -46,7 +46,14 @@ public unsafe partial class AiAssist
 
     /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
     private static bool CantBeInvaded(nint country, int tag) =>
-        PortHolders is { } ports && _line.Values.Any(l => l.Tag == tag) && !ports.Any(holder => Game.AtWar(country, holder));
+        PortHolders is { } ports && HasLine(tag) && !ports.Any(holder => Game.AtWar(country, holder));
+
+    /// <summary>A tracked line of the tag's. Enumerates the dictionary lock-free (Values locks every bucket and copies).</summary>
+    private static bool HasLine(int tag)
+    {
+        foreach (var e in _line) if (e.Value.Tag == tag) return true;
+        return false;
+    }
     private static int _stationed;
     private static bool _holdLine, _axis, _beachDefense;
     private const int AxisHours = 24, ThinSectorWeight = 8, SectorHours = 72, SalientHead = -1; // a thin sector is held 3 days unless taken
@@ -232,6 +239,9 @@ public unsafe partial class AiAssist
         if (_axis && spot is { } line && theatre != 0) Anchor(general, theatre, line.Tag, line.Province, line.Weight, line.Line, enemyLine, hour);
         if (_railGuns) PublishGunArmies(general, AxisFrontArmies(general, atWar, hour), hour);
         foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) Axes.TryRemove(g, out _); // generals come and go all game
+        foreach (var (g, kept) in SecondArms) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) SecondArms.TryRemove(g, out _);
+        foreach (var (g, kept) in Feints) if (hour - kept.Until is < -FeintHours or >= 2 * AxisHours) Feints.TryRemove(g, out _);
+        foreach (var (s, at) in RaisedAt) if (hour - at is < 0 or >= 48) RaisedAt.TryRemove(s, out _); // fronts are rebuilt: their sections go
         if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
         foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) AxisArmies.TryRemove(g, out _);
         // Fronts come and go all game: drop the stale lines (matched by value, so one refreshed meanwhile stays).
@@ -345,7 +355,7 @@ public unsafe partial class AiAssist
             var next = new List<int>();
             foreach (var id in ring)
             foreach (var n in Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [])
-                if (core.Add(n)) next.Add(n);
+                if (Game.Province(n) is var q && q != 0 && Province.State(q) != 0 && core.Add(n)) next.Add(n); // land only: through a sea zone it reached far coasts
             ring = next;
         }
         return core;
@@ -382,9 +392,9 @@ public unsafe partial class AiAssist
     private static bool OnAnyAxis(int tag, int province)
     {
         var hour = Game.Hour;
-        foreach (var axis in Axes.Values)
+        foreach (var (_, axis) in Axes)
             if (axis.Tag == tag && hour - axis.Hour is >= 0 and < 2 * AxisHours && axis.Core.Contains(province)) return true;
-        foreach (var arm in SecondArms.Values)
+        foreach (var (_, arm) in SecondArms)
             if (arm.Tag == tag && hour - arm.Hour is >= 0 and < 2 * AxisHours && arm.Core.Contains(province)) return true;
         return false;
     }
