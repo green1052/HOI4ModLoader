@@ -610,7 +610,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
@@ -668,7 +668,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
@@ -726,7 +726,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
@@ -784,7 +784,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
@@ -842,7 +842,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
@@ -900,7 +900,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
@@ -958,7 +958,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
@@ -1016,7 +1016,7 @@ ${1}buttonType = {
                         buttonType = {
                             name = "hoimod_setting_pick"
                             position = { x = 226 y = 1 }
-                            spriteType = "GFX_list_button"
+                            quadTextureSprite ="GFX_list_button"
                             clicksound = click_default
                         }
                         instantTextBoxType = {
