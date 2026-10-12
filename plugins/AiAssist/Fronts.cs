@@ -19,6 +19,7 @@ public unsafe partial class AiAssist
     private IHook<BalanceFn>? _armyBalancing;
     private int _raised, _unguarded;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // front line section -> hour last logged
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> UnguardedAt = new(); // tag -> hour last logged
 
     /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
     private static bool CantBeInvaded(nint country, int tag) =>
@@ -107,6 +108,23 @@ public unsafe partial class AiAssist
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
             var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag == 0 || tag == Game.ControlledTag) continue;
+            // Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't
+            // land: a land war takes them all. Checked first: an area defence front has no front line. Left alone, Italy walked
+            // its Somali line divisions to Kismayo, and its Eritrean ones to ports in Libya and Italy, against Ethiopia.
+            if (*(int*)(front + AreaDefense) != 0)
+            {
+                if (_holdLine && *(int*)(front + MaxWanted) > 0 && CantBeInvaded(country, tag))
+                {
+                    *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
+                    Interlocked.Increment(ref _unguarded);
+                    if (!UnguardedAt.TryGetValue(tag, out var at) || hour - at is < 0 or >= 24)
+                    {
+                        UnguardedAt[tag] = hour;
+                        _log?.Info($"#{tag}: its enemies hold no port, so its port and home garrisons (area defence) go to the land fronts");
+                    }
+                }
+                continue;
+            }
             var reference = (int*)(front + FrontOfAiFront);
             if (reference[0] == 0 && reference[1] == 0) continue;
             var frontLine = _resolve((nint)reference);
@@ -155,13 +173,6 @@ public unsafe partial class AiAssist
                     if (spot == null || spot.Value.Tag == tag && weight < spot.Value.Weight) spot = (tag, p, weight, spot?.Line ?? []);
                 }
                 if (spot?.Tag == tag) foreach (var our in threatened) spot.Value.Line.Add(Game.Id(our));
-            }
-            // Area defence (the AI's coast and home garrisons) against enemies that hold no port, so can't land: a land war takes them all.
-            if (_holdLine && *(int*)(front + AreaDefense) != 0 && *(int*)(front + MaxWanted) > 0 && CantBeInvaded(country, tag))
-            {
-                *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
-                Interlocked.Increment(ref _unguarded);
-                continue;
             }
             // Hold the line: at war, every province of ours on the line keeps a defender, and the front as many divisions as the
             // enemy divisions across it, whatever else (a supply crisis, another front) the game weighs. The theatre distribution
