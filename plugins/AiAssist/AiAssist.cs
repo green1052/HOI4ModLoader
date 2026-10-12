@@ -57,18 +57,20 @@ public unsafe partial class AiAssist : Plugin
             + "Divisions worn out by fighting rest behind the line (a quarter of those around at most), and divisions in a salient whose way back is closing under an enemy at least as strong pull out, where another of ours holds their province; "
             + "neither where the AI outguns the enemy two to one. Rested divisions, and reserves the line moved away from, go back on their own order. "
             + "Newly deployed divisions go where they are needed most first: the grad's holes (DefensivePostures), else empty line provinces, then the most thinly held front. "
-            + "Against enemies that hold no port (so can't land), the AI keeps no coast and home garrisons: those divisions stay on the land front.");
+            + "Against enemies that hold no port (so can't land), the AI keeps no coast and home garrisons: those divisions stay on the land front, as they do while its line is short. "
+            + "A front already twice the enemy keeps one per province, so its spare divisions can go where the line is short. Offensives that lose most of their attacks, or push a division into a salient "
+            + "whose way back closes, are called off; army HQs stay off the fronts.");
         _beachDefense = Config.Bind("AI", "BeachDefense", true,
             "Naval landings are answered at once: free divisions near the beachhead (ground the enemy took from the sea in the last ten days, or a small enemy pocket on the coast) wall it in and attack into it; "
             + "vanilla leaves it alone until the front collapses.");
         _axis = Config.Bind("AI", "BreakthroughAxis", true,
             "The AI's local attacks keep to a breakthrough axis: while the AI's own armoured spearhead (the game's force concentration) attacks, where its path crosses the enemy line, moving forward with it; "
-            + "otherwise its front's thinnest enemy sector (few divisions, no forts, open terrain), held three days and moved on only once taken. Off the axis, only attacks that pin enemy divisions next to it (they can't shift into the breakthrough while under attack). "
+            + "otherwise the theatre's thinnest enemy sector (few divisions, no forts, open terrain), held three days and moved on only once taken. Off the axis, only attacks that pin enemy divisions next to it (they can't shift into the breakthrough while under attack). "
             + "Its close air support backs battles on the axis first.");
         _exploit = Config.Bind("AI", "Exploitation", true,
             "Through a gap in the enemy line (empty enemy ground no enemy division covers), fresh mobile divisions of the AI drive up to four provinces deep "
             + "to the most valuable province there (a capital, victory points, a supply hub, airfields), off their battle plan for a week; two at most per target, four per country every three hours. "
-            + "Vanilla only takes the next province, so an empty capital behind a broken line stays untaken.");
+            + "Vanilla only takes the next province, so an empty capital behind a broken line stays untaken. Needs HoldTheLine.");
         _pincers = Config.Bind("AI", "Pincers", true,
             "Needs BreakthroughAxis. Where the enemy masses divisions on the line (3+ in a province, twice the line's average), the AI's axis becomes two arms: "
             + "the thinnest enemy sector on each side of the mass, 2-5 line provinces away, so the attacks close behind it; kept three days while both arms' targets are still the enemy's.") && _axis;
@@ -92,15 +94,19 @@ public unsafe partial class AiAssist : Plugin
             + "while regions far behind the front get half the planes and a lower priority.");
         var airTraining = Config.Bind("AI", "AirTraining", true,
             "The AI trains its green air wings (under the second experience level) on the training mission instead of flying them where nothing happens: at peace any wing it would send on a mission, "
-            + "at war fighters it would send to patrol a land region no enemy plane flies in. At most half of a country's wings train at once; trained ones go back to the AI's missions.");
+            + "at war fighters it would send to patrol a land region no enemy plane flies in; wings with no mission at all train too (daily, at war as well), carrier wings never. "
+            + "At most half of a country's wings train at once; trained ones go back to the AI's missions. A wing isn't flown back to the base it left this week (vanilla flipped wings between two bases daily).");
         var armyTraining = Config.Bind("AI", "ArmyTraining", true,
             "AI armies with nothing to do train their divisions up to regular: at peace any army, at war armies holding no front (garrisons, reserves), "
-            + "while none of their divisions fights, stands next to enemy ground or is under 70 % strength. Vanilla stops every exercise once a war starts and never trains armies on no front.");
+            + "while none of their divisions fights, stands next to enemy ground or is under 70 % strength; none while the AI expects a war (a war preparation strategy, a focus aimed either way). "
+            + "Vanilla stops every exercise once a war starts and never trains armies on no front.");
         var navalTraining = Config.Bind("AI", "NavalTraining", true,
-            "At peace, AI task forces no naval objective takes train until their ships are regulars, instead of waiting in port (vanilla stops training once world tension passes 50 %).");
+            "At peace, AI task forces no naval objective takes train until their ships are regulars, instead of waiting in port (vanilla stops training once world tension passes 50 %); "
+            + "none while the AI expects a war.");
         var shoreBombardment = Config.Bind("AI", "ShoreBombardment", true,
-            "At war, AI task forces with guns no naval objective takes go to the sea next to the country's coastal land battles and hold there, "
-            + "where their shore bombardment weakens the enemy divisions (vanilla sends them to port).");
+            "At war, AI task forces with guns or carriers go to the sea next to the country's coastal land battles and hold there, where their shore bombardment (or the carriers' wings) "
+            + "weakens the enemy divisions. Taken before the naval AI's objectives do, off patrol, strike force, hold or training (never invasion support, convoys, raiding or mines): one per battle no other covers, "
+            + "within 6 sea provinces; a week at the battle, up to two weeks waiting at sea for the next, halved (4+ ships) when a second battle has none. Vanilla keeps them on its objectives or sends them to port.");
         var stableLeaders = Config.Bind("AI", "StableLeaders", true,
             "The AI doesn't take a general or field marshal from an army or army group he commands: vanilla's daily leader choice took them from each other's groups "
             + "and back again (a group left without a leader took the next best, even one leading elsewhere), so every army changed its leader every day or two.");
@@ -121,6 +127,7 @@ public unsafe partial class AiAssist : Plugin
             "The AI uses its paratroopers (needs BreakthroughAxis): up to four paradrop-capable divisions of an army of the theatre its breakthrough axis is in fly from the airbase nearest the axis that can carry them "
             + "onto an empty enemy province behind the line near the axis (victory points, supply hubs, airfields, pockets first). They jump only when vanilla allows the drop "
             + "(prepared, enough transport planes, air superiority on the route). With no axis drop, behind a beachhead of its own from the last ten days instead (from the airbase nearest it). "
+            + "Paratroopers are kept off the fronts and wait at the best airbase within reach. "
             + "Vanilla's AI never paradrops, and Sheep Mod's AI builds few paratroopers or transport planes (see AirborneUnits); the log counts which check stopped them.") && _axis;
         // Game files count toward the checksum: added at startup only (the game reads them once), so a change waits for a restart.
         if (Config.Bind("AI", "AirborneUnits", true,
@@ -137,7 +144,7 @@ public unsafe partial class AiAssist : Plugin
             + "Once every enemy it fell back from stays under 80 % of its power for a week (a month after falling back at the earliest), its divisions go back on their orders, and for a month only twice its strength "
             + "puts it back on a grad. Out of contact, the posture stays. Needs HoldTheLine.") && _holdLine;
         var encircle = Config.Bind("AI", "Encirclement", true,
-            "The breakthrough axis goes for enemy salients first: where enemy ground bulges into the AI's line through a neck of one or two provinces, and taking the neck cuts off 3+ enemy divisions "
+            "The breakthrough axis goes for enemy salients first: where enemy ground bulges into the AI's line through a neck of one to three provinces, and taking the neck cuts off 3+ enemy divisions "
             + "for less than it costs, the local attacks and close air support of both flanks go for the neck instead of pushing the salient head-on; kept until the pocket closes, a week at most. Needs BreakthroughAxis.") && _axis;
         var railGuns = Config.Bind("AI", "RailwayGuns", true,
             "The AI's railway guns go to the armies on its breakthrough axis first and stay there: those armies are served first and other armies can't take their guns. Needs BreakthroughAxis.") && _axis;
