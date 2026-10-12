@@ -31,6 +31,7 @@ public static class Signatures
 /// - Ctrl+Alt+B / Ctrl+Alt+P: a blitz or a pincer with the selected armies (Operations.cs).
 /// Divisions taken off a front go back onto it once their job is done (rested, crisis over, post given up); one short of
 /// equipment or manpower goes back after MaxRestHours once its organisation is back. A reload forgets them: they stay where they are.
+/// With [AI] ApplyToAI (single player), AI countries get the same micro, each with its own bookkeeping (Side).
 /// </summary>
 [Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class FrontLine : Plugin
@@ -47,6 +48,7 @@ public unsafe partial class FrontLine : Plugin
     private const int MaxSwapsPerArmy = 2;    // sent to rest at a time, so a front never changes all at once
     private const int MaxRestHours = 14 * 24; // short of equipment or manpower, strength may never come back: organisation is enough then
     private const long PendingMs = 30_000;    // a unit we gave orders to is left alone meanwhile (multiplayer: a round trip)
+    private const long AiBudgetMs = 20;       // AI countries' turns per tick, round robin: the rest wait for the next tick
 
     private static readonly int[] PlanKeys = ['E', 'H']; // with Ctrl+Alt held: activate, halt
     private readonly bool[] _down = new bool[PlanKeys.Length];
@@ -64,9 +66,23 @@ public unsafe partial class FrontLine : Plugin
     /// </summary>
     private readonly record struct Held(Job Job, nint Group, int Order, int Since, int Post, int Target, (nint, int) Front);
 
-    private readonly Dictionary<nint, long> _pending = [];                     // unit -> until
-    private readonly Dictionary<nint, Held> _held = [];                       // every division we took for a job: one bookkeeping, so no feature takes another's
-    private readonly Dictionary<int, (nint[] Units, bool Attack)> _sent = []; // province we sent divisions into (a battle to help, an attack) -> them
+    /// <summary>One country's bookkeeping: the player's, and each AI country's with ApplyToAI. Begin swaps it in.</summary>
+    private sealed class Side
+    {
+        public readonly Dictionary<nint, long> Pending = [];
+        public readonly Dictionary<nint, Held> Held = [];
+        public readonly Dictionary<int, (nint[] Units, bool Attack)> Sent = [];
+        public readonly Dictionary<int, (int Hour, (nint, int) Front)> LastSeen = [];
+        public readonly Dictionary<(nint, int), int> Crisis = [];
+    }
+
+    private readonly Dictionary<int, Side> _sides = [];                     // tag -> its bookkeeping
+    // The turn's country's (Begin):
+    private Dictionary<nint, long> _pending = [];                             // unit -> until
+    private Dictionary<nint, Held> _held = [];                               // every division we took for a job: one bookkeeping, so no feature takes another's
+    private Dictionary<int, (nint[] Units, bool Attack)> _sent = [];          // province we sent divisions into (a battle to help, an attack) -> them
+    private bool _force;                                                      // an AI country's turn: commands posted as the AI posts them
+    private int _nextAi;                                                      // the AI country the last tick's budget stopped at
     // Rebuilt every turn: who is on which order, how many of a front stand in a province, our divisions, memos.
     private readonly Dictionary<nint, nint> _orders = [];                     // member -> order (Manage's turns only)
     private readonly Dictionary<(nint Front, nint Province), int> _holding = [];
@@ -77,7 +93,7 @@ public unsafe partial class FrontLine : Plugin
     private Dictionary<nint, double> _losingNow = [];                          // our defences being lost -> attacker's share (%)
     private long _now;
     private PerGame _game = null!;
-    private bool _rotation, _plugging, _escape, _attack, _fireBrigade, _depth, _shuffle;
+    private bool _rotation, _plugging, _escape, _attack, _fireBrigade, _depth, _shuffle, _ai;
     private double _wornOrg, _wornStrength, _returnOrg, _returnStrength, _losing;
     private int _maxResting, _plugRadius;
 
@@ -110,8 +126,13 @@ public unsafe partial class FrontLine : Plugin
             + "Meanwhile fresh divisions next to the crisis attack idle enemy stacks of one or two divisions (one attacker each, while its organisation holds) so they are locked in combat and can't be moved in.");
         if (Config.Bind("Keys", "BattlePlanKeys", true, "Ctrl+Alt+E activates every battle plan at once, Ctrl+Alt+H halts them."))
             MainThread.Every(TimeSpan.FromMilliseconds(30), PollKeys);
+        _ai = Config.Bind("AI", "ApplyToAI", false,
+            "Single player: AI countries get the same front line micro (rotation, plugging, escape, attack, fire brigade, depth defence and shuffle, with the settings above). "
+            + "AI Assist's own rotation, escape, reserves, second line and local attacks stand aside meanwhile, and its regrouping hooks leave these divisions alone; without AI Assist the AI's regrouping may take them back.");
         var operations = BindOperations();
         var micro = _rotation || _plugging || _escape || _attack || _fireBrigade || _depth || _shuffle;
+        _ai &= micro && !Multiplayer;
+        Jobs.AiMicro = _ai ? Info.Id : null;
         if (!micro && !operations) return;
 
         _ = Sig.Find(Commands.AssignSig);
@@ -120,12 +141,8 @@ public unsafe partial class FrontLine : Plugin
             + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig) + Sig.VTable(Signatures.LandCombat);
         _game = new PerGame(() => // one reset for the operations too: they share _held
         {
-            _pending.Clear();
-            _held.Clear();
-            _sent.Clear();
+            _sides.Clear(); // Begin swaps a new side in
             _orders.Clear();
-            _lastSeen.Clear();
-            _crisis.Clear();
             _operations.Clear();
             _opOrdered.Clear();
             _opLastHour = -1;
@@ -170,15 +187,23 @@ public unsafe partial class FrontLine : Plugin
         Log.Info($"{(activate ? "activated" : "halted")} {changed} battle plan(s)");
     }
 
+    private Side SideOf(int tag) => _sides.TryGetValue(tag, out var side) ? side : _sides[tag] = new Side();
+
+    /// <summary><see cref="Begin(int, out nint[])"/> for the player's country.</summary>
+    private nint Begin(out int tag, out nint[] units) => Begin(tag = Game.ControlledTag, out units);
+
     /// <summary>
-    /// The start of every timer's turn: per-game state reset after a load or a country change; outside a running game 0.
-    /// Else our country, its land divisions (<paramref name="units"/>, <see cref="_alive"/>, <see cref="_at"/>); divisions
-    /// gone since (died, merged) are forgotten before anything dereferences them, and the memos of earlier turns.
+    /// The start of every timer's turn: per-game state reset after a load or a country change, then <paramref name="tag"/>'s
+    /// bookkeeping swapped in; outside a running game 0. Else its country, its land divisions (<paramref name="units"/>,
+    /// <see cref="_alive"/>, <see cref="_at"/>); divisions gone since (died, merged) are forgotten before anything
+    /// dereferences them, and the memos of earlier turns.
     /// </summary>
-    private nint Begin(out int tag, out nint[] units)
+    private nint Begin(int tag, out nint[] units)
     {
         _game.Check();
-        tag = Game.ControlledTag;
+        var side = SideOf(tag);
+        (_pending, _held, _sent, _lastSeen, _crisis) = (side.Pending, side.Held, side.Sent, side.LastSeen, side.Crisis);
+        _force = tag != Game.ControlledTag;
         var country = Game.Country(tag);
         units = [];
         if (country == 0 || !Game.HasStarted) return 0;
@@ -189,7 +214,7 @@ public unsafe partial class FrontLine : Plugin
         foreach (var (unit, until) in _pending.ToArray())
             if (_now >= until) _pending.Remove(unit);
         foreach (var unit in _held.Keys.Where(u => !_alive.Contains(u)).ToList()) _held.Remove(unit);
-        foreach (var op in _operations) Forget(op);
+        if (!_force) foreach (var op in _operations) Forget(op); // the player's
         _war.Clear();
         _allies.Clear();
         _edge.Clear();
@@ -206,7 +231,27 @@ public unsafe partial class FrontLine : Plugin
 
     private void Manage()
     {
-        var country = Begin(out var tag, out var units);
+        _game.Check();
+        if (!Game.HasStarted) return;
+        var player = Game.ControlledTag;
+        if (player != 0) Turn(player); // 0: observer
+        if (_ai)
+        {
+            var countries = Game.Countries.ToArray();
+            var started = Environment.TickCount64;
+            for (var n = 0; n < countries.Length && Environment.TickCount64 - started < AiBudgetMs; n++)
+            {
+                _nextAi = (_nextAi + 1) % countries.Length;
+                var tag = countries[_nextAi] == 0 ? 0 : Game.Tag(countries[_nextAi]);
+                if (tag > 0 && tag != player) Turn(tag);
+            }
+        }
+        Jobs.Set(Info.Id, _sides.Values.SelectMany(s => s.Held.Keys));
+    }
+
+    private void Turn(int tag)
+    {
+        var country = Begin(tag, out var units);
         if (country == 0) return;
         foreach (var (id, sent) in _sent.ToArray()) // done once none of them is on the way (or, attacking, fighting) any more
             if (!sent.Units.Any(u => _alive.Contains(u) && (_pending.ContainsKey(u) || Division.Walking(u) || sent.Attack && Division.Fighting(u))))
@@ -224,6 +269,7 @@ public unsafe partial class FrontLine : Plugin
             foreach (var member in Order.Members(order)) _orders[member] = order;
             if (IsFront(order)) fronts.TryAdd(order, new Front(order, (owner, Order.Id(order))));
         }
+        if (_force && fronts.Count == 0 && _held.Count == 0) return; // an AI country without fronts: at peace
         _holding.Clear();
         foreach (var unit in units)
         {
@@ -406,7 +452,7 @@ public unsafe partial class FrontLine : Plugin
         _orders.TryGetValue(unit + MemberOfUnit, out var order);
         if (_holding.TryGetValue((order, location), out var n)) _holding[(order, location)] = n - 1; // one fewer holds it
         Book(unit, job, job == Job.Pin ? 0 : order, post, target, front);
-        Commands.Move(unit, province);
+        Commands.Move(unit, province, _force);
         _pending[unit] = _now + PendingMs;
     }
 
@@ -421,7 +467,7 @@ public unsafe partial class FrontLine : Plugin
         if (_held.TryGetValue(unit, out var was)) (group, id) = (was.Group, was.Order);
         else if (order != 0)
         {
-            Commands.Unassign(unit, group); // stays in the army; off its army group's fronts too
+            Commands.Unassign(unit, group, _force); // stays in the army; off its army group's fronts too
             id = Order.Id(order);
         }
         _held[unit] = new Held(job, group, id, Game.Hour, post, target, front);
@@ -437,14 +483,15 @@ public unsafe partial class FrontLine : Plugin
         var held = _held[unit];
         _held.Remove(unit);
         if (held.Order == 0 || Division.Group(unit) != held.Group) return true; // in another army now: the player's
-        if (Assign(unit, held.Group, held.Order)) _pending[unit] = _now + PendingMs; // its order gone: it stays in the army's reserve
+        if (Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs; // its order gone: it stays in the army's reserve
         return true;
     }
 
     private static bool IsFront(nint order) => Order.Type(order) == Order.Front;
 
     /// <summary><see cref="Division.Ready"/> (can take orders now), and not just ordered.</summary>
-    private bool Ready(nint unit, int tag, long now) => Division.Ready(unit, tag) && !(_pending.TryGetValue(unit, out var until) && now < until);
+    private bool Ready(nint unit, int tag, long now) =>
+        Division.Ready(unit, tag) && !(_pending.TryGetValue(unit, out var until) && now < until) && !Jobs.Taken(unit, Info.Id); // AI Assist's posts stay
 
     /// <summary>Ready, and doing no job for us.</summary>
     private bool Free(nint unit, int tag, long now) => Ready(unit, tag, now) && !_held.ContainsKey(unit);
@@ -499,6 +546,4 @@ public unsafe partial class FrontLine : Plugin
         if (!_war.TryGetValue(other, out var war)) _war[other] = war = Game.AtWar(country, other);
         return war;
     }
-
-    private static bool Assign(nint unit, nint group, int order) => Commands.Assign(unit, group, order);
 }

@@ -53,7 +53,7 @@ public unsafe partial class FrontLine
             ready.RemoveRange(0, t.Need);
             foreach (var unit in sent)
             {
-                Commands.Move(unit, t.To);
+                Commands.Move(unit, t.To, _force);
                 _pending[unit] = _now + PendingMs;
                 here.Remove(unit);
             }

@@ -34,9 +34,10 @@ namespace AiAssist;
 /// - Railway guns: the armies on the breakthrough axis get the railway guns first and keep them.
 /// - Supply hubs: a new hub where AI divisions starve with none near (vanilla only upgrades and links hubs).
 /// </summary>
-[Plugin("com.green1052.aiassist", "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
+[Plugin(Id, "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
 {
+    private const string Id = "com.green1052.aiassist";
     private static int _failed; // AI hooks run on worker threads: log the first error only
     private static Logger? _log;
 

@@ -21,8 +21,8 @@ public unsafe partial class FrontLine
         public int Threat;                       // enemy divisions across that line
     }
 
-    private readonly Dictionary<int, (int Hour, (nint, int) Front)> _lastSeen = []; // line province id -> when it was last ours, on which front
-    private readonly Dictionary<(nint, int), int> _crisis = [];                     // front -> the last hour it was losing
+    private Dictionary<int, (int Hour, (nint, int) Front)> _lastSeen = []; // line province id -> when it was last ours, on which front (the turn's Side)
+    private Dictionary<(nint, int), int> _crisis = [];                     // front -> the last hour it was losing (the turn's Side)
 
     /// <summary>Each front's line and threat; a front that lost (or is losing) several provinces lately, or faces twice its divisions, is in a crisis.</summary>
     private void Survey(nint country, int tag, IEnumerable<Front> fronts)
@@ -176,7 +176,7 @@ public unsafe partial class FrontLine
                 continue;
             }
             if (Org(unit) >= PinStopOrg && Crisis(held.Front)) continue;
-            Commands.Move(unit, held.Post); // an attacker may break off
+            Commands.Move(unit, held.Post, _force); // an attacker may break off
             _pending[unit] = _now + PendingMs;
             _held.Remove(unit);
             Log.Info($"shuffle: a pinning attack breaks off at {Org(unit):0}% organisation");

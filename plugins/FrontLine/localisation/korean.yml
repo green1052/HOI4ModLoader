@@ -37,3 +37,5 @@
  com.green1052.frontline.OperationDepth.desc:0 "작전 목표가 적 전선 뒤로 몇 프로빈스까지 들어갈 수 있는지입니다."
  com.green1052.frontline.SpearheadOrganisation:0 "선봉 정지 조직력 (%)"
  com.green1052.frontline.SpearheadOrganisation.desc:0 "선봉 사단은 조직력이 이 값(%) 아래로 떨어지면 더 나아가지 않고, 한쪽 날개의 선봉이 전부 그렇게 되면 작전이 끝납니다."
+ com.green1052.frontline.ApplyToAI:0 "AI에도 적용"
+ com.green1052.frontline.ApplyToAI.desc:0 "싱글플레이 전용: AI 국가도 같은 전선 보조(교대 휴식, 구멍 메우기, 탈출, 공격, 소방수, 종심 방어, 전선 간 병력 이동)를 위 설정값 그대로 받습니다. 그동안 AI Assist의 교대 휴식, 탈출, 예비대, 2선, 국지 공격은 물러나고, AI Assist의 재편성 훅이 이 사단들을 건드리지 않게 막습니다. AI Assist가 없으면 AI의 재편성이 사단을 도로 데려갈 수 있습니다."

@@ -42,12 +42,16 @@ public unsafe partial class AiAssist
                 foreach (var unit in units) if (Division.Fighting(unit)) _combat[unit] = hour;
                 Release(tag, units, hour);
                 BreakOff(country, tag, units, hour);
-                FireBrigade(country, tag, units, hour);
-                PullBack(country, tag, units, hour);
+                if (!MicroElsewhere)
+                {
+                    FireBrigade(country, tag, units, hour);
+                    PullBack(country, tag, units, hour);
+                }
             }
             if (Grads.TryGetValue(tag, out var grad)) CounterAttack(country, tag, grad, hour); // on its grad: no piecemeal taking back of given-up ground
-            else if (_attackTargets) TakeEmpty(country, tag, units, hour);
+            else if (_attackTargets && !MicroElsewhere) TakeEmpty(country, tag, units, hour);
         }
+        ShareJobs();
     }
 
     /// <summary>

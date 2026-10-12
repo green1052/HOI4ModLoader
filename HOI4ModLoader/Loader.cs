@@ -204,6 +204,7 @@ public static class Loader
     {
         for (var i = Loaded.Count - 1; i >= 0; i--) Patches.Revert(Loaded[i].Info.Id);
         Loaded.Clear();
+        Jobs.Reset(); // the reloaded plugins start over
         LoadPlugins();
     }
 

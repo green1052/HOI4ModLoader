@@ -69,7 +69,7 @@ public unsafe partial class AiAssist
         if (unit == 0) return false;
         var tag = Division.Commander(unit);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
-        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit) || Paratrooper(unit)
+        if (_posted.ContainsKey(unit) || _resting.ContainsKey(unit) || Paratrooper(unit) || Jobs.Taken(unit)
             || _fresh.TryGetValue(unit, out var fresh) && Game.Hour - fresh.Hour is >= 0 and < FreshWalkHours) return true;
         var country = Game.Country(tag);
         var location = Division.Location(unit);
@@ -223,9 +223,11 @@ public unsafe partial class AiAssist
             var manned = Manned(tag, line);
             if (grad == null && !manned && !dominant) HoldOffensives(country, tag, hour);
             if (!manned) continue;
+            if (MicroElsewhere) continue;
             Reserve(country, tag, line, hour);
             if (grad == null) Depth(country, tag, line, hour);
         }
+        ShareJobs();
     }
 
     /// <summary>The line's provinces short of defenders (one each, or what the grad wants) that nobody is walking to yet.</summary>
@@ -555,8 +557,14 @@ public unsafe partial class AiAssist
     /// <summary>A land division of the tag (not lent) that can take orders now: not fighting, retreating or embarked, not one we sent or rest.</summary>
     private static bool Movable(nint unit, int tag)
     {
-        return Division.Ready(unit, tag) && !_sent.ContainsKey(unit) && !_resting.ContainsKey(unit) && !Paratrooper(unit);
+        return Division.Ready(unit, tag) && !_sent.ContainsKey(unit) && !_resting.ContainsKey(unit) && !Paratrooper(unit) && !Jobs.Taken(unit, Id);
     }
+
+    /// <summary>Our divisions with a job (posted, resting, walking somewhere for us), for the other plugins to leave alone.</summary>
+    private static void ShareJobs() => Jobs.Set(Id, _posted.Keys.Concat(_resting.Keys).Concat(_sent.Keys));
+
+    /// <summary>Another plugin (FrontLine) runs the AI's rotation, escape, reserves, second line and local attacks: ours stand aside.</summary>
+    private static bool MicroElsewhere => Jobs.AiMicro is { } owner && owner != Id;
 
     /// <summary>A movable division that stands idle, rested enough to go somewhere.</summary>
     private static bool Spare(nint unit, int tag) => Movable(unit, tag) && !Division.Walking(unit) && Percent(Division.Organisation(unit)) >= MinBackfillOrg;

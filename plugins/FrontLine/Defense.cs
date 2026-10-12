@@ -84,7 +84,7 @@ public unsafe partial class FrontLine
             var location = Division.Location(unit);
             if (location != post)
             {
-                Commands.Move(unit, held.Post); // back from a counterattack, or pushed off its post
+                Commands.Move(unit, held.Post, _force); // back from a counterattack, or pushed off its post
                 _pending[unit] = _now + PendingMs;
                 _held[unit] = held with { Job = Job.Reserve, Target = 0 };
                 continue;
@@ -238,7 +238,7 @@ public unsafe partial class FrontLine
             }
             else if (Division.Location(unit) != post)
             {
-                Commands.Move(unit, held.Post);
+                Commands.Move(unit, held.Post, _force);
                 _pending[unit] = _now + PendingMs;
             }
         }

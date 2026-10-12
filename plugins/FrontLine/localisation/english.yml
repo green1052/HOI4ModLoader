@@ -36,3 +36,5 @@ l_english:
  com.green1052.frontline.OperationDepth.desc:0 "How deep (provinces) behind the enemy line an operation's objective may lie."
  com.green1052.frontline.SpearheadOrganisation:0 "Spearhead stops at organisation (%)"
  com.green1052.frontline.SpearheadOrganisation.desc:0 "Spearheads stop advancing below this organisation (%); the operation ends when all of a wing's are."
+ com.green1052.frontline.ApplyToAI:0 "Apply to AI"
+ com.green1052.frontline.ApplyToAI.desc:0 "Single player: AI countries get the same front line micro (rotation, plugging, escape, attack, fire brigade, depth defence and shuffle, with the settings above). AI Assist's own rotation, escape, reserves, second line and local attacks stand aside meanwhile, and its regrouping hooks leave these divisions alone; without AI Assist the AI's regrouping may take them back."

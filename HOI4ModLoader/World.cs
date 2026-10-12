@@ -335,3 +335,34 @@ public static unsafe class ProductionLine
         return type == 0 ? 0 : *(nint*)(type + ArchetypeOfType);
     }
 }
+
+/// <summary>
+/// Divisions a plugin took for a job of its own (rest, reserve, counterattack...), by plugin id: other plugins leave them, and
+/// AiAssist keeps the AI's regrouping off them. Also which plugin runs the AI's front line micro, if any. Keys only, never
+/// dereferenced; AI threads read it.
+/// </summary>
+public static class Jobs
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, string> Held = new();
+
+    /// <summary>The plugin id that micromanages the AI's front lines (rotation, reserves, second line, local attacks), or null.</summary>
+    public static volatile string? AiMicro;
+
+    /// <summary>Replaces <paramref name="owner"/>'s divisions with <paramref name="units"/>.</summary>
+    public static void Set(string owner, IEnumerable<nint> units)
+    {
+        var now = units.ToHashSet();
+        foreach (var (unit, by) in Held)
+            if (by == owner && !now.Contains(unit)) Held.TryRemove(unit, out _);
+        foreach (var unit in now) Held.TryAdd(unit, owner);
+    }
+
+    internal static void Reset()
+    {
+        Held.Clear();
+        AiMicro = null;
+    }
+
+    /// <summary>A plugin other than <paramref name="except"/> has a job for the division.</summary>
+    public static bool Taken(nint unit, string? except = null) => Held.TryGetValue(unit, out var by) && by != except;
+}

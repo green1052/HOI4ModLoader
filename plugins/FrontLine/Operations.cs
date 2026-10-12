@@ -283,7 +283,7 @@ public unsafe partial class FrontLine
     /// <summary>Gives back what ended operations left (Return: FrontLine's turns may not run), then runs each operation once per game hour.</summary>
     private void RunOperations()
     {
-        if (_operations.Count == 0 && _held.Count == 0) return;
+        if (_operations.Count == 0 && SideOf(Game.ControlledTag).Held.Count == 0) return;
         var country = Begin(out var tag, out _);
         if (country == 0) return;
         Return(tag);
