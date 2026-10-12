@@ -178,7 +178,6 @@ public unsafe partial class AiAssist : Plugin
             _ = Sig.Find(Commands.UnassignSig);
             _ = Sig.Find(Commands.AssignSig);
             MainThread.Every(TimeSpan.FromSeconds(1), Backfill); // the passes poll each second and run on game time (Due)
-            MainThread.Every(TimeSpan.FromSeconds(1), KeepLines);
         }
         if (_strategicInvasions) LoadInvasions();
         if (_paradrops) LoadParadrops();
