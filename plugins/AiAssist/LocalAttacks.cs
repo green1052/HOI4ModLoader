@@ -316,7 +316,7 @@ public unsafe partial class AiAssist
     private static void TakeEmpty(nint country, int tag, nint[] units, long now)
     {
         var taken = 0;
-        foreach (var here in units.Where(u => Division.IsLand(u) && Division.Commander(u) == tag && Division.Location(u) != 0)
+        foreach (var here in units.Where(u => Division.IsLand(u) && Division.Commander(u) == tag && Division.Location(u) != 0 && !Division.IsHeadquarters(u)) // an HQ holds nothing
                      .GroupBy(Division.Location))
         {
             var fresh = here.Where(u => Spare(u, tag) && Percent(Division.Strength(u)) >= FreshStrength).ToList();

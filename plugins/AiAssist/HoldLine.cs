@@ -565,7 +565,7 @@ public unsafe partial class AiAssist
     {
         var ours = 0;
         foreach (var unit in Province.Units(province))
-            if (unit != 0 && Division.IsLand(unit) && Division.Commander(unit) == tag) ours++;
+            if (unit != 0 && Division.IsLand(unit) && Division.Commander(unit) == tag && !Division.IsHeadquarters(unit)) ours++; // an HQ holds nothing
         var country = Game.Country(tag);
         return ours >= 3 || ours == 2 && country != 0 && !Province.EnemyDivisionsNext(country, tag, province);
     }
