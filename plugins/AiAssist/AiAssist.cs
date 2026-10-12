@@ -95,7 +95,8 @@ public unsafe partial class AiAssist : Plugin
         _paradrops = Config.Bind("AI", "StrategicParadrops", true,
             "The AI uses its paratroopers (needs BreakthroughAxis): up to four paradrop-capable divisions of an army of the theatre its breakthrough axis is in fly from the airbase nearest the axis that can carry them "
             + "onto an empty enemy province behind the line near the axis (victory points, supply hubs, airfields, pockets first). They jump only when vanilla allows the drop "
-            + "(prepared, enough transport planes, air superiority on the route). Vanilla's AI never paradrops. Sheep Mod's AI builds no paratroopers or transport planes, so drops are rare; "
+            + "(prepared, enough transport planes, air superiority on the route). With no axis drop, behind a beachhead of its own from the last ten days instead (from the airbase nearest it). "
+            + "Vanilla's AI never paradrops. Sheep Mod's AI builds few paratroopers or transport planes: the optional HOI4ModLoader AI Airborne mod (mods\\AiAirborne) makes the majors build some; "
             + "the log counts which check stopped them.") && _axis;
         _postures = Config.Bind("AI", "DefensivePostures", true,
             "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.3x while it lost line provinces in the last week or is short of divisions) gives up exposed ground and holds its grad: "
@@ -218,6 +219,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _cas, "focused {0} CAS pass(es) on the axis");
         Add(ref _spearheads, "put {0} breakthrough axis/axes on the AI's armoured spearhead");
         Add(ref _paradropped, "launched {0} AI paradrop(s)");
+        Add(ref _beachDrops, "readied {0} AI paradrop(s) behind a beachhead");
         Add(ref _noParatroopers, "paradrops: {0} axis check(s) found no ready paratroopers");
         Add(ref _noAirbase, "paradrops: {0} found no source airbase with transport planes");
         Add(ref _noTarget, "paradrops: {0} found no target");

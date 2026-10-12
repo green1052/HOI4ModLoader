@@ -17,7 +17,7 @@ public unsafe partial class AiAssist
     private const int DropHours = 2, PlanHours = 12; // drops in progress advance every two game hours; new ones are planned every twelve
 
     private static bool _paradrops;
-    private static int _paradropped, _activeDrops; // _activeDrops: Drops.Count for AI threads (ConcurrentDictionary.IsEmpty takes every lock)
+    private static int _paradropped, _activeDrops, _beachDrops; // _activeDrops: Drops.Count for AI threads (ConcurrentDictionary.IsEmpty takes every lock)
     private static int _noParatroopers, _noAirbase, _notReady, _noTarget; // why the planner didn't drop, for the log (Sheep Mod's AI builds no paratroopers or transports)
     private int _dropAt = Never, _planAt = Never;
     private static nint _deleteVTable, _assignVTable, _unassignVTable;
@@ -28,7 +28,8 @@ public unsafe partial class AiAssist
 
     private sealed class Drop
     {
-        public nint General; // the CAIGeneral whose axis it backs: an Axes key, never dereferenced
+        public nint General; // the CAIGeneral whose axis it backs: an Axes key, never dereferenced (0: a beachhead's)
+        public HashSet<int>? Core; // a beachhead drop: the beachhead it backs (an axis drop reads its axis's core)
         public long Group;
         public int Source, Order, Target, Hour, Launched = -1;
         public long[] Units = [];
@@ -179,11 +180,71 @@ public unsafe partial class AiAssist
                 return;
             }
             if (!Commands.Post(cmd, true)) return;
-            var drop = new Drop { General = general, Group = new OrdersGroup(group).Ref, Source = source, Hour = hour, Units = units.Select(Division.Ref).ToArray() };
-            Drops[tag] = drop;
-            foreach (var u in drop.Units) Paratroopers[u] = tag;
+            Begin(tag, new Drop { General = general, Group = new OrdersGroup(group).Ref, Source = source, Hour = hour, Units = units.Select(Division.Ref).ToArray() });
             return;
         }
+        StartBeachDrop(country, tag, hour);
+    }
+
+    private static void Begin(int tag, Drop drop)
+    {
+        Drops[tag] = drop;
+        foreach (var u in drop.Units) Paratroopers[u] = tag;
+    }
+
+    /// <summary>
+    /// No axis drop: behind a beachhead of ours (ground taken from the sea in the last LandedHours) instead, with the paratroopers
+    /// of whichever army has the most ready, from the airbase nearest it on the map that vanilla accepts as their source (a
+    /// beachhead is overseas: home airbases are no land walk away). Vanilla's range check sorts out targets too far for it.
+    /// </summary>
+    private static void StartBeachDrop(nint country, int tag, int hour)
+    {
+        var beach = new HashSet<int>();
+        for (var id = 1; id < _landed.Length; id++)
+            if (Landed(id, hour) && _controllers[id] == tag) beach.Add(id);
+        if (beach.Count == 0 || BestTarget(country, tag, beach, 0) == 0) return;
+        nint group = 0;
+        List<nint> units = [];
+        foreach (var g in Game.Units(country).ToArray().Where(u => u != 0 && CanDrop(u) && Spare(u, tag)).GroupBy(Division.Group))
+            if (g.Key != 0 && !new OrdersGroup(g.Key).IsArmyGroup && g.Count() > units.Count) (group, units) = (g.Key, g.ToList());
+        if (units.Count == 0)
+        {
+            Interlocked.Increment(ref _noParatroopers);
+            return;
+        }
+        if (units.Count > MaxParatroopers) units.RemoveRange(MaxParatroopers, units.Count - MaxParatroopers);
+        var (bx, by) = beach.Select(id => MapArrows.Position(Game.Province(id))).Aggregate((0L, 0L), (s, p) => (s.Item1 + p.X, s.Item2 + p.Y));
+        (bx, by) = (bx / beach.Count, by / beach.Count);
+        var (source, best) = (0, long.MaxValue);
+        var states = new HashSet<nint>();
+        for (var id = 1; id <= _provinceCount; id++)
+        {
+            var p = Game.Province(id);
+            var state = p == 0 || Province.Controller(p) != tag ? 0 : Province.State(p);
+            if (state == 0 || !states.Add(state)) continue; // one airbase a state: its main province's
+            var main = State.MainProvince(state);
+            if (main == 0 || Province.Controller(main) != tag || _isParadropSource(main, group) == 0) continue;
+            var (x, y) = MapArrows.Position(main);
+            var d = (x - bx) * (x - bx) + (y - by) * (y - by);
+            if (d < best) (source, best) = (Game.Id(main), d);
+        }
+        if (source == 0)
+        {
+            Interlocked.Increment(ref _noAirbase);
+            return;
+        }
+        var cmd = Allocator.AllocZeroed(SourceCommandSize);
+        Native.WithPdxArray(units.ToArray(), list => _paradropSource(cmd, group, source, 0, list));
+        if (!Commands.CanExecute(cmd))
+        {
+            Commands.Free(cmd);
+            Interlocked.Increment(ref _notReady);
+            NextParadrop[tag] = hour + CooldownHours;
+            return;
+        }
+        if (!Commands.Post(cmd, true)) return;
+        Begin(tag, new Drop { Core = beach, Group = new OrdersGroup(group).Ref, Source = source, Hour = hour, Units = units.Select(Division.Ref).ToArray() });
+        Interlocked.Increment(ref _beachDrops);
     }
 
     /// <summary>One step of a drop in progress. False: it is over (dropped, deleted, emptied, or given up).</summary>
@@ -217,7 +278,7 @@ public unsafe partial class AiAssist
         if (target == 0 || !DropTarget(country, tag, target) || _isParadropTarget(order, target) == 0)
         {
             // The axis it was planned for (another theatre's targets are out of its planes' range).
-            var core = Axes.TryGetValue(drop.General, out var axis) && axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours ? axis.Core : null;
+            var core = drop.Core ?? (Axes.TryGetValue(drop.General, out var axis) && axis.Tag == tag && hour - axis.Hour is >= 0 and < AxisHours ? axis.Core : null);
             var next = core == null ? 0 : BestTarget(country, tag, core, order);
             if (next != 0 && PostOrderCommand(Signatures.ParadropTargetCommand, drop.Group, drop.Order, next)) drop.Target = next; // vanilla re-checks the route's air on it
             else if (executing) PostOrderCommand(Commands.ExecuteOrder, drop.Group, drop.Order, 0); // nothing safe to land on: hold
