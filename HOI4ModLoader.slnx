@@ -7,6 +7,7 @@
         <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
         <Project Path="plugins/Fonts/Fonts.csproj" />
         <Project Path="plugins/FrontLine/FrontLine.csproj" />
+        <Project Path="plugins/Performance/Performance.csproj" />
         <Project Path="plugins/Queues/Queues.csproj" />
         <Project Path="plugins/Reroll/Reroll.csproj" />
     </Folder>
