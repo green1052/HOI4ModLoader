@@ -100,9 +100,12 @@ public sealed unsafe partial class Image
                 if (Stored()?.TryGetValue(name, out var line) == true) result = Parse<T>(line);
                 else
                 {
-                    try { result = find(); }
+                    try
+                    {
+                        result = find();
+                        Store(name, result); // only hits: a failure is looked for again next start (a loader update may find it)
+                    }
                     catch (InvalidOperationException e) { result = e; }
-                    Store(name, result);
                 }
                 _lookups[key] = result;
             }

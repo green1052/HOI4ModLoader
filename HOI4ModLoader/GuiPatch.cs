@@ -88,6 +88,7 @@ public static class GameFiles
     {
         var target = Path.Combine(Dir, path);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.Delete(target); // a hard link Add(path, source) left there would write into its source (a cached font)
         File.WriteAllBytes(target, contents);
     }
 

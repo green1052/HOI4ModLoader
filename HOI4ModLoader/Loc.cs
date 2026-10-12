@@ -52,7 +52,7 @@ public static partial class Loc
             var match = Setting().Match(File.ReadAllText(settings));
             return match.Success ? match.Groups[1].Value : "english";
         }
-        catch (IOException) { return "english"; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return "english"; } // a type initializer must not throw: no plugin would load
     }
 
     [GeneratedRegex("""^\s*([^\s:#]+):\d*\s*"(.*)"\s*$""")]

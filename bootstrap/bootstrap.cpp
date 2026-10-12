@@ -1,6 +1,8 @@
 // version.dll proxy, the only native piece (like BepInEx's Doorstop).
 // Forwards the real version.dll exports, and right before hoi4.exe's entry point boots .NET
-// and calls HOI4ModLoader.Loader.Init from HOI4ModLoader\core\HOI4ModLoader.dll.
+// and calls HOI4ModLoader.Loader.Init from HOI4ModLoader\core\HOI4ModLoader.dll. It also writes
+// HOI4ModLoader\crash.log on native faults, starts the profiler (profiler.cpp), the start-up prefetch
+// (prefetch.cpp) and, with [Performance] Mimalloc, the allocator shims (allocator.c).
 #include <windows.h>
 #include <shlobj.h>
 #include <cstdint>

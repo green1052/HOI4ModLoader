@@ -213,8 +213,9 @@ public static unsafe class Game
     public static nint StrategicAir(int tag)
     {
         var holder = tag <= 0 || State == 0 ? 0 : *(nint*)(State + AirHolder.Holder);
-        if (holder == 0 || *(int*)(holder + AirHolder.Count) == 0) return 0;
-        return *(nint*)(*(nint*)(holder + AirHolder.Array) + 8 * TagIndex(tag));
+        var index = holder == 0 ? -1 : TagIndex(tag);
+        if (index < 0 || index >= *(int*)(holder + AirHolder.Count)) return 0; // a tag from another game (a stale cache), as Country checks
+        return *(nint*)(*(nint*)(holder + AirHolder.Array) + 8 * index);
     }
 
     // CSupplySystem (gamestate+0x3D8): per-province records by id at +0x138 (0xD8 bytes, count at +0x144), zeroed and rebuilt
@@ -276,7 +277,7 @@ public static unsafe class Game
         for (var i = 0; i < count; i++) ids[i] = *(int*)(data + i * AdjacencySize + NeighbourId);
         if (id >= 0)
         {
-            if (id >= cache.Length) _neighbours = cache = cache.Length > id ? cache : [.. cache, .. new int[]?[Math.Max(id + 1, cache.Length * 2) - cache.Length]];
+            if (id >= cache.Length) _neighbours = cache = [.. cache, .. new int[]?[Math.Max(id + 1, cache.Length * 2) - cache.Length]];
             cache[id] = ids;
         }
         return ids;

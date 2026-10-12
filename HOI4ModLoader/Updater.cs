@@ -58,7 +58,10 @@ internal static class Updater
             // Plugins get merged or renamed between versions: the previous release's go, ones the player added stay.
             if (File.Exists(Shipped))
                 foreach (var name in File.ReadAllLines(Shipped).Select(Path.GetFileName).Where(n => !string.IsNullOrWhiteSpace(n)))
-                    File.Delete(Path.Combine(pluginsDir, name!));
+                {
+                    try { File.Delete(Path.Combine(pluginsDir, name!)); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"update: {name} stays: {e.Message}"); } // one locked file must not leave the rest half moved
+                }
             Directory.CreateDirectory(pluginsDir);
             foreach (var name in names) File.Move(Path.Combine(Staged, name), Path.Combine(pluginsDir, name), true);
             File.WriteAllLines(Shipped, names);

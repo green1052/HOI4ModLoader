@@ -2,7 +2,9 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// Sends the game's own commands (CSetResearchCommand, CAddConstructionCommand...), the same objects the UI makes when the
-/// player clicks: no new command types, so other players' games run them as vanilla. Main thread only (<see cref="MainThread"/>).
+/// player clicks: no new command types, so other players' games run them as vanilla. Posting (Post, TryPost and the command
+/// helpers) is main thread only (<see cref="MainThread"/>); New, CanExecute, Free and ClearWay are safe on AI worker threads,
+/// whose commands go through the game's PostAICommand.
 /// </summary>
 public static unsafe class Commands
 {

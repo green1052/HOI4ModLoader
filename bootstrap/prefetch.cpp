@@ -78,14 +78,18 @@ DWORD WINAPI SaveList(void*) {
     return 0;
 }
 
-DWORD WINAPI Read(void*) {
-    static thread_local char buffer[1 << 20];
+// One buffer per reader: a thread_local here (static TLS of a statically imported DLL) gave every thread of the game its own
+// zero-filled megabyte for the whole run.
+char g_buffers[kReaders][1 << 20];
+
+DWORD WINAPI Read(void* reader) {
+    char* buffer = g_buffers[(size_t)reader];
     for (size_t i; (i = g_next.fetch_add(1)) < g_prefetch.size() && GetTickCount() - g_prefetchStart < kPrefetchMs;) {
         HANDLE f = CreateFileW(g_prefetch[i].c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
         if (f == INVALID_HANDLE_VALUE) continue;
         DWORD got;
-        while (ReadFile(f, buffer, sizeof buffer, &got, nullptr) && got) {}
+        while (ReadFile(f, buffer, sizeof g_buffers[0], &got, nullptr) && got) {}
         CloseHandle(f);
     }
     return 0;
@@ -118,7 +122,7 @@ void StartPrefetch(const std::wstring& mods) {
     if (!g_prefetch.empty()) {
         g_prefetchStart = GetTickCount();
         for (int i = 0; i < kReaders; i++)
-            if (HANDLE t = CreateThread(nullptr, 0, Read, nullptr, 0, nullptr)) CloseHandle(t);
+            if (HANDLE t = CreateThread(nullptr, 0, Read, (void*)(size_t)i, 0, nullptr)) CloseHandle(t);
     }
     InitializeCriticalSection(&g_lock);
     if (!HookImport()) return;

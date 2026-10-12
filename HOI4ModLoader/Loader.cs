@@ -76,11 +76,17 @@ public static class Loader
                 Multiplayer = true; // fail closed: unable to tell, game rule plugins could desync a multiplayer game
                 Log.Error($"multiplayer check unavailable, game rule plugins stay off: {e.Message}");
             }
-            // Signatures the core resolves on first use: a broken one (game update) is reported here, once, not in play.
-            foreach (var signature in new[] { Allocator.MallocSig, Allocator.CallocSig, Allocator.FreeSig, Commands.PostSig, Commands.SessionHolderSig, Commands.MoveSig, Gui.SetTextSig, Gui.HasTextBoxSig })
+            // Every signature of the core (most resolve on first use, many on AI threads): a broken one (game update) is
+            // reported here, once, not in play. The same walk as tests\Signatures.Tests; cached per exe after the first start.
+            foreach (var field in typeof(Loader).Assembly.GetTypes().SelectMany(type => type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)))
             {
-                try { Sig.Find(signature); }
-                catch (Exception e) { Log.Error($"core signature: {e.Message}"); }
+                if (!field.IsLiteral || field.GetRawConstantValue() is not string value) continue;
+                try
+                {
+                    if (field.GetCustomAttribute<SignatureAttribute>() is { } signature) Sig.FindAll(value, signature.Count, signature.Anchor);
+                    else if (field.IsDefined(typeof(VTableAttribute))) Sig.VTable(value);
+                }
+                catch (Exception e) { Log.Error($"core signature {field.DeclaringType?.Name}.{field.Name}: {e.Message}"); }
             }
 
             // The loader's own hooks first: a plugin hooking the same function then stacks on top, and reloads cleanly.
@@ -109,7 +115,7 @@ public static class Loader
                 Reload();
             });
             var crashTest = config.Bind("Debug", "CrashTest", 0, CrashTestDescription);
-            // Every setting is bound by now: drop the ones the loader no longer has (e.g. the old [Performance] Mimalloc).
+            // Every setting is bound by now: drop the ones the loader no longer has.
             try
             {
                 var removed = config.RemoveUnbound("");

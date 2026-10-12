@@ -4,7 +4,9 @@
 // through hoi4.exe and the system modules. The report lists, per thread, how much of the time it ran and what it waited in,
 // the hoi4.exe functions on the stacks of running samples (inclusive: a function and what it calls), and, for the main
 // thread, the hoi4.exe function each wait is called from (what the frame or the load waits for).
-// While a thread is suspended nothing here allocates or takes a lock (it may hold the heap's).
+// While a thread is suspended nothing here allocates or takes a lock (it may hold the heap's): the unwind lookup only runs on
+// addresses inside hoi4.exe and the system modules, whose static tables need none (for JIT code ntdll would search the
+// dynamic function tables under their lock, which the suspended thread may hold).
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
@@ -41,7 +43,7 @@ int g_threadCount;
 uint64_t g_samples;
 DWORD g_self, g_main;
 std::wstring g_mods;
-uint8_t *g_exe, *g_exeEnd, *g_ntdll, *g_ntdllEnd;
+uint8_t *g_exe, *g_exeEnd, *g_ntdll, *g_ntdllEnd, *g_kernel32, *g_kernel32End, *g_kernelbase, *g_kernelbaseEnd;
 
 bool In(uint64_t at, uint8_t* begin, uint8_t* end) { return at >= (uint64_t)begin && at < (uint64_t)end; }
 
@@ -71,6 +73,8 @@ void Record(DWORD id, CONTEXT& ctx) {
     int seenCount = 0;
     bool mainWaitDone = false;
     for (int depth = 0; depth < kMaxFrames && ctx.Rip; depth++) {
+        if (!In(ctx.Rip, g_exe, g_exeEnd) && !In(ctx.Rip, g_ntdll, g_ntdllEnd) && !In(ctx.Rip, g_kernel32, g_kernel32End)
+            && !In(ctx.Rip, g_kernelbase, g_kernelbaseEnd)) break; // JIT code, a hook stub, another module: stop
         uint64_t image = 0;
         auto fe = RtlLookupFunctionEntry(ctx.Rip, &image, nullptr);
         if (In(ctx.Rip, g_exe, g_exeEnd) && fe) {
@@ -135,6 +139,7 @@ void Write(const std::wstring& out, DWORD ms) {
 }
 
 void Profile(DWORD ms, const std::wstring& out) {
+    timeBeginPeriod(1); // 1 ms samples; the game keeps its own timer resolution otherwise
     g_leaf.Clear(), g_inclusive.Clear(), g_mainWaits.Clear();
     g_threadCount = 0, g_samples = 0;
     std::vector<HANDLE> threads;
@@ -163,13 +168,15 @@ void Profile(DWORD ms, const std::wstring& out) {
         Sleep(1);
     }
     for (HANDLE h : threads) CloseHandle(h);
+    timeEndPeriod(1);
     Write(out, ms);
 }
 
 DWORD WINAPI Run(void* startup) {
-    timeBeginPeriod(1);
     ModuleRange(nullptr, g_exe, g_exeEnd);
     ModuleRange(L"ntdll.dll", g_ntdll, g_ntdllEnd);
+    ModuleRange(L"kernel32.dll", g_kernel32, g_kernel32End);
+    ModuleRange(L"kernelbase.dll", g_kernelbase, g_kernelbaseEnd);
     if (startup) Profile(kStartupMs, g_mods + L"\\startup-profile.txt");
     for (std::wstring trigger = g_mods + L"\\profile-now";; Sleep(1000)) // on demand, for the rest of the run
         if (DeleteFileW(trigger.c_str())) Profile(kOnDemandMs, g_mods + L"\\profile-" + std::to_wstring(GetTickCount64()) + L".txt");
