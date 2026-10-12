@@ -21,6 +21,17 @@ public unsafe partial class AiAssist
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // front line section -> hour last logged
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> UnguardedAt = new(); // tag -> hour last logged
 
+    /// <summary>
+    /// The division is in no army, or its army has no order at all (its front gone, an area defence order deleted): kept out of
+    /// the regrouping and the army balancing, it would stand there with no order for good, so the game may place it.
+    /// </summary>
+    private static bool OrderlessArmy(nint unit)
+    {
+        var group = Division.Group(unit);
+        return group == 0 || Native.PdxArray(group + OrdersGroup.RootOrdersOffset).Length == 0
+            && (*(nint*)(group + OrdersGroup.ParentOffset) is var parent && (parent == 0 || Native.PdxArray(parent + OrdersGroup.RootOrdersOffset).Length == 0));
+    }
+
     /// <summary>The theatre general's country (from its fronts) can't be invaded.</summary>
     private static bool GeneralCantBeInvaded(nint general)
     {
@@ -84,7 +95,7 @@ public unsafe partial class AiAssist
                 {
                     var entry = data + 16 * i; // {CArmy*, front slot*}
                     var unit = *(nint*)entry;
-                    if (unit != 0 && (Pinned(unit) || FreshlyArrived(unit))) continue;
+                    if (unit != 0 && (Pinned(unit) || FreshlyArrived(unit)) && !OrderlessArmy(unit)) continue;
                     if (kept != i) Buffer.MemoryCopy((void*)entry, (void*)(data + 16 * kept), 16, 16);
                     kept++;
                 }
@@ -104,7 +115,7 @@ public unsafe partial class AiAssist
                     var indices = (int*)*(nint*)part;
                     int n = *(int*)(part + 0xC), kept = 0;
                     for (var k = 0; k < n; k++)
-                        if ((uint)indices[k] >= (uint)unit.Length || !Pinned(unit[indices[k]])) indices[kept++] = indices[k];
+                        if ((uint)indices[k] >= (uint)unit.Length || !Pinned(unit[indices[k]]) || OrderlessArmy(unit[indices[k]])) indices[kept++] = indices[k];
                     *(int*)(part + 0xC) = kept; // the game skips empty partitions
                 }
             });
