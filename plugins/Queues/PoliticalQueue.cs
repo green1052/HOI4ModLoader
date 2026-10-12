@@ -131,6 +131,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         _advisorPick = Patches.Hook<TwoFn>(Sig.Find(PoliticalSignatures.AdvisorPick), (impl, status) =>
         {
             var slot = *(nint*)(impl + SlotOfImpl);
+            if (!Gui.ShiftHeld && status != 0) Drop(Kind.Advisor, *(nint*)status); // hired by hand
             if (!Gui.ShiftHeld || status == 0 || slot == 0) return _advisorPick!.OriginalFunction(impl, status);
             Toggle(new Entry(Kind.Advisor, *(nint*)status, SlotName(slot)) { Occupant = *(nint*)(impl + OccupantOfImpl) });
             LabelAdvisor(status - CharacterItemOffset);
@@ -158,6 +159,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         {
             var decision = *(nint*)(item + DecisionOfItem);
             if (!Gui.ShiftHeld && _forced.Contains(item)) return 0;
+            if (!Gui.ShiftHeld && decision != 0) Drop(Kind.Decision, decision); // taken by hand
             if (!Gui.ShiftHeld || decision == 0) return _decisionClick!.OriginalFunction(item);
             Toggle(new Entry(Kind.Decision, decision));
             Label(*(nint*)(item + DecisionName), new Entry(Kind.Decision, decision));
@@ -167,6 +169,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         {
             var entry = TargetedEntry(*(nint*)(item + TargetOfItem));
             if (!Gui.ShiftHeld && _forced.Contains(item)) return 0;
+            if (!Gui.ShiftHeld && entry != null && _queue.RemoveAll(e => Same(e, entry)) > 0) log.Info("targeted decision: taken by hand, unqueued");
             if (!Gui.ShiftHeld || entry == null) return _targetedDecisionClick!.OriginalFunction(item);
             Toggle(entry);
             Label(*(nint*)(item + TargetedDecisionName), entry);
@@ -194,6 +197,12 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         });
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
+    }
+
+    /// <summary>A queued entry the player took by hand (a plain click): the queue would try it again forever.</summary>
+    private void Drop(Kind kind, nint item)
+    {
+        if (_queue.RemoveAll(e => e.Kind == kind && e.Item == item) > 0) log.Info($"{kind}: taken by hand, unqueued");
     }
 
     /// <summary>
