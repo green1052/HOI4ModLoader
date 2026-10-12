@@ -26,7 +26,7 @@ public unsafe partial class AiAssist
     private static readonly Dictionary<nint, long> _sent = []; // unit -> game hour until: a division we sent is left alone while it walks (main thread)
     private static readonly Dictionary<int, long> _gap = [];   // province id -> game hour until: a hole or target a division is walking to (main thread)
 
-    private enum PostKind { Reserve, Garrison, Helper, Depth }
+    private enum PostKind { Reserve, Garrison, Helper, Depth, Drive }
 
     /// <summary>A pinned division's job: its tag, the province it holds, the line province it backs (second line).</summary>
     private readonly record struct Posting(int Tag, PostKind Kind, int Province, int Guard = 0);
@@ -504,6 +504,7 @@ public unsafe partial class AiAssist
     private static bool PostHolds(nint country, int tag, Posting post)
     {
         if (post.Kind == PostKind.Garrison) return true; // the grad's: let go when it is (Unpin)
+        if (post.Kind == PostKind.Drive) return Game.Hour < post.Guard; // a drive through a gap (Guard: until when), then back on its order
         var p = Game.Province(post.Province);
         if (p == 0 || Province.Controller(p) != tag) return false;
         var front = Province.NextToEnemy(country, tag, p);

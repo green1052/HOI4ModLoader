@@ -20,6 +20,11 @@ l_english:
     com.green1052.aiassist.GroundCrews.desc:0 "The AI turns on More Ground Crews where its air wings fight hardest.\n- Effect: +10 % air efficiency in a region for 20 command power (given back when off)\n- Every 2 days, up to 2 regions with 10+ planes lost and shot down in the last 3 days, only if 50+ command power is left after the cost\n- Off after a week without fighting, or one at a time while command power is under 50\nVanilla's AI never turns them on"
     com.green1052.aiassist.AttackTargets:0 "Attack targets"
     com.green1052.aiassist.AttackTargets.desc:0 "Local attacks pick targets by value instead of at random.\n- Order: provinces that cut off enemy divisions, then victory points, capitals, supply hubs, airfields, resources, weak defenders, then ones that shorten the front\n- Defenders dug in to 60 %+ count against\n- Opens a relief or breakout corridor first when its own divisions are pocketed\n- Fresh divisions take empty enemy provinces next to the line"
+    com.green1052.aiassist.Exploitation:0 "Exploitation"
+    com.green1052.aiassist.Exploitation.desc:0 "Through a gap in the enemy line, fresh mobile divisions drive deep.
+- Gap: empty enemy ground with no enemy division next to it
+- Up to 4 provinces deep, to the most valuable province (capital, victory points, supply hub, airfields)
+- 2 divisions per target at most, 4 per country every 3 hours; off their battle plan for a week, then back"
     com.green1052.aiassist.BeachDefense:0 "Beach defence"
     com.green1052.aiassist.BeachDefense.desc:0 "Answers naval landings at once by sealing off and attacking the beachhead.\n- Free divisions near the landing wall it in and attack into it\n- Beachhead: ground the enemy took from the sea in the last 10 days, or a small enemy pocket on the coast\nVanilla leaves a landing alone until the front collapses"
     com.green1052.aiassist.SupplyAwareAttacks:0 "Supply-aware attacks"

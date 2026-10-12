@@ -75,18 +75,19 @@ public unsafe partial class FrontLine
         foreach (var (front, enemies) in pockets)
         {
             var main = fronts.Where(f => f.Key.Group == front.Key.Group && !pockets.ContainsKey(f)).MaxBy(f => f.Units.Count);
-            if (main == null) continue;
+            if (main == null && !_force) continue; // the player's army with no other front: theirs to decide
             var spare = front.Units.Count - Math.Max(2, PocketShare * enemies);
             if (spare <= 0) continue;
             var moved = 0;
             // The ones not in contact with the pocket leave first.
             foreach (var unit in front.Units.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Division.Location(u) != 0).OrderBy(u => NextToEnemy(country, tag, Division.Location(u))).Take(spare))
             {
-                if (!Commands.Assign(unit, Division.Group(unit), main.Key.Id, _force)) continue;
+                // An AI army with only this front: off its order, the theatre distribution gives them to fronts that want them.
+                if (!(main != null ? Commands.Assign(unit, Division.Group(unit), main.Key.Id, _force) : Commands.Unassign(unit, Division.Group(unit), _force))) continue;
                 _pending[unit] = _now + PendingMs;
                 moved++;
             }
-            if (moved > 0) Log.Info($"pocket front: {moved} division(s) beyond what a pocket of {enemies} enemy division(s) needs go to their army's main front");
+            if (moved > 0) Log.Info($"pocket front: {moved} division(s) beyond what a pocket of {enemies} enemy division(s) needs go to {(main != null ? "their army's main front" : "the AI's regrouping")}");
         }
     }
 

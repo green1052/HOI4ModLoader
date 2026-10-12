@@ -65,6 +65,10 @@ public unsafe partial class AiAssist : Plugin
             "The AI's local attacks keep to a breakthrough axis: while the AI's own armoured spearhead (the game's force concentration) attacks, where its path crosses the enemy line, moving forward with it; "
             + "otherwise its front's thinnest enemy sector (few divisions, no forts, open terrain), held three days and moved on only once taken. Off the axis, only attacks that pin enemy divisions next to it (they can't shift into the breakthrough while under attack). "
             + "Its close air support backs battles on the axis first.");
+        _exploit = Config.Bind("AI", "Exploitation", true,
+            "Through a gap in the enemy line (empty enemy ground no enemy division covers), fresh mobile divisions of the AI drive up to four provinces deep "
+            + "to the most valuable province there (a capital, victory points, a supply hub, airfields), off their battle plan for a week; two at most per target, four per country every three hours. "
+            + "Vanilla only takes the next province, so an empty capital behind a broken line stays untaken.");
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
             + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "
@@ -178,6 +182,7 @@ public unsafe partial class AiAssist : Plugin
             _ = Sig.Find(Commands.UnassignSig);
             _ = Sig.Find(Commands.AssignSig);
             MainThread.Every(TimeSpan.FromSeconds(1), Backfill); // the passes poll each second and run on game time (Due)
+            if (_exploit) MainThread.Every(TimeSpan.FromSeconds(1), Exploit);
         }
         if (_strategicInvasions) LoadInvasions();
         if (_paradrops) LoadParadrops();
@@ -214,6 +219,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _raised, "raised {0} front request(s) to cover the line");
         Add(ref _unguarded, "freed {0} coast and home garrison request(s) of countries whose enemies hold no port");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
+        Add(ref _drives, "drove {0} mobile division(s) through gaps in enemy lines");
         Add(ref _kept, "kept {0} line defender(s) from strategic redeployment to another front");
         Add(ref _reserved, "posted {0} reserve(s)");
         Add(ref _depth, "posted {0} second-line division(s) behind key line provinces");
