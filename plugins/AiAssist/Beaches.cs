@@ -134,17 +134,23 @@ public unsafe partial class AiAssist
             Array.Fill(_landed, Never, old, size - old);
         }
         var before = (int[])_controllers.Clone();
+        var ports = new HashSet<int>();
         for (var id = 1; id <= _provinceCount; id++)
         {
             var p = Game.Province(id);
             var taker = p == 0 ? 0 : Province.Controller(p);
+            if (taker > 0 && Province.BuildingLevel(p, Buildings.NavalBaseSlot) > 0) ports.Add(taker);
             if (taker == before[id]) continue;
             _controllers[id] = taker;
             if (first || taker <= 0 || before[id] <= 0) continue; // the first scan, sea or wasteland
             _changed[id] = hour;
             _landed[id] = FromSea(p, taker, before, hour) ? hour : Never;
         }
+        PortHolders = ports;
     }
+
+    /// <summary>Countries holding a naval base, from the last controller scan (null before it): the ones that can land troops. Read by AI worker threads.</summary>
+    private static volatile HashSet<int>? PortHolders;
 
     /// <summary>
     /// Whether <paramref name="p"/>, a coastal province just taken by <paramref name="taker"/>, came from the sea: at the last scan at most

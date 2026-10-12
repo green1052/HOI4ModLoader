@@ -56,7 +56,8 @@ public unsafe partial class AiAssist : Plugin
             + "One short of divisions for its line doesn't start attacks and stops the running offensives of its thinly held fronts, unless it outguns the enemy there two to one. "
             + "Divisions worn out by fighting rest behind the line (a quarter of those around at most), and divisions in a salient whose way back is closing under an enemy at least as strong pull out, where another of ours holds their province; "
             + "neither where the AI outguns the enemy two to one. Rested divisions, and reserves the line moved away from, go back on their own order. "
-            + "Newly deployed divisions go where they are needed most first: the grad's holes (DefensivePostures), else empty line provinces, then the most thinly held front.");
+            + "Newly deployed divisions go where they are needed most first: the grad's holes (DefensivePostures), else empty line provinces, then the most thinly held front. "
+            + "Against enemies that hold no port (so can't land), the AI keeps no coast and home garrisons: those divisions stay on the land front.");
         _beachDefense = Config.Bind("AI", "BeachDefense", true,
             "Naval landings are answered at once: free divisions near the beachhead (ground the enemy took from the sea in the last ten days, or a small enemy pocket on the coast) wall it in and attack into it; "
             + "vanilla leaves it alone until the front collapses.");
@@ -211,6 +212,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _training, "put {0} green air wing(s) on training");
         Add(ref _stuck, "held factories on efficient lines in {0} AI production plan(s)");
         Add(ref _raised, "raised {0} front request(s) to cover the line");
+        Add(ref _unguarded, "freed {0} coast and home garrison request(s) of countries whose enemies hold no port");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
         Add(ref _reserved, "posted {0} reserve(s)");
         Add(ref _depth, "posted {0} second-line division(s) behind key line provinces");

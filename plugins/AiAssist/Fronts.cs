@@ -17,7 +17,11 @@ public unsafe partial class AiAssist
 
     private IHook<GeneralRetFn>? _unitRequests;
     private IHook<BalanceFn>? _armyBalancing;
-    private int _raised;
+    private int _raised, _unguarded;
+
+    /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
+    private static bool CantBeInvaded(nint country, int tag) =>
+        PortHolders is { } ports && _line.Values.Any(l => l.Tag == tag) && !ports.Any(holder => Game.AtWar(country, holder));
     private static int _stationed;
     private static bool _holdLine, _axis, _beachDefense;
     private const int AxisHours = 24, ThinSectorWeight = 8, SectorHours = 72, SalientHead = -1; // a thin sector is held 3 days unless taken
@@ -150,6 +154,13 @@ public unsafe partial class AiAssist
                     if (spot == null || spot.Value.Tag == tag && weight < spot.Value.Weight) spot = (tag, p, weight, spot?.Line ?? []);
                 }
                 if (spot?.Tag == tag) foreach (var our in threatened) spot.Value.Line.Add(Game.Id(our));
+            }
+            // Area defence (the AI's coast and home garrisons) against enemies that hold no port, so can't land: a land war takes them all.
+            if (_holdLine && *(int*)(front + AreaDefense) != 0 && *(int*)(front + MaxWanted) > 0 && CantBeInvaded(country, tag))
+            {
+                *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
+                Interlocked.Increment(ref _unguarded);
+                continue;
             }
             // Hold the line: at war, every province of ours on the line keeps a defender, whatever else (a supply crisis,
             // another front) the game weighs; it would ship them off and leave the line empty while fighting.
