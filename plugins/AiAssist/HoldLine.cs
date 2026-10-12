@@ -1124,6 +1124,7 @@ public unsafe partial class AiAssist
             : EnemyAirOver(members, tag) is var air and > 0 ? $"the enemy holds {air}% of the air over it"
             : Muddy(members) ? "most of its divisions stand in mud"
             : Outgunned(members, tag) is { } ahead ? ahead
+            : PredictedLoss(members, tag) is { } odds ? odds
             : Trapped(members, tag) ? "a division of it stands in a salient whose way back is closing"
             : Beaten.TryGetValue(*(nint*)(order + GroupOfOrder), out var beaten) && hour - beaten is >= 0 and < BeatenHours ? "its attacks were beaten back in the last three days"
             : null;
