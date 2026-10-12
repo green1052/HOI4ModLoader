@@ -18,7 +18,7 @@ public unsafe partial class AiAssist
     private IHook<GeneralRetFn>? _unitRequests;
     private IHook<BalanceFn>? _armyBalancing;
     private int _raised, _unguarded;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // AI front -> hour last logged
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // front line section -> hour last logged
 
     /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
     private static bool CantBeInvaded(nint country, int tag) =>
@@ -179,9 +179,9 @@ public unsafe partial class AiAssist
             *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
             *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
             Interlocked.Increment(ref _raised);
-            if (!RaisedAt.TryGetValue(front, out var last) || hour - last is < 0 or >= 24) // once a day per front in the log
+            if (!RaisedAt.TryGetValue(section, out var last) || hour - last is < 0 or >= 24) // once a day per front in the log
             {
-                RaisedAt[front] = hour;
+                RaisedAt[section] = hour;
                 _log?.Info($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
             }
         }
