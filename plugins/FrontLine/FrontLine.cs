@@ -44,7 +44,7 @@ public unsafe partial class FrontLine : Plugin
     private const int CombatsOfGameState = 0x268, DefenderOfCombat = 0x30, ProvinceOfCombat = 0x38, ProgressSlot = 25;
     private const int DivisionsOfSide = 0x20, ReservesOfSide = 0x100;
     private const int MaxRestSearch = 6, MaxPlugsPerTurn = 2, MaxEscapesPerTurn = 2, MaxAttacksPerTurn = 2;
-    private const int RestDepth = 2;          // provinces behind the line a division rests (none of its neighbours enemy)
+    private const int RestDepth = 1;          // provinces behind the line a division rests (none of its neighbours enemy): the nearest such, org recovers as fast there
     private const int MaxSwapsPerArmy = 2;    // sent to rest at a time, so a front never changes all at once
     private const int MaxRestHours = 14 * 24; // short of equipment or manpower, strength may never come back: organisation is enough then
     private const long PendingMs = 30_000;    // a unit we gave orders to is left alone meanwhile (multiplayer: a round trip)
@@ -130,7 +130,8 @@ public unsafe partial class FrontLine : Plugin
             "Key line provinces (ports, victory points, river crossings, cities and mountains) get a second division a province behind them, from spare divisions of a front; it stays while the line holds there.");
         _shuffle = Config.Bind("Shuffle", "Shuffle", true,
             "When a front is losing (three provinces lost in two days or defences being lost, or facing twice its divisions), spare fresh divisions of quiet fronts reinforce its most pressed provinces and go back to their own front a day after the crisis. "
-            + "Meanwhile fresh divisions next to the crisis attack idle enemy stacks of one or two divisions (one attacker each, while its organisation holds) so they are locked in combat and can't be moved in.");
+            + "Meanwhile fresh divisions next to the crisis attack idle enemy stacks of one or two divisions (one attacker each, while its organisation holds) so they are locked in combat and can't be moved in. "
+            + "A front that only faces an encircled pocket keeps twice the pocket's divisions (two at least); the rest go onto their army's biggest other front.");
         if (Config.Bind("Keys", "BattlePlanKeys", true, "Ctrl+Alt+E activates every battle plan at once, Ctrl+Alt+H halts them."))
             MainThread.Every(TimeSpan.FromMilliseconds(30), PollKeys);
         _ai = Config.Bind("AI", "ApplyToAI", false,
@@ -304,7 +305,11 @@ public unsafe partial class FrontLine : Plugin
             Escape(country, tag, units);
             Breakout(country, tag, units);
         }
-        if (_shuffle) Shuffle(country, tag, fronts.Values);
+        if (_shuffle)
+        {
+            Shuffle(country, tag, fronts.Values);
+            TrimPocketFronts(country, tag, fronts.Values);
+        }
         if (_depth) DepthDefense(country, tag, fronts.Values);
         if (_fireBrigade) PostReserves(country, tag, fronts.Values);
         if (_attack) Attack(country, tag);
@@ -470,7 +475,7 @@ public unsafe partial class FrontLine : Plugin
         _orders.TryGetValue(unit + MemberOfUnit, out var order);
         if (_holding.TryGetValue((order, location), out var n)) _holding[(order, location)] = n - 1; // one fewer holds it
         Book(unit, job, job == Job.Pin ? 0 : order, post, target, front);
-        Arrow(unit, province, job switch
+        Arrow(unit, province, job.ToString(), job switch
         {
             Job.Rest => (80, 120, 255),
             Job.Counter or Job.Pin => (220, 60, 220),
@@ -480,10 +485,12 @@ public unsafe partial class FrontLine : Plugin
         _pending[unit] = _now + PendingMs;
     }
 
-    /// <summary>[Debug] AiActionArrows: an arrow from where the unit stands to where it was sent.</summary>
-    private static void Arrow(nint unit, int to, (byte R, byte G, byte B) colour)
+    /// <summary>Logs who was sent where, for what; [Debug] AiActionArrows: an arrow from where the unit stands to where it was sent.</summary>
+    private void Arrow(nint unit, int to, string what, (byte R, byte G, byte B) colour)
     {
         var from = Division.Location(unit);
+        var owner = Division.Owner(unit);
+        Log.Info($"  {(owner == Game.PlayerTag ? "player" : $"#{owner}")} {what}: province {(from != 0 ? Game.Id(from) : 0)} -> {to}");
         if (from != 0) MapArrows.Flash(Game.Id(from), to, colour.R, colour.G, colour.B);
     }
 

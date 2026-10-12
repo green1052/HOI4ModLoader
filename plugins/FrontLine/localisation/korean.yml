@@ -30,7 +30,8 @@
     com.green1052.frontline.DepthDefense:0 "종심 방어"
     com.green1052.frontline.DepthDefense.desc:0 "전선 요충지 바로 뒤에 전선의 남는 사단 하나를 2선으로 세워 둡니다.\n- 요충지: 항구, 승점, 강을 낀 곳, 도시, 산악\n- 그곳 전선이 유지되는 동안 자리를 지킵니다"
     com.green1052.frontline.Shuffle:0 "전선 간 병력 이동"
-    com.green1052.frontline.Shuffle.desc:0 "밀리는 전선에 조용한 전선의 남는 쌩쌩한 사단을 보냅니다.\n- 밀리는 전선: 이틀 새 프로빈스 3곳 상실, 지는 방어전, 또는 적이 아군의 2배 이상\n- 가장 압박받는 프로빈스로 가고, 위기가 지나고 하루 뒤 돌아갑니다\n- 그동안 위기 지역 옆에서 쉬는 적 스택(1~2개 사단)에 한 사단씩 견제 공격을 걸어 묶어 둡니다(조직력이 떨어지면 물림)"
+    com.green1052.frontline.Shuffle.desc:0 "밀리는 전선에 조용한 전선의 남는 쌩쌩한 사단을 보냅니다.\n- 밀리는 전선: 이틀 새 프로빈스 3곳 상실, 지는 방어전, 또는 적이 아군의 2배 이상\n- 가장 압박받는 프로빈스로 가고, 위기가 지나고 하루 뒤 돌아갑니다\n- 그동안 위기 지역 옆에서 쉬는 적 스택(1~2개 사단)에 한 사단씩 견제 공격을 걸어 묶어 둡니다(조직력이 떨어지면 물림)
+- 포위망만 마주한 전선은 포위망 사단 수의 2배(최소 2개)만 남기고, 나머지는 같은 군의 주 전선으로 보냅니다"
     com.green1052.frontline.BattlePlanKeys:0 "전투 계획 단축키"
     com.green1052.frontline.BattlePlanKeys.desc:0 "Ctrl+Alt+E로 모든 전투 계획을 한 번에 시작하고, Ctrl+Alt+H로 전부 멈춥니다."
     com.green1052.frontline.OperationKeys:0 "작전 단축키(블리츠, 협공)"

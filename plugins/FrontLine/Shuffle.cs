@@ -54,6 +54,42 @@ public unsafe partial class FrontLine
                 _crisis[front.Key] = hour;
     }
 
+    // ---- Pocket fronts: the game splits a pocket off a front with a share of its divisions, often far more than the pocket needs ----
+
+    private const int PocketShare = 2; // our divisions per enemy division in the pocket, 2 at least
+
+    /// <summary>A front facing only encircled enemy ground keeps PocketShare per pocket division; the rest go onto its army's biggest open front.</summary>
+    private void TrimPocketFronts(nint country, int tag, IEnumerable<Front> all)
+    {
+        var fronts = all.ToList();
+        var pockets = new Dictionary<Front, int>(); // pocket front -> enemy divisions it faces
+        foreach (var front in fronts)
+        {
+            var facing = new HashSet<nint>();
+            foreach (var unit in front.Units)
+                if (Division.Location(unit) is var at && at != 0)
+                    foreach (var id in Game.Neighbours(at))
+                        if (Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)) facing.Add(e);
+            if (facing.Count > 0 && facing.All(e => Province.Encircled(country, tag, e))) pockets[front] = facing.Sum(Province.Divisions);
+        }
+        foreach (var (front, enemies) in pockets)
+        {
+            var main = fronts.Where(f => f.Key.Group == front.Key.Group && !pockets.ContainsKey(f)).MaxBy(f => f.Units.Count);
+            if (main == null) continue;
+            var spare = front.Units.Count - Math.Max(2, PocketShare * enemies);
+            if (spare <= 0) continue;
+            var moved = 0;
+            // The ones not in contact with the pocket leave first.
+            foreach (var unit in front.Units.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Division.Location(u) != 0).OrderBy(u => NextToEnemy(country, tag, Division.Location(u))).Take(spare))
+            {
+                if (!Commands.Assign(unit, Division.Group(unit), main.Key.Id, _force)) continue;
+                _pending[unit] = _now + PendingMs;
+                moved++;
+            }
+            if (moved > 0) Log.Info($"pocket front: {moved} division(s) beyond what a pocket of {enemies} enemy division(s) needs go to their army's main front");
+        }
+    }
+
     private bool Crisis((nint, int) front) => _crisis.TryGetValue(front, out var hour) && Game.Hour - hour is >= 0 and < CrisisHours;
 
     /// <summary>

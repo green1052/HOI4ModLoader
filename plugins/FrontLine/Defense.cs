@@ -40,7 +40,7 @@ public unsafe partial class FrontLine
             foreach (var breaker in breakers)
             {
                 _held.Remove(breaker); // whatever it was doing for us
-                Arrow(breaker, Game.Id(target), (0, 220, 255));
+                Arrow(breaker, Game.Id(target), "breakout", (0, 220, 255));
                 Commands.Move(breaker, Game.Id(target), _force);
                 _pending[breaker] = _now + PendingMs;
             }
