@@ -23,7 +23,9 @@ public sealed class Logger(string source)
         try { action(); }
         catch (Exception e)
         {
-            if (_failed.Add(what)) Error($"{what}: {e}");
+            bool first;
+            lock (_failed) first = _failed.Add(what); // hooks on AI threads guard too
+            if (first) Error($"{what}: {e}");
         }
     }
 

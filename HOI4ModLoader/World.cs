@@ -418,6 +418,9 @@ public static class Jobs
         AiMicro = null;
     }
 
+    /// <summary>A new game: the divisions held are gone (the owners publish their new ones again).</summary>
+    internal static void Forget() => Held.Clear();
+
     /// <summary>A plugin other than <paramref name="except"/> has a job for the division.</summary>
     public static bool Taken(nint unit, string? except = null) => Held.TryGetValue(unit, out var by) && by != except;
 }

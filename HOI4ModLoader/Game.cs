@@ -71,7 +71,11 @@ public static unsafe class Game
     {
         var now = (HasStarted, ControlledTag);
         if (now == _seen) return;
-        if (now.HasStarted && !_seen.Started) Starts++;
+        if (now.HasStarted && !_seen.Started)
+        {
+            Starts++;
+            Jobs.Forget(); // the last game's division pointers: a new world's division may reuse one
+        }
         _seen = now;
         Generation++;
     }

@@ -56,6 +56,10 @@ public static class MainThread
     {
         Log.Guard("game tracking", Game.Track); // before any timer: a loaded save resets the plugins' per-game state first
         var now = Environment.TickCount64;
+        var due = false; // PeekMessage runs several times a frame: most ticks have no timer due, and need no copy of the list
+        foreach (var timer in Timers)
+            if (now >= timer.Next) { due = true; break; }
+        if (!due) return;
         foreach (var timer in Timers.ToArray()) // a timer may reload plugins, which removes and adds timers
         {
             if (now < timer.Next || !Timers.Contains(timer)) continue;

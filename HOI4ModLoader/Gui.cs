@@ -32,10 +32,14 @@ public static unsafe partial class Gui
         if (window == 0) return 0; // a native null read can't be caught: it ends the game
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, byte>)Sig.Find(HasTextBoxSig);
-        var str = NewString(Encoding.ASCII.GetBytes(name));
-        try { return _hasTextBox(window, str) == 0 ? 0 : Find(window, FindTextBoxSlot, str); }
-        finally { FreeString(str); }
+        var str = Name(name);
+        return _hasTextBox(window, str) == 0 ? 0 : Find(window, FindTextBoxSlot, str);
     }
+
+    // Names looked up as game strings, made once and kept: per-frame lookups (queues, trade, construction) made and freed one each time.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, nint> Names = new();
+
+    private static nint Name(string name) => Names.GetOrAdd(name, n => NewString(Encoding.ASCII.GetBytes(n)));
 
     /// <summary>
     /// A child of <paramref name="window"/> by name through one of CContainerWindow's lookups (vtable slot: 13 button,
@@ -43,10 +47,7 @@ public static unsafe partial class Gui
     /// </summary>
     public static nint Find(nint window, int slot, string name)
     {
-        if (window == 0) return 0;
-        var str = NewString(Encoding.ASCII.GetBytes(name));
-        try { return Find(window, slot, str); }
-        finally { FreeString(str); }
+        return window == 0 ? 0 : Find(window, slot, Name(name));
     }
 
     private static nint Find(nint window, int slot, nint name) => ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[slot])(window, name, 0);
