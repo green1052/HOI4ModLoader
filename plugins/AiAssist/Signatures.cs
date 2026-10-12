@@ -142,4 +142,35 @@ public static class Signatures
     /// with a null reason), transport planes for the divisions standing at the source (none there: passes).
     /// </summary>
     [Signature] public const string OrderReady = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 8B 41 30 48 8B F1 83 F8 03 75 ? E8 ? ? ? ? EB ? 83 F8 04 75 ? E8 ? ? ? ?";
+
+    /// <summary>
+    /// The air AI's per-wing order (0x1412CAFF0; wing, CAirBase* base, CStrategicRegion* region, int mission index or -1, bool
+    /// cancelTransfer) -> bool: flies the wing to the base with the mission, or sets the region and mission there with the
+    /// AI's commands. A wing on training at its base only gets training cleared. Called for every wing the plan uses, by the
+    /// mission share-out (0x1412C3F20, region and mission) and the rebasing (0x1412CDB20, -1), from CAIMilitaryMinister's
+    /// daily and hourly updates: the country's AI worker thread.
+    /// </summary>
+    [Signature] public const string AssignWing = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC 30 45 8B F9";
+
+    /// <summary>
+    /// CStratAirSetMissionCommand ctor (mem[0x48], CAirWing*, int mission bits, bool enable, bool clearFirst): +0x40 bits, +0x44
+    /// enable, +0x45 clear, +0x46 stop training at max XP. The AI's own training pass posts (wing, 0x800, 1, 1) with +0x46 set.
+    /// </summary>
+    [Signature] public const string SetMissionCommand = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 54 24 ? 48 89 4C 24 ? 56 57 41 56 48 83 EC 20 41 0F B6 F9 41 8B D8 48 8B F2 4C 8B F1 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 41 89 4E 10 41 C7 46 14 00 00 FF FF 66 41 89 4E 18 49 89 4E 1C 48 8D 05 ? ? ? ? 49 89 06 49 8D 4E 28 E8 ? ? ? ? 90 41 89 5E 40 41 88 7E 44 0F B6 44 24";
+
+    /// <summary>CAirWing::CanTrain(wing) -> bool: may fly training (`mov eax,[rcx+30h]; shr eax,0Bh`: mission 0x800 allowed), XP under NAir.AIR_WING_XP_TRAINING_MAX, not in a raid, not a carrier's in port.</summary>
+    [Signature] public const string CanTrain = "40 53 48 83 EC 20 8B 41 30 48 8B D9 C1 E8 0B";
+
+    /// <summary>CAirWing::GetAirBase(wing) -> CAirBase*: where it is, or is flying to (ArmySupport's pattern too).</summary>
+    [Signature] public const string AirBaseOfWing = "40 53 48 83 EC 20 48 8B D9 48 83 C1 48 83 39 00 75 ? 83 79 ? ? 74 ? E8 ? ? ? ? 48 85 C0 75 ? 48 8B 4B ? 48 83 C1 18 83 39 00 75 ? 83 79 ? ? 75 ? 33 C0 48 83 C4 20 5B C3";
+
+    /// <summary>CAirWing::GetExperienceLevel(wing) -> int: how many of NAir.AIR_WING_XP_LEVELS its XP (`mov rdx,[rcx+218h]`) reached; 0 green.</summary>
+    [Signature] public const string WingXpLevel = "4C 8B 05 ? ? ? ? 33 C0 48 8B 91 18 02 00 00";
+
+    /// <summary>
+    /// The diplomacy's "at war with anyone" test (diplomacy, int mode; 0 as the game asks) -> bool: true when `[rcx+0A4h]` is set,
+    /// else when a relation is a war. CCountry::IsAtWar (0x140700520) is `mov rcx,[rcx+0F88h]; jmp` here; air missions call it
+    /// with 0 to tell war from peace.
+    /// </summary>
+    [Signature] public const string AtWarAny = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 83 B9 A4 00 00 00 00 8B FA";
 }

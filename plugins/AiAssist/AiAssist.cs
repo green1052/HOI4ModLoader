@@ -27,6 +27,7 @@ namespace AiAssist;
 /// - Air retreat: regions the AI is losing the air war in get fewer planes.
 /// - Bombing targets: strategic bombers ask for more planes for the enemy regions next to the land front, less (and a lower
 ///   score) for ones far behind it.
+/// - Air training: green wings train (the training mission) instead of flying where nothing happens, half the air force at most.
 /// - Production lines: small factory cuts on efficiently running production lines are held for a while (vanilla restarts the
 ///   freed factories elsewhere at 10 % efficiency).
 /// - Refit priority: front-line divisions get reinforcements and upgrades first (until they are 75 % full).
@@ -73,6 +74,9 @@ public unsafe partial class AiAssist : Plugin
         _bombingTargets = Config.Bind("AI", "BombingTargets", true,
             "The AI's strategic bombers go for the enemy regions next to its land front first (the factories, supply hubs and airfields feeding the battle): they ask for twice the planes there, "
             + "while regions far behind the front get half the planes and a lower priority.");
+        var airTraining = Config.Bind("AI", "AirTraining", true,
+            "The AI trains its green air wings (under the second experience level) on the training mission instead of flying them where nothing happens: at peace any wing it would send on a mission, "
+            + "at war fighters it would send to patrol a land region no enemy plane flies in. At most half of a country's wings train at once; trained ones go back to the AI's missions.");
         var productionLines = Config.Bind("AI", "ProductionLines", true,
             "The AI keeps factories on production lines that have built up efficiency: a small cut (up to a quarter) to equipment whose lines average 35 %+ efficiency is held for a while "
             + "and the factories come off the smallest increases elsewhere; vanilla moves them to other equipment, where they start over at 10 %. Big cuts and full stops go through.");
@@ -138,6 +142,7 @@ public unsafe partial class AiAssist : Plugin
             Salients.Clear();
             ThinLines.Clear();
             HubPlans.Clear();
+            TrainingPosted.Clear();
             ClearRailGuns();
             _capitals = (0, []);
             _provinceCount = -1;
@@ -148,6 +153,7 @@ public unsafe partial class AiAssist : Plugin
         if (_attackTargets || _armorTerrain || _axis || _supplyAware || _postures || _holdLine) LoadPockets(); // the thin-line steer lives in PocketFilter
         if (refit) LoadRefit();
         if (_airRetreat || _bombingTargets || _strategicInvasions) LoadRegionPriorities();
+        if (airTraining) LoadAirTraining();
         if (productionLines) LoadProductionLines(stickyDays);
         if (_axis) LoadCas();
         if (_holdLine || _axis) LoadFronts();
@@ -187,6 +193,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _refitted, "put {0} front-line division-day(s) first for equipment");
         Add(ref _pulled, "lowered {0} lost air region(s)");
         Add(ref _bombing, "aimed {0} strategic bombing plan(s) at the front");
+        Add(ref _training, "put {0} green air wing(s) on training");
         Add(ref _stuck, "held factories on efficient lines in {0} AI production plan(s)");
         Add(ref _raised, "raised {0} front request(s) to cover the line");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
