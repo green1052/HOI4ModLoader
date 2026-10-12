@@ -18,6 +18,7 @@ public unsafe partial class AiAssist
     private IHook<GeneralRetFn>? _unitRequests;
     private IHook<BalanceFn>? _armyBalancing;
     private int _raised, _unguarded;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // AI front -> hour last logged
 
     /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
     private static bool CantBeInvaded(nint country, int tag) =>
@@ -162,16 +163,27 @@ public unsafe partial class AiAssist
                 Interlocked.Increment(ref _unguarded);
                 continue;
             }
-            // Hold the line: at war, every province of ours on the line keeps a defender, whatever else (a supply crisis,
-            // another front) the game weighs; it would ship them off and leave the line empty while fighting.
+            // Hold the line: at war, every province of ours on the line keeps a defender, and the front as many divisions as the
+            // enemy divisions across it, whatever else (a supply crisis, another front) the game weighs. The theatre distribution
+            // takes a front's divisions for other fronts only beyond its minimum (CollectReassignableUnits and the donation pass
+            // 0x141A5D070 keep AI_THEATRE_DISTRIBUTION_PERCENTAGE_OF_MINIMUM_UNITS_TO_KEEP x +0x90): left alone, Italy shipped its
+            // Somali divisions to Eritrea and Ethiopia walked in.
             if (!_holdLine || !hostile || Grads.ContainsKey(tag) // on a grad, it gets the divisions, not the old border
                 || *(int*)(front + AreaDefense) != 0 || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
-            if (*(int*)(front + MinWanted) >= contact.Count) continue;
-            *(int*)(front + MinWanted) = contact.Count;
-            *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), contact.Count);
+            var facing = 0;
+            foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);
+            var need = Math.Max(contact.Count, facing);
+            if (*(int*)(front + MinWanted) >= need) continue;
+            *(int*)(front + MinWanted) = need;
+            *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
             *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
             Interlocked.Increment(ref _raised);
+            if (!RaisedAt.TryGetValue(front, out var last) || hour - last is < 0 or >= 24) // once a day per front in the log
+            {
+                RaisedAt[front] = hour;
+                _log?.Info($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
+            }
         }
         if (_axis && spot is { } line && theatre != 0) Anchor(general, theatre, line.Tag, line.Province, line.Weight, line.Line, enemyLine, hour);
         if (_railGuns) PublishGunArmies(general, AxisFrontArmies(general, atWar, hour), hour);
