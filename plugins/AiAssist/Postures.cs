@@ -15,7 +15,7 @@ public unsafe partial class AiAssist
     // plain moves and pinned divisions, never an order.
 
     private const int DecideHours = 24, MinGradHours = 30 * 24, RedrawHours = 7 * 24, WeekHours = 7 * 24, ExitDays = 7, BlockHours = 30 * 24;
-    private const int StrongRatio = 200, PressedRatio = 130, ExitRatio = 80; // enemy power facing a sector per our share of it, %
+    private const int StrongRatio = 200, PressedRatio = 160, ExitRatio = 80; // enemy power facing a sector per our share of it, %
     private const int GradDepth = 10, MaxGradNodes = 3000, MaxGradMoves = 6;
     // ponytail: hand-tuned trade of ground against line; scale the giving-up cost by the strength ratio if grads run too deep or never form.
     private const int HoldCost = 100, AbandonBase = 20, AbandonPerVp = 5, Inf = 1 << 28;
@@ -129,7 +129,7 @@ public unsafe partial class AiAssist
             var ratio = (int)Math.Min(int.MaxValue, theirs * 100 / Math.Max(1, ours * contact[enemy] / border.Count));
             top = Math.Max(top, ratio);
             if (kept.Contains(enemy)) weak &= ratio < ExitRatio;
-            else if (ratio >= StrongRatio || !blocked && ratio >= PressedRatio && (lost >= 2 || thin)) strong.Add(enemy);
+            else if (ratio >= StrongRatio || !blocked && ratio >= PressedRatio && lost >= 2) strong.Add(enemy); // not just thin: civil wars between equals left salients bare
         }
         if (kept.Count == 0) // no grad (or peace with all it was against): a new one needs a new reason
             return new Stance(hour, hour, strong, top, 0, old.Strong.Count > 0 ? hour + BlockHours : old.Blocked, history);

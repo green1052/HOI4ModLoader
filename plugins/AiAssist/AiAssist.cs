@@ -105,7 +105,7 @@ public unsafe partial class AiAssist : Plugin
             && Loader.AtStartup)
             AddGameFile("common/ai_strategy/hoimod_ai_airborne.txt");
         _postures = Config.Bind("AI", "DefensivePostures", true,
-            "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.3x while it lost line provinces in the last week or is short of divisions) gives up exposed ground and holds its grad: "
+            "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.6x while it lost line provinces in the last week) gives up exposed ground and holds its grad: "
             + "the most defensible short line between that enemy and its capital (rivers, mountains, marsh, forests, hills, cities and forts in front, few directions to be attacked from), redrawn weekly, "
             + "or one line back once the enemy breaks in. Its divisions walk there and stay (victory point cities get one more), it starts no offensives or paradrops (landings still go), and it attacks only "
             + "fought-out enemy stacks next to the line, with two fresh divisions or more (reserves behind the grad too), while single divisions pin the enemy stacks that could come to their aid; worn-out attackers break off. "
