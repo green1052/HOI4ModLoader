@@ -47,6 +47,8 @@ public static class Loader
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
                 "Reload all plugins when a DLL in HOI4ModLoader\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
+            MapArrows.Enabled = config.Bind("Debug", "AiActionArrows", false,
+                "Flash an arrow on the map for each front line action the AI plugins take (encirclements, breakouts, assaults, holes filled), to see what they do.");
             if (config.Bind("Performance", "Mimalloc", true,
                 "Use mimalloc for the game's memory allocations instead of the Windows heap (takes effect at the next start)."))
             {
@@ -89,6 +91,8 @@ public static class Loader
             catch (Exception e) { Log.Error($"settings Mods tab: {e.Message}"); }
             try { VersionLabel.Install(); }
             catch (Exception e) { Log.Error($"version label: {e.Message}"); }
+            try { MapArrows.Install(); }
+            catch (Exception e) { Log.Error($"map arrows: {e.Message}"); }
             Patches.Owner = null;
 
             LoadPlugins();

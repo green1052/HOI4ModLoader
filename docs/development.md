@@ -86,6 +86,9 @@ Plugins change vanilla interface files without shipping copies of them: declare 
 ```
 If a pattern stops matching after a game update, the loader leaves the vanilla file and logs an error; the signature tests catch it first. Keep to `interface/` and `localisation/`: anything in the checksum (`common`, `events`, `history`, `map`) would break multiplayer and achievements.
 
+### Map arrows
+`MapArrows` draws arrows with the game's own map arrow manager, in the supply map's style, tinted, in any map mode; nothing is sent, so other players see nothing. The manager is caught from the game's first arrow in each game (`Ready`). `Make(r, g, b)` gives an arrow to keep for the game, `Draw(arrow, points)` shows it along map positions (`Position(province)`) with its head on the last, `Hide(arrow)` hides it (AutoTrade's trade routes). `Flash(fromId, toId, r, g, b)` shows an arrow between two provinces for about 8 seconds, from a small reused pool, only with `[Debug] AiActionArrows` on: the AI plugins mark what they just did with it. Main thread only.
+
 ## Debugging and hot reload
 - Set `WaitForDebugger = True` in `config\HOI4ModLoader.cfg`, start the game and attach a debugger to `hoi4.exe`: it stops before `Load()`.
 - Rebuilding a plugin with the game running reverts every patch and loads the new DLLs. Plugin state (queues and such) resets. `HotReload = False` turns it off.

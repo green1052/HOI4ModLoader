@@ -133,6 +133,7 @@ On by default: the game's memory allocations use Microsoft's [mimalloc](https://
 - **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins don't load on game versions other than 1.19.3.
 - **UI elements missing or broken:** other mods that replace the same interface files (settings window, main menu, construction tab, intelligence agency, army group card) can conflict; the loader's versions win.
 - **Turning a plugin off:** use the Mods tab, or set `Enabled = False` in `config\<plugin id>.cfg`.
+- **What do FrontLine and AI Assist do?** `[Debug] AiActionArrows = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` flashes an arrow on the map for a few seconds for each front line action they take (encirclements, breakouts, assaults, holes filled). Arrows show once the game has drawn one of its own (select a unit or open a map mode with arrows).
 
 ## Development
 See [docs/development.md](docs/development.md) for building and writing plugins.

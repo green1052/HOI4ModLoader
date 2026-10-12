@@ -64,10 +64,14 @@ public static unsafe class Game
     /// </summary>
     public static int Generation { get; private set; }
 
+    /// <summary>Counts game starts (a save loaded, a new game): each has a new map.</summary>
+    internal static int Starts { get; private set; }
+
     internal static void Track()
     {
         var now = (HasStarted, ControlledTag);
         if (now == _seen) return;
+        if (now.HasStarted && !_seen.Started) Starts++;
         _seen = now;
         Generation++;
     }
