@@ -1,6 +1,9 @@
-// Start-up profiler: with HOI4ModLoader\profile-startup present, samples where every game thread is (its instruction pointer)
-// once a millisecond for the first 150 s and writes HOI4ModLoader\startup-profile.txt: the most sampled addresses, as
-// "module+offset count". The game's own load (assets, databases, map) is ~93% of start-up: this says where it goes.
+// Profiler. HOI4ModLoader\profile-startup present: the first 150 s from the exe's entry point go to startup-profile.txt;
+// afterwards, creating HOI4ModLoader\profile-now profiles the next 60 s (in game, at the speed to look at) into
+// profile-<tick>.txt. Every game thread is sampled once a millisecond: its instruction pointer, and its call stack unwound
+// through hoi4.exe and the system modules. The report lists, per thread, how much of the time it ran and what it waited in,
+// the hoi4.exe functions on the stacks of running samples (inclusive: a function and what it calls), and, for the main
+// thread, the hoi4.exe function each wait is called from (what the frame or the load waits for).
 // While a thread is suspended nothing here allocates or takes a lock (it may hold the heap's).
 #include <windows.h>
 #include <tlhelp32.h>
@@ -13,60 +16,133 @@
 
 namespace {
 
-constexpr DWORD kDurationMs = 150000, kThreadsEveryMs = 200;
-constexpr size_t kSlots = 1 << 20; // open addressing; a full table only drops new addresses
+constexpr DWORD kStartupMs = 150000, kOnDemandMs = 60000, kThreadsEveryMs = 200;
+constexpr size_t kSlots = 1 << 18; // per table; open addressing, a full table only drops new keys
+constexpr int kMaxFrames = 48, kMaxThreads = 256;
 
-struct Slot { uint64_t at; uint32_t count; };
-Slot g_slots[kSlots];               // static: no allocation while sampling
-uint64_t g_samples, g_dropped;
-std::wstring g_out;
-DWORD g_self;
-
-void Count(uint64_t at) {
-    g_samples++;
-    for (size_t i = (at * 0x9E3779B97F4A7C15ull) >> 44, probe = 0; probe < 64; i = (i + 1) & (kSlots - 1), probe++) {
-        if (g_slots[i].at == at) { g_slots[i].count++; return; }
-        if (g_slots[i].at == 0) { g_slots[i] = {at, 1}; return; }
+struct Slot { uint64_t key; uint32_t count; };
+struct Table {
+    Slot slots[kSlots];
+    uint64_t dropped;
+    void Add(uint64_t key) {
+        for (size_t i = (key * 0x9E3779B97F4A7C15ull) >> 46, probe = 0; probe < 64; i = (i + 1) & (kSlots - 1), probe++) {
+            if (slots[i].key == key) { slots[i].count++; return; }
+            if (slots[i].key == 0) { slots[i] = {key, 1}; return; }
+        }
+        dropped++;
     }
-    g_dropped++;
+    void Clear() { memset(slots, 0, sizeof slots); dropped = 0; }
+};
+
+Table g_leaf, g_inclusive, g_mainWaits; // leaf addresses; hoi4.exe function starts on running stacks; main thread wait callers
+struct ThreadStats { DWORD id; uint64_t samples, waiting; };
+ThreadStats g_threads[kMaxThreads];
+int g_threadCount;
+uint64_t g_samples;
+DWORD g_self, g_main;
+std::wstring g_mods;
+uint8_t *g_exe, *g_exeEnd, *g_ntdll, *g_ntdllEnd;
+
+bool In(uint64_t at, uint8_t* begin, uint8_t* end) { return at >= (uint64_t)begin && at < (uint64_t)end; }
+
+void ModuleRange(const wchar_t* name, uint8_t*& begin, uint8_t*& end) {
+    begin = (uint8_t*)GetModuleHandleW(name);
+    auto nt = (IMAGE_NT_HEADERS*)(begin + ((IMAGE_DOS_HEADER*)begin)->e_lfanew);
+    end = begin + nt->OptionalHeader.SizeOfImage;
 }
 
-void Write() {
-    std::vector<Slot> hits;
-    for (auto& s : g_slots) if (s.at) hits.push_back(s);
-    std::sort(hits.begin(), hits.end(), [](const Slot& a, const Slot& b) { return a.count > b.count; });
-    std::string text = "samples " + std::to_string(g_samples) + ", dropped " + std::to_string(g_dropped) + "\r\n";
-    wchar_t path[MAX_PATH];
-    for (size_t i = 0; i < hits.size() && i < 3000; i++) {
-        HMODULE m = nullptr;
-        char line[MAX_PATH + 64];
-        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)hits[i].at, &m)
-            && GetModuleFileNameW(m, path, MAX_PATH)) {
-            const wchar_t* name = wcsrchr(path, L'\\');
-            name = name ? name + 1 : path;
-            char narrow[MAX_PATH];
-            WideCharToMultiByte(CP_UTF8, 0, name, -1, narrow, sizeof narrow, nullptr, nullptr);
-            sprintf_s(line, "%s+0x%llx %u\r\n", narrow, (unsigned long long)(hits[i].at - (uint64_t)m), hits[i].count);
-        } else {
-            sprintf_s(line, "0x%llx %u\r\n", (unsigned long long)hits[i].at, hits[i].count);
+ThreadStats& Stats(DWORD id) {
+    for (int i = 0; i < g_threadCount; i++) if (g_threads[i].id == id) return g_threads[i];
+    if (g_threadCount < kMaxThreads) { g_threads[g_threadCount] = {id, 0, 0}; return g_threads[g_threadCount++]; }
+    return g_threads[kMaxThreads - 1];
+}
+
+// One sample of a suspended thread: unwinds its stack from the given context (static .pdata only: frames outside hoi4.exe
+// and the system modules stop the walk, so no JIT callback runs while the thread is suspended).
+void Record(DWORD id, CONTEXT& ctx) {
+    g_samples++;
+    auto& stats = Stats(id);
+    stats.samples++;
+    uint64_t leaf = ctx.Rip;
+    g_leaf.Add(leaf);
+    bool waiting = In(leaf, g_ntdll, g_ntdllEnd); // a system call: a wait, a sleep or file I/O
+    if (waiting) stats.waiting++;
+    uint64_t seen[kMaxFrames];
+    int seenCount = 0;
+    bool mainWaitDone = false;
+    for (int depth = 0; depth < kMaxFrames && ctx.Rip; depth++) {
+        uint64_t image = 0;
+        auto fe = RtlLookupFunctionEntry(ctx.Rip, &image, nullptr);
+        if (In(ctx.Rip, g_exe, g_exeEnd) && fe) {
+            uint64_t begin = image + fe->BeginAddress;
+            if (waiting && id == g_main && !mainWaitDone) { g_mainWaits.Add(begin); mainWaitDone = true; }
+            if (!waiting && std::find(seen, seen + seenCount, begin) == seen + seenCount) { seen[seenCount++] = begin; g_inclusive.Add(begin); }
         }
-        text += line;
+        if (!fe) { // a leaf function (system call stubs): its return address is on top of the stack
+            if (!In(ctx.Rip, g_ntdll, g_ntdllEnd) && !In(ctx.Rip, g_exe, g_exeEnd)) break; // JIT code, a hook stub: stop
+            ctx.Rip = *(uint64_t*)ctx.Rsp;
+            ctx.Rsp += 8;
+            continue;
+        }
+        void* handler;
+        uint64_t frame;
+        RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, fe, &ctx, &handler, &frame, nullptr);
     }
-    HANDLE f = CreateFileW(g_out.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+}
+
+// A bad stack (a thread mid-switch) must not take the game down: the sample is dropped.
+void SafeRecord(DWORD id, CONTEXT& ctx) {
+    __try { Record(id, ctx); }
+    __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+std::string Where(uint64_t at) {
+    HMODULE m = nullptr;
+    wchar_t path[MAX_PATH];
+    char line[MAX_PATH + 32];
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)at, &m) && GetModuleFileNameW(m, path, MAX_PATH)) {
+        const wchar_t* name = wcsrchr(path, L'\\');
+        char narrow[MAX_PATH];
+        WideCharToMultiByte(CP_UTF8, 0, name ? name + 1 : path, -1, narrow, sizeof narrow, nullptr, nullptr);
+        sprintf_s(line, "%s+0x%llx", narrow, (unsigned long long)(at - (uint64_t)m));
+    } else sprintf_s(line, "0x%llx", (unsigned long long)at);
+    return line;
+}
+
+void Section(std::string& text, const char* title, Table& table, size_t top) {
+    std::vector<Slot> hits;
+    for (auto& s : table.slots) if (s.key) hits.push_back(s);
+    std::sort(hits.begin(), hits.end(), [](const Slot& a, const Slot& b) { return a.count > b.count; });
+    text += std::string("== ") + title + " (dropped " + std::to_string(table.dropped) + ")\r\n";
+    for (size_t i = 0; i < hits.size() && i < top; i++) text += Where(hits[i].key) + " " + std::to_string(hits[i].count) + "\r\n";
+}
+
+void Write(const std::wstring& out, DWORD ms) {
+    std::string text = "samples " + std::to_string(g_samples) + " over " + std::to_string(ms) + " ms, about 1 per thread per ms\r\n";
+    std::sort(g_threads, g_threads + g_threadCount, [](const ThreadStats& a, const ThreadStats& b) { return a.samples - a.waiting > b.samples - b.waiting; });
+    text += "== threads (id: running / sampled)\r\n";
+    for (int i = 0; i < g_threadCount; i++)
+        text += std::to_string(g_threads[i].id) + (g_threads[i].id == g_main ? " (main)" : "") + ": "
+              + std::to_string(g_threads[i].samples - g_threads[i].waiting) + " / " + std::to_string(g_threads[i].samples) + "\r\n";
+    Section(text, "hoi4.exe functions on running stacks (inclusive)", g_inclusive, 400);
+    Section(text, "main thread waits, by the hoi4.exe function they are called from", g_mainWaits, 100);
+    Section(text, "leaf addresses", g_leaf, 300);
+    HANDLE f = CreateFileW(out.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
     if (f == INVALID_HANDLE_VALUE) return;
     DWORD written;
     WriteFile(f, text.data(), (DWORD)text.size(), &written, nullptr);
     CloseHandle(f);
 }
 
-DWORD WINAPI Sample(void*) {
-    timeBeginPeriod(1);
+void Profile(DWORD ms, const std::wstring& out) {
+    g_leaf.Clear(), g_inclusive.Clear(), g_mainWaits.Clear();
+    g_threadCount = 0, g_samples = 0;
     std::vector<HANDLE> threads;
     std::vector<DWORD> ids;
     alignas(16) static CONTEXT context;
     DWORD start = GetTickCount(), listed = 0;
-    while (GetTickCount() - start < kDurationMs) {
-        if (GetTickCount() - listed >= kThreadsEveryMs) { // new threads come and go during load; nothing is suspended here
+    while (GetTickCount() - start < ms) {
+        if (GetTickCount() - listed >= kThreadsEveryMs) { // threads come and go; nothing is suspended here
             listed = GetTickCount();
             HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             THREADENTRY32 te{sizeof te};
@@ -78,27 +154,34 @@ DWORD WINAPI Sample(void*) {
             }
             CloseHandle(snap);
         }
-        for (HANDLE h : threads) {
-            if (SuspendThread(h) == (DWORD)-1) continue; // exited
-            context.ContextFlags = CONTEXT_CONTROL;
-            uint64_t at = GetThreadContext(h, &context) ? context.Rip : 0;
-            ResumeThread(h);
-            if (at) Count(at);
+        for (size_t i = 0; i < threads.size(); i++) {
+            if (SuspendThread(threads[i]) == (DWORD)-1) continue; // exited
+            context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+            if (GetThreadContext(threads[i], &context)) SafeRecord(ids[i], context);
+            ResumeThread(threads[i]);
         }
         Sleep(1);
     }
     for (HANDLE h : threads) CloseHandle(h);
-    timeEndPeriod(1);
-    Write();
-    return 0;
+    Write(out, ms);
+}
+
+DWORD WINAPI Run(void* startup) {
+    timeBeginPeriod(1);
+    ModuleRange(nullptr, g_exe, g_exeEnd);
+    ModuleRange(L"ntdll.dll", g_ntdll, g_ntdllEnd);
+    if (startup) Profile(kStartupMs, g_mods + L"\\startup-profile.txt");
+    for (std::wstring trigger = g_mods + L"\\profile-now";; Sleep(1000)) // on demand, for the rest of the run
+        if (DeleteFileW(trigger.c_str())) Profile(kOnDemandMs, g_mods + L"\\profile-" + std::to_wstring(GetTickCount64()) + L".txt");
 }
 
 } // namespace
 
-// Starts the sampler if HOI4ModLoader\profile-startup exists. Called first thing at the exe's entry point.
+// Called first thing at the exe's entry point, on the main thread.
 void StartProfiler(const std::wstring& mods) {
-    if (GetFileAttributesW((mods + L"\\profile-startup").c_str()) == INVALID_FILE_ATTRIBUTES) return;
-    g_out = mods + L"\\startup-profile.txt";
-    HANDLE t = CreateThread(nullptr, 0, Sample, nullptr, 0, &g_self);
+    g_mods = mods;
+    g_main = GetCurrentThreadId();
+    bool startup = GetFileAttributesW((mods + L"\\profile-startup").c_str()) != INVALID_FILE_ATTRIBUTES;
+    HANDLE t = CreateThread(nullptr, 0, Run, startup ? (void*)1 : nullptr, 0, &g_self);
     if (t) CloseHandle(t);
 }
