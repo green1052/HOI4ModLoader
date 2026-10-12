@@ -3,7 +3,7 @@
 ## Layout
 | Path | What |
 |---|---|
-| `bootstrap/` | `version.dll` proxy (C++). Starts .NET 10 just before the game's entry point; also holds the mimalloc glue (`allocator.c`). |
+| `bootstrap/` | `version.dll` proxy: C# compiled with Native AOT (`Boot.cs`: boots .NET 10 through hostfxr just before the game's entry point; the profiler and start-up prefetch) linked with C for what runs on the game's threads (`native.c`: the export forwarders, the entry point hook and the crash handler; the profiler's sampling, the prefetch's file recorder and the mimalloc glue, `allocator.c`). |
 | `HOI4ModLoader/` | The core: plugin loading, patch API, signature scanning, config, logging, game structures, the settings window's Mods tab, the main menu version label. |
 | `plugins/<name>/` | One plugin per folder. |
 | `plugins/<name>/gui/` | (optional) GUI snippets for `[assembly: GuiPatch]`, embedded in the DLL. |
@@ -18,7 +18,7 @@ dotnet build
 ```
 - Every build deploys into the game folder (found through Steam's registry entry, or `-p:HOI4Dir=`).
 - With the game running, plugins hot reload; locked core files only warn.
-- `bootstrap` is built with the Visual Studio C++ tools when its sources change.
+- `bootstrap` is published (`dotnet publish bootstrap`, Native AOT) when its sources change; it needs the Visual Studio C++ tools for the C compiler and the linker.
 - mimalloc is Microsoft's official release (version and SHA-256 pinned), downloaded at build time; it isn't in the repository.
 
 A release folder (`out\`, relative to the repository). Release builds leave out the `.pdb` symbols (`-p:DeploySymbols=true` keeps them):

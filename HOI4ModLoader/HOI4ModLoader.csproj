@@ -16,31 +16,22 @@
     </ItemGroup>
 
     <ItemGroup>
-        <BootstrapSource Include="..\bootstrap\*.cpp;..\bootstrap\*.c;..\bootstrap\*.vcxproj" />
+        <BootstrapSource Include="..\bootstrap\*.c;..\bootstrap\*.cs;..\bootstrap\Bootstrap.csproj" />
         <None Include="@(BootstrapSource)" LinkBase="bootstrap" />
     </ItemGroup>
 
     <!--
-      bootstrap\ (C++ version.dll) needs the MSBuild from Visual Studio / Build Tools with the C++ workload, which can't
-      build SDK-style projects (and vice versa), so it isn't in the .slnx: this project builds it when its sources change.
+      bootstrap\ (version.dll: Native AOT C# plus C) is published, not built, so it isn't in the .slnx: this project
+      publishes it when its sources change. It needs the Visual Studio C++ build tools (the linker and the C compiler).
     -->
     <PropertyGroup>
-        <BootstrapDll>$(MSBuildThisFileDirectory)..\bootstrap\bin\Release\version.dll</BootstrapDll>
+        <BootstrapDll>$(MSBuildThisFileDirectory)..\bootstrap\bin\publish\version.dll</BootstrapDll>
     </PropertyGroup>
     <Target Name="BuildBootstrap" BeforeTargets="Build" Inputs="@(BootstrapSource)" Outputs="$(BootstrapDll)">
-        <PropertyGroup>
-            <_VsWhere>$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe</_VsWhere>
-        </PropertyGroup>
-        <Exec Condition="Exists('$(_VsWhere)')" Command="&quot;$(_VsWhere)&quot; -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find MSBuild\**\Bin\MSBuild.exe"
-              ConsoleToMSBuild="true" StandardOutputImportance="low" ContinueOnError="true">
-            <Output TaskParameter="ConsoleOutput" PropertyName="_VcMSBuild" />
-        </Exec>
-        <Warning Condition="'$(_VcMSBuild)' == ''" Text="Visual Studio C++ build tools not found: bootstrap\ (version.dll) was not rebuilt." />
-        <!-- Clear the variables `dotnet build` exports, or the C++ MSBuild resolves the .NET SDK's targets instead of its own. -->
-        <Exec Condition="'$(_VcMSBuild)' != ''"
-              Command="set MSBuildSDKsPath=&amp; set MSBuildExtensionsPath=&amp; set MSBUILD_EXE_PATH=&amp; set MSBuildLoadMicrosoftTargetsReadOnly=&amp; &quot;$(_VcMSBuild)&quot; &quot;..\bootstrap\bootstrap.vcxproj&quot; -nologo -v:m -p:Configuration=Release -p:Platform=x64" />
-        <!-- The C++ build may find nothing to relink (e.g. a comment changed): mark the output current, or this runs every build. -->
-        <Touch Condition="'$(_VcMSBuild)' != '' And Exists('$(BootstrapDll)')" Files="$(BootstrapDll)" />
+        <Warning Condition="!Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe')" Text="Visual Studio C++ build tools not found: bootstrap\ (version.dll) was not rebuilt." />
+        <Exec Condition="Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe')" Command="dotnet publish &quot;..\bootstrap\Bootstrap.csproj&quot; -nologo -v:m" />
+        <!-- The publish may find nothing to relink (e.g. a comment changed): mark the output current, or this runs every build. -->
+        <Touch Condition="Exists('$(BootstrapDll)')" Files="$(BootstrapDll)" />
     </Target>
 
 

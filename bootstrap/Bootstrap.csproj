@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      version.dll: C# compiled ahead of time (Native AOT) plus the C in native.c, profiler.c, prefetch.c and allocator.c,
+      linked into one DLL. `dotnet publish` builds it (HOI4ModLoader.csproj does when these sources change); it needs the
+      Visual Studio C++ build tools, for the linker and the C compiler. Not in the .slnx: a plain build doesn't make it.
+    -->
+    <PropertyGroup>
+        <AssemblyName>version</AssemblyName>
+        <RootNamespace>HOI4ModLoader.Bootstrap</RootNamespace>
+        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+        <PublishAot>true</PublishAot>
+        <NativeLib>Shared</NativeLib>
+        <PublishDir>$(MSBuildThisFileDirectory)bin\publish\</PublishDir>
+        <!-- No ICU, no background GC thread: it only boots .NET and does a little file work. -->
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <NativeSource Include="*.c" />
+        <NativeObject Include="@(NativeSource->'$(MSBuildProjectDirectory)\$(IntermediateOutputPath)native\%(Filename).obj')" />
+        <!-- Linked in whole (allocator.c's exports are only reached at run time) and called directly, not through LoadLibrary. -->
+        <NativeLibrary Include="@(NativeObject)" />
+        <DirectPInvoke Include="native" />
+        <!-- NativeAOT brings its own DllMain: native.c's entry point wraps the CRT's and then hooks hoi4.exe's. -->
+        <LinkerArg Include="/ENTRY:hm_entry" />
+    </ItemGroup>
+
+    <!--
+      VS 18's vcvarsall runs vswhere.exe from PATH, and where the Installer folder isn't on it the error it prints lands in
+      front of the linker's folder NativeAOT reads from its output ("...;C:\...\x64\"): keep only the folder.
+    -->
+    <Target Name="FixCppToolsDirectory" AfterTargets="SetupOSSpecificProps" Condition="$(_CppToolsDirectory.Contains(';'))">
+        <PropertyGroup>
+            <_CppToolsDirectory>$([System.Text.RegularExpressions.Regex]::Replace('$(_CppToolsDirectory)', '^.*;', ''))</_CppToolsDirectory>
+            <CppLinker>$(_CppToolsDirectory)link.exe</CppLinker>
+            <CppLibCreator>$(_CppToolsDirectory)lib.exe</CppLibCreator>
+        </PropertyGroup>
+    </Target>
+
+    <Target Name="CompileNative" BeforeTargets="LinkNative" Inputs="@(NativeSource)" Outputs="@(NativeObject)">
+        <PropertyGroup>
+            <_VsWhere>$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe</_VsWhere>
+            <_NativeOut>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)native\</_NativeOut>
+        </PropertyGroup>
+        <Exec Condition="Exists('$(_VsWhere)')" Command="&quot;$(_VsWhere)&quot; -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath"
+              ConsoleToMSBuild="true" StandardOutputImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="_VsInstall" />
+        </Exec>
+        <Error Condition="'$(_VsInstall)' == ''" Text="Visual Studio C++ build tools not found (needed for version.dll)." />
+        <MakeDir Directories="$(_NativeOut)" />
+        <!-- /MT: the static C runtime, as NativeAOT links it. -->
+        <Exec Command="call &quot;$(_VsInstall)\VC\Auxiliary\Build\vcvars64.bat&quot; &gt;nul &amp;&amp; cl /nologo /c /O2 /MT /W3 @(NativeSource->'&quot;%(FullPath)&quot;', ' ')" WorkingDirectory="$(_NativeOut)" />
+    </Target>
+
+</Project>
