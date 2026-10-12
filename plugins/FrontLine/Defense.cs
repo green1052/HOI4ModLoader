@@ -23,7 +23,7 @@ public unsafe partial class FrontLine
         foreach (var unit in units)
         {
             var location = Division.Location(unit);
-            if (location == 0 || walked.Contains(Game.Id(location)) || !Friendly(country, tag, location)) continue;
+            if (location == 0 || walked.Contains(Game.Id(location)) || !Friendly(country, tag, location) || !LowSupply(unit)) continue; // a pocket breaks out only when mostly unsupplied (below)
             var region = Province.Region(location, MaxCutOff, p => Friendly(country, tag, p), walked);
             if (region == null) continue; // part of the main body
             if (region.Any(p => Game.Neighbours(p).Any(n => Game.Province(n) is var q && q != 0 && Province.Controller(q) == 0)))
@@ -35,11 +35,12 @@ public unsafe partial class FrontLine
             var inside = region.ToHashSet();
             var trapped = units.Where(u => Division.Location(u) is var l && l != 0 && inside.Contains(l)).ToList();
             if (trapped.Count(LowSupply) * 2 <= trapped.Count) continue; // still supplied: it holds (attacking out daily left it bare)
-            var breakers = trapped.Where(u => Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= BreakoutOrg).ToList();
+            var breakers = trapped.Where(u => Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= BreakoutOrg
+                                              && !(_held.TryGetValue(u, out var job) && job.Job == Job.Operation)).ToList(); // an operation keeps its own
             if (breakers.Count == 0) continue;
             foreach (var breaker in breakers)
             {
-                _held.Remove(breaker); // whatever it was doing for us
+                if (_held.TryGetValue(breaker, out var held)) _held[breaker] = held with { Job = Job.Done }; // whatever it was doing: back on its order afterwards (Return)
                 Arrow(breaker, Game.Id(target), "breakout", (0, 220, 255));
                 Commands.Move(breaker, Game.Id(target), _force);
                 _pending[breaker] = _now + PendingMs;

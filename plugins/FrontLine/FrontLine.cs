@@ -77,6 +77,7 @@ public unsafe partial class FrontLine : Plugin
     }
 
     private readonly Dictionary<int, Side> _sides = [];                     // tag -> its bookkeeping
+    private readonly Dictionary<int, int> _aiTurnHour = [];                 // AI tag -> the game hour of its last turn
     // The turn's country's (Begin):
     private Dictionary<nint, long> _pending = [];                             // unit -> until
     private Dictionary<nint, Held> _held = [];                               // every division we took for a job: one bookkeeping, so no feature takes another's
@@ -154,6 +155,8 @@ public unsafe partial class FrontLine : Plugin
         {
             _sides.Clear(); // Begin swaps a new side in
             _breakouts.Clear();
+            _aiTurnHour.Clear();
+            _lured.Clear();
             _orders.Clear();
             _operations.Clear();
             _opOrdered.Clear();
@@ -257,11 +260,15 @@ public unsafe partial class FrontLine : Plugin
         {
             var countries = Game.Countries.ToArray();
             var started = Environment.TickCount64;
+            var hour = Game.Hour;
             for (var n = 0; n < countries.Length && Environment.TickCount64 - started < AiBudgetMs; n++)
             {
                 _nextAi = (_nextAi + 1) % countries.Length;
                 var tag = countries[_nextAi] == 0 ? 0 : Game.Tag(countries[_nextAi]);
-                if (tag > 0 && tag != player) Turn(tag);
+                // Once a game hour: combat, supply and control change hourly, so a second turn (paused, or a fast round robin) redid the same work.
+                if (tag <= 0 || tag == player || _aiTurnHour.TryGetValue(tag, out var last) && last == hour) continue;
+                _aiTurnHour[tag] = hour;
+                Turn(tag);
             }
         }
         Jobs.Set(Info.Id, _sides.Values.SelectMany(s => s.Held.Keys));
@@ -429,7 +436,7 @@ public unsafe partial class FrontLine : Plugin
     {
         var shoulders = Game.Neighbours(province).Select(Game.Province)
             .Where(p => p != 0 && Province.Controller(p) == tag && Province.NextToEnemy(country, tag, p)).ToList();
-        if (shoulders.Count < 2 || shoulders.Any(p => _losingNow.ContainsKey(p) || !Province.Units(p).ToArray().Any(u => Division.Commander(u) == tag))) return false;
+        if (shoulders.Count < 2 || shoulders.Any(p => _losingNow.ContainsKey(p) || !Province.Units(p).ToArray().Any(u => u != 0 && Division.Commander(u) == tag))) return false;
         var attackers = Game.Neighbours(province).Select(Game.Province).Where(p => p != 0 && Province.Enemy(country, tag, p)).Sum(Province.Divisions);
         var reserves = 0;
         var seen = new HashSet<nint> { province };
@@ -481,10 +488,11 @@ public unsafe partial class FrontLine : Plugin
     /// <summary>The pool's division closest to <paramref name="target"/> (breadth first over our provinces), taken out of the pool; 0 if none in reach.</summary>
     private static nint Take(int tag, nint target, int radius, Dictionary<nint, List<nint>> pool)
     {
-        var at = Search(tag, target, radius, (p, _) => pool.TryGetValue(p, out var here) && here.Count > 0);
+        if (pool.Count == 0) return 0; // nothing to take: no search of the whole radius (stretched AIs, every turn)
+        var at = Search(tag, target, radius, (p, _) => pool.ContainsKey(p));
         if (at == 0) return 0;
         var unit = pool[at].MaxBy(Org);
-        pool[at].Remove(unit);
+        if (pool[at].Remove(unit) && pool[at].Count == 0) pool.Remove(at);
         return unit;
     }
 

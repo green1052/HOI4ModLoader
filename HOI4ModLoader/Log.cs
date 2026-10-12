@@ -7,6 +7,7 @@ public sealed class Logger(string source)
 {
     private static readonly string Path = System.IO.Path.Combine(Loader.ModsDir, "LogOutput.log");
     private static readonly Lock Gate = new();
+    private static StreamWriter? _writer; // kept open: opening the file per line cost every logged AI move a file open and close
 
     private readonly HashSet<string> _failed = [];
 
@@ -30,7 +31,11 @@ public sealed class Logger(string source)
     {
         try
         {
-            lock (Gate) File.AppendAllText(Path, $"{DateTime.Now:HH:mm:ss.fff} {level} [{source}] {message}{Environment.NewLine}");
+            lock (Gate)
+            {
+                _writer ??= new StreamWriter(new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { AutoFlush = true };
+                _writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {level} [{source}] {message}");
+            }
         }
         catch (IOException) { } // a locked or read-only log must not take the game down
     }
@@ -39,7 +44,12 @@ public sealed class Logger(string source)
     {
         try
         {
-            lock (Gate) File.WriteAllText(Path, "");
+            lock (Gate)
+            {
+                _writer?.Dispose();
+                _writer = null;
+                File.WriteAllText(Path, "");
+            }
         }
         catch (IOException) { }
     }
