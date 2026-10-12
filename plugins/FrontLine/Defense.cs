@@ -11,8 +11,8 @@ public unsafe partial class FrontLine
     private readonly Dictionary<int, int> _breakouts = []; // pocket (its lowest province id) -> game hour of its last breakout
 
     /// <summary>
-    /// Our divisions in ground of ours (and allies') cut off from the rest by land and sea, up to MaxCutOff provinces, with
-    /// friendly lines within MaxBreakoutDistance provinces: once a day, all of them with some organisation attack the enemy province that starts the
+    /// Our divisions in ground of ours (and allies') cut off from the rest by land and sea, up to MaxCutOff provinces, most of
+    /// them out of supply, with friendly lines within MaxBreakoutDistance provinces: once a day, all of them with some organisation attack the enemy province that starts the
     /// shortest way out. Pockets far from any friendly ground (overseas colonies) are left alone.
     /// </summary>
     private void Breakout(nint country, int tag, nint[] units)
@@ -33,7 +33,9 @@ public unsafe partial class FrontLine
             var target = WayOut(country, tag, region);
             if (target == 0) continue; // nothing friendly near: an overseas holding, not a pocket
             var inside = region.ToHashSet();
-            var breakers = units.Where(u => Division.Location(u) is var l && l != 0 && inside.Contains(l) && Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= BreakoutOrg).ToList();
+            var trapped = units.Where(u => Division.Location(u) is var l && l != 0 && inside.Contains(l)).ToList();
+            if (trapped.Count(LowSupply) * 2 <= trapped.Count) continue; // still supplied: it holds (attacking out daily left it bare)
+            var breakers = trapped.Where(u => Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= BreakoutOrg).ToList();
             if (breakers.Count == 0) continue;
             foreach (var breaker in breakers)
             {
@@ -46,6 +48,10 @@ public unsafe partial class FrontLine
             Log.Info($"breakout: {breakers.Count} division(s) cut off in {region.Count} province(s) attack toward friendly lines");
         }
     }
+
+    private const int IsLowSupplySlot = 43; // CArmy vtable: the low supply flag the unit icon shows
+
+    private static bool LowSupply(nint unit) => ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) != 0;
 
     /// <summary>The enemy province next to the pocket on the shortest land way to friendly ground outside it (fewest enemy divisions on a tie), or 0.</summary>
     private nint WayOut(nint country, int tag, List<nint> region)
