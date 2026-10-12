@@ -201,10 +201,13 @@ static std::wstring FindHostFxr(const std::wstring& root) {
     return bestDir.empty() ? L"" : root + L"\\host\\fxr\\" + bestDir + L"\\hostfxr.dll";
 }
 
+void StartProfiler(const std::wstring& mods); // profiler.cpp
+
 static void BootDotnet() {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring mods = std::wstring(exe, wcsrchr(exe, L'\\')) + L"\\HOI4ModLoader";
+    StartProfiler(mods); // before anything else, so it sees the whole start-up
     OpenCrashLog(mods);
 
     // The .NET 10 Runtime (x64) the player installed, where its installer puts it.

@@ -38,6 +38,7 @@
     <ItemGroup>
         <ClCompile Include="bootstrap.cpp" />
         <ClCompile Include="allocator.c" />
+        <ClCompile Include="profiler.cpp" />
     </ItemGroup>
     <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 
