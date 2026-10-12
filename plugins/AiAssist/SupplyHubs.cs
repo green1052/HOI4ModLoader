@@ -4,10 +4,10 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Supply hubs: a new hub where AI divisions starve with none near, late in the game and for a rich country only ----
+    // ---- Supply hubs: the railway to the hub feeding starving AI divisions, and a new hub where none is near (late, rich only) ----
     //
     // A hub costs 20000 (a railway level 170 + 130 a province): early on, or with few civilian factories, that money is better
-    // spent elsewhere, and the railways of the hubs it has are what vanilla upgrades.
+    // spent elsewhere. A railway level is cheap, so the feeding hub's railway to the capital is upgraded first, whatever the year.
     //
     // The interior minister already upgrades saturated hubs' railways and links cut-off hubs weekly; it never builds a new hub.
     // Ported from AutoConstruction's AutoSupply (BuildHub, FeedingNode), same layouts (HOI4 1.19.3); its railway rules are vanilla's here.
@@ -20,6 +20,11 @@ public unsafe partial class AiAssist
     private const int IsLowSupplySlot = 43; // CArmy vtable
     private const int HubDistance = 3, HubCheckHours = 7 * 24, HubsPerMonth = 2, MonthHours = 30 * 24, StarvingTried = 5;
     private const int HubYear = 1941, HubCivilianFactories = 60;
+    private const int MaxRailway = 5, RailwayCooldownHours = 60 * 24;
+
+    private static delegate* unmanaged<nint, int*, int, byte, byte> _buildRailway;
+    private static int _railways;
+    private static readonly Dictionary<(int Tag, int Node), int> RailwayPlans = []; // (tag, feeding node province) -> hour its railway was upgraded (main thread)
 
     private static delegate* unmanaged<nint, nint, int> _freeLevels;
     private static delegate* unmanaged<nint, nint, nint, byte, byte> _canBuildInProvince;
@@ -30,11 +35,15 @@ public unsafe partial class AiAssist
     {
         _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(AiSignatures2.FreeLevels);
         _canBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(AiSignatures2.CanBuildInProvince);
+        _buildRailway = (delegate* unmanaged<nint, int*, int, byte, byte>)Sig.Find(AiSignatures2.BuildRailway);
         _ = Sig.VTable(AiSignatures2.ConstructionCommand) + Sig.VTable(AiSignatures2.BuildingReference) + Sig.VTable(AiSignatures2.BuildingLine);
         MainThread.Every(TimeSpan.FromSeconds(10), SupplyHubs);
     }
 
-    /// <summary>Per AI country, every week of game time: up to <see cref="HubsPerMonth"/> new hubs a month where its divisions starve.</summary>
+    /// <summary>
+    /// Per AI country, every week of game time: a railway level toward the capital for the hub feeding its starving divisions,
+    /// and up to <see cref="HubsPerMonth"/> new hubs a month where they starve with none near.
+    /// </summary>
     private void SupplyHubs()
     {
         if (!Game.HasStarted || !SheepMod.Active) return;
@@ -42,6 +51,7 @@ public unsafe partial class AiAssist
         if (_hubWorld != Game.Generation)
         {
             HubPlans.Clear(); // tags only, but the old game's schedule
+            RailwayPlans.Clear();
             _hubWorld = Game.Generation;
         }
         var supply = Game.Supply;
@@ -52,7 +62,7 @@ public unsafe partial class AiAssist
         var year = Game.Year;
         if (_hubWorld != _yearLogged) Log.Info($"supply hubs: the game's year reads {year} (built from {HubYear}, by countries with {HubCivilianFactories}+ civilian factories)");
         _yearLogged = _hubWorld;
-        if (year is > 1900 and < HubYear) return; // not late enough (a date that makes no sense: the factories alone decide)
+        var hubYear = year is <= 1900 or >= HubYear; // earlier: railways only (a date that makes no sense: the factories alone decide)
         Dictionary<int, int>? civilian = null;
         foreach (var country in Game.Countries)
         {
@@ -63,12 +73,15 @@ public unsafe partial class AiAssist
             var queued = plan.Queued ?? [];
             queued.RemoveAll(h => hour - h is < 0 or >= MonthHours);
             HubPlans[tag] = (hour + HubCheckHours, queued);
-            if (queued.Count >= HubsPerMonth) continue;
-            civilian ??= CivilianFactories();
-            if (civilian.GetValueOrDefault(tag) < HubCivilianFactories) continue;
             var countrySupply = *(nint*)(networks + 8 * Game.TagIndex(tag));
             var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);
-            if (network != 0 && NewHub(country, tag, network, type)) queued.Add(hour);
+            var starving = network == 0 ? [] : Starving(country);
+            if (starving.Count == 0) continue;
+            UpgradeRailway(country, tag, network, starving, hour);
+            if (!hubYear || queued.Count >= HubsPerMonth) continue;
+            civilian ??= CivilianFactories();
+            if (civilian.GetValueOrDefault(tag) < HubCivilianFactories) continue;
+            if (NewHub(country, tag, network, type, starving)) queued.Add(hour);
         }
     }
 
@@ -94,17 +107,85 @@ public unsafe partial class AiAssist
         return civilian;
     }
 
-    /// <summary>A hub for the worst-starving area of the country that has none within <see cref="HubDistance"/> provinces.</summary>
-    private static bool NewHub(nint country, int tag, nint network, nint type)
+    /// <summary>Province -> the country's land divisions low on supply there.</summary>
+    private static Dictionary<nint, int> Starving(nint country)
     {
-        var starving = new Dictionary<nint, int>(); // province -> divisions low on supply there
+        var starving = new Dictionary<nint, int>();
         foreach (var unit in Game.Units(country))
         {
             if (unit == 0 || !Division.IsLand(unit) || ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) == 0) continue;
             var province = Division.Location(unit);
             if (province != 0) starving[province] = starving.GetValueOrDefault(province) + 1;
         }
-        if (starving.Count == 0) return false;
+        return starving;
+    }
+
+    /// <summary>
+    /// One railway level more (the AI's own builder) on the railway from the hub feeding the worst-starving area to the capital
+    /// state, where it isn't at the top level yet; one a check, and a hub's railway at most every <see cref="RailwayCooldownHours"/> hours.
+    /// </summary>
+    private static void UpgradeRailway(nint country, int tag, nint network, Dictionary<nint, int> starving, int hour)
+    {
+        var capital = *(int*)(country + CapitalOfCountry); // a state id
+        foreach (var (province, _) in starving.OrderByDescending(s => s.Value).Take(StarvingTried))
+        {
+            var feeding = FeedingNodeProvince(network, Game.Id(province), Game.TagIndex(tag));
+            if (feeding < 0 || RailwayPlans.TryGetValue((tag, feeding), out var last) && hour - last is >= 0 and < RailwayCooldownHours) continue;
+            var path = RailwayToCapital(feeding, tag, capital, out var lowest);
+            if (path == null || lowest >= MaxRailway) continue; // in the capital state, not linked by our railways, or at the top already
+            RailwayPlans[(tag, feeding)] = hour;
+            // +1 level along the path, mode 2 as the interior minister calls it; it posts the command itself.
+            if (Native.WithPdxArray(path, p => { var t = tag; return _buildRailway(p, &t, 1, 2); }) != 0) Interlocked.Increment(ref _railways);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// The railway (fewest provinces, all controlled by the tag) from the province to the capital state, and its lowest level;
+    /// null when the province is in the capital state or no railway of ours links them.
+    /// </summary>
+    private static int[]? RailwayToCapital(int from, int tag, int capital, out int lowest)
+    {
+        lowest = 0;
+        var railways = *(nint*)(Game.State + RailwaysOfGameState);
+        if (railways == 0 || InState(from, capital)) return null;
+        var back = new Dictionary<int, (int From, int Level)> { [from] = (-1, 0) }; // province -> the one before it and the level between
+        var queue = new Queue<int>([from]);
+        while (queue.TryDequeue(out var id))
+        {
+            var info = *(nint*)(*(nint*)(railways + 8) + 8 * id);
+            if (info == 0) continue;
+            var pairs = *(nint*)(info + RailwayPairs);
+            for (int i = 0, n = *(int*)(info + RailwayPairs + 0xC); i < n; i++)
+            {
+                var (next, level) = (*(int*)(pairs + i * 8), *(int*)(pairs + i * 8 + 4));
+                if (level <= 0 || back.ContainsKey(next) || Game.Province(next) is var p && (p == 0 || Province.Controller(p) != tag)) continue;
+                back[next] = (id, level);
+                if (!InState(next, capital))
+                {
+                    queue.Enqueue(next);
+                    continue;
+                }
+                var path = new List<int>();
+                lowest = MaxRailway;
+                for (var at = next; at != from; at = back[at].From)
+                {
+                    path.Add(at);
+                    lowest = Math.Min(lowest, back[at].Level);
+                }
+                path.Add(from);
+                path.Reverse();
+                return [.. path];
+            }
+        }
+        return null;
+    }
+
+    private static bool InState(int province, int state) => Game.Province(province) is var p && p != 0 && Province.State(p) is var s && s != 0 && State.Id(s) == state;
+
+    /// <summary>A hub for the worst-starving area of the country that has none within <see cref="HubDistance"/> provinces.</summary>
+    private static bool NewHub(nint country, int tag, nint network, nint type, Dictionary<nint, int> starving)
+    {
         var building = QueuedHubStates(country, type);
         foreach (var (province, _) in starving.OrderByDescending(s => s.Value).Take(StarvingTried))
         {

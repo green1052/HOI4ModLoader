@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace AiAssist;
 
-/// <summary>Byte patterns (reverse engineered against HOI4 1.19.3) for railway guns and supply hubs, checked by tests\Signatures.Tests.</summary>
+/// <summary>Byte patterns (reverse engineered against HOI4 1.19.3) for railway guns, supply hubs and railways, checked by tests\Signatures.Tests.</summary>
 public static class AiSignatures2
 {
     /// <summary>
@@ -19,6 +19,13 @@ public static class AiSignatures2
 
     /// <summary>CCountry::CanBuildInProvince(country, province, type, bool) -> bool.</summary>
     [Signature] public const string CanBuildInProvince = "48 8B 82 B8 00 00 00 4D 8B D0 4C 8B C1 F6 80 D2 00 00 00 01";
+
+    /// <summary>
+    /// The AI's railway builder (0x1414E0740), what its interior minister upgrades railways with: (CPdxArray&lt;int&gt;* path, int* tag,
+    /// int levelsToAdd, byte mode) -> bool. Path: province ids, each next to the one before; the target level is the lowest
+    /// (level + levelsToAdd) over its links, at most 5; it posts a CBuildRailwayCommand (a copy of the path) for the tag itself.
+    /// </summary>
+    [Signature] public const string BuildRailway = "4C 8B DC 49 89 5B 10 45 88 4B 20 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 41 0F B6 F1 45 8B F8 4C 8B E2 4C 8B E9 80 3D";
 
     [VTable] public const string ConstructionCommand = "CAddConstructionCommand";
     [VTable] public const string BuildingReference = "CBuildingReference";
