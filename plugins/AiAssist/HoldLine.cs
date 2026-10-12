@@ -46,7 +46,7 @@ public unsafe partial class AiAssist
     private PerGame _game = null!;
     private static int _world = -1; // Game.Generation at the last reset: until it runs after a load, _line points into the old world
     private int _backfillAt = Never;
-    private static int _backfilled, _reserved, _deployed, _returned, _stopped, _depth;
+    private static int _backfilled, _reserved, _deployed, _returned, _stopped, _depth, _kept;
 
     /// <summary>
     /// A division that took up its post only days ago: the theatre shuffle would march it somewhere else and back
@@ -612,6 +612,11 @@ public unsafe partial class AiAssist
             try
             {
                 keep = !_paradrops || KeepsParadrops(cmd);
+                if (keep && _holdLine && Redeploys(cmd))
+                {
+                    keep = false;
+                    Interlocked.Increment(ref _kept);
+                }
                 if (keep && *(nint*)cmd == _executeVTable && *(byte*)(cmd + Commands.ArgOfOrderCommand) != 0 && !Ready(cmd, tag))
                 {
                     keep = false;
@@ -627,6 +632,25 @@ public unsafe partial class AiAssist
             Commands.Free(cmd); // deleted, as the game does with an invalid command
             return 0;
         });
+    }
+
+    private const int UnitOfRedeployment = 0x38; // CStrategicRedeploymentCommand: the division's CRef (1.19.3, seen in game)
+    private static nint _redeployVTable;
+
+    /// <summary>
+    /// A strategic redeployment (to another front, walking to a port and shipping out) of a division its line needs
+    /// (<see cref="Pinned"/>): the last defender of a province next to the enemy, or no more than the enemy divisions next to
+    /// it. Vanilla re-tasks whole armies so, past the front requests and the reassignment filter. AI threads: read only.
+    /// </summary>
+    private static bool Redeploys(nint cmd)
+    {
+        if (_redeployVTable == 0) _redeployVTable = Sig.VTable("CStrategicRedeploymentCommand");
+        if (*(nint*)cmd != _redeployVTable) return false;
+        var unit = Game.Resolve(*(long*)(cmd + UnitOfRedeployment));
+        if (unit == 0 || !Division.IsLand(unit) || !Pinned(unit)) return false;
+        var location = Division.Location(unit);
+        _log?.Info($"#{Division.Commander(unit)}: kept a line defender in province {(location == 0 ? 0 : Game.Id(location))} from a strategic redeployment");
+        return true;
     }
 
     /// <summary>
