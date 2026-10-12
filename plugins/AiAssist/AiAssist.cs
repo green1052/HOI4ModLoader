@@ -49,7 +49,7 @@ public unsafe partial class AiAssist : Plugin
         var refit = Config.Bind("AI", "RefitPriority", true,
             "Reinforcements and new equipment go to the AI's front-line divisions (in combat or next to enemy-held ground) before its rear and garrison divisions.");
         _holdLine = Config.Bind("AI", "HoldTheLine", true,
-            "At war, the AI keeps a division in every province of a front that borders the enemy; its regrouping can't take the last defender of a province next to enemy ground, the divisions walling in a pocket, "
+            "At war, the AI keeps a division in every province of a front that borders the enemy, and as many as the enemy divisions next to it; its regrouping can't take the last defender of a province next to enemy ground (nor one of no more than the enemy divisions next to it), the divisions walling in a pocket, "
             + "a reserve or a division that arrived this week. Free divisions walk back into empty line provinces (ports, victory points, river banks, cities and mountains first), "
             + "the same front's divisions first (one from another front is held there). A country with divisions to spare keeps reserves a province behind its line and a second division behind key line provinces; "
             + "ready reserves counterattack break-ins near them (enemy troops inside, ground lost in the last two days, a landing) and go back to their post. "

@@ -63,7 +63,7 @@ public unsafe partial class AiAssist
 
     /// <summary>The AI's regrouping can't take this division: a reserve, a grad garrison, resting, a new division on its way,
     /// a paratrooper of ours, the last one of its country in a province on the line (next to enemy ground, troops there or not:
-    /// vanilla strips quiet stretches of a front bare), or one on the wall of a pocket (an enemy province with divisions whose
+    /// vanilla strips quiet stretches of a front bare) or one of no more than the enemy divisions next to it, or one on the wall of a pocket (an enemy province with divisions whose
     /// neighbours are all ours). AI threads: read only.</summary>
     private static bool Pinned(nint unit)
     {
@@ -75,17 +75,19 @@ public unsafe partial class AiAssist
         var country = Game.Country(tag);
         var location = Division.Location(unit);
         if (country == 0 || location == 0) return false;
-        var alone = true;
+        var ours = 0;
         foreach (var other in Province.Units(location))
-            if (other != unit && Division.Commander(other) == tag) alone = false;
+            if (Division.Commander(other) == tag) ours++;
+        var facing = 0;
         foreach (var id in Game.Neighbours(location))
         {
             var p = Game.Province(id);
             if (p == 0 || !Province.Enemy(country, tag, p)) continue;
-            if (alone || Province.Divisions(p) > 0 && Province.Surrounded(country, tag, p))
+            if (ours <= 1 || Province.Divisions(p) > 0 && Province.Surrounded(country, tag, p))
                 return true; // nothing else holds the province, or a cut-off pocket sits against it
+            facing += Province.Divisions(p);
         }
-        return false;
+        return ours <= facing; // a line province keeps as many as the enemy divisions next to it
     }
 
     /// <summary>The country's tracked threatened line (refreshed within the last two days) that it still holds, or null. AI threads too.</summary>
