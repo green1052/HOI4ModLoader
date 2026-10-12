@@ -637,20 +637,42 @@ public unsafe partial class AiAssist
     private const int UnitOfRedeployment = 0x38; // CStrategicRedeploymentCommand: the division's CRef (1.19.3, seen in game)
     private static nint _redeployVTable;
 
+    private const int RedeployEnemyRadius = 2; // enemy divisions this close (provinces) make the line a live one
+
     /// <summary>
-    /// A strategic redeployment (to another front, walking to a port and shipping out) of a division its line needs
-    /// (<see cref="Pinned"/>): the last defender of a province next to the enemy, or no more than the enemy divisions next to
-    /// it. Vanilla re-tasks whole armies so, past the front requests and the reassignment filter. AI threads: read only.
+    /// A strategic redeployment (to another front: walking to a port, shipping out) of a division on the line or right behind
+    /// it (a province next to enemy ground, or next to one) while enemy divisions stand within RedeployEnemyRadius: vanilla
+    /// re-tasks whole armies so and empties a live front (Italy's Somali line, Ethiopia across it). Quiet fronts may still
+    /// give theirs. AI threads: read only.
     /// </summary>
     private static bool Redeploys(nint cmd)
     {
         if (_redeployVTable == 0) _redeployVTable = Sig.VTable("CStrategicRedeploymentCommand");
         if (*(nint*)cmd != _redeployVTable) return false;
         var unit = Game.Resolve(*(long*)(cmd + UnitOfRedeployment));
-        if (unit == 0 || !Division.IsLand(unit) || !Pinned(unit)) return false;
+        if (unit == 0 || !Division.IsLand(unit)) return false;
+        var tag = Division.Commander(unit);
+        var country = tag <= 0 || tag == Game.ControlledTag ? 0 : Game.Country(tag);
         var location = Division.Location(unit);
-        _log?.Info($"#{Division.Commander(unit)}: kept a line defender in province {(location == 0 ? 0 : Game.Id(location))} from a strategic redeployment");
+        if (country == 0 || location == 0) return false;
+        var onLine = Province.NextToEnemy(country, tag, location)
+                     || Game.Neighbours(location).Any(id => Game.Province(id) is var p && p != 0 && Province.Controller(p) == tag && Province.NextToEnemy(country, tag, p));
+        if (!onLine || !EnemyDivisionsNear(country, tag, location, RedeployEnemyRadius)) return false;
+        _log?.Info($"#{tag}: kept a division in province {Game.Id(location)} on a live line from a strategic redeployment");
         return true;
+    }
+
+    /// <summary>Enemy divisions stand within <paramref name="radius"/> provinces of <paramref name="from"/>.</summary>
+    private static bool EnemyDivisionsNear(nint country, int tag, nint from, int radius)
+    {
+        var seen = new HashSet<nint> { from };
+        var frontier = new List<nint> { from };
+        for (var depth = 0; depth < radius && frontier.Count > 0; depth++)
+        {
+            frontier = frontier.SelectMany(p => Game.Neighbours(p)).Select(Game.Province).Where(p => p != 0 && seen.Add(p)).ToList();
+            if (frontier.Any(p => Province.Enemy(country, tag, p) && Province.Divisions(p) > 0)) return true;
+        }
+        return false;
     }
 
     /// <summary>
