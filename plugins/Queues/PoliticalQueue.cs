@@ -51,7 +51,7 @@ public static class PoliticalSignatures
 /// <summary>
 /// Political power queue. Shift+click an idea (law, designer, national spirit) in its slot's picker, an advisor (political
 /// advisor, theorist, chief, high command) in the advisor picker, or a decision, to queue/unqueue it; queued entries show
-/// "N. " in front of their name. The first queued entry the game accepts (its own command check, which includes the cost)
+/// a numbered badge (Gui.Number) in front of their name. The first queued entry the game accepts (its own command check, which includes the cost)
 /// is taken with the same command the UI sends, one at a time, so it happens as soon as there's enough political power.
 /// Part of <see cref="Queues"/>, which loads it.
 /// </summary>
@@ -249,7 +249,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
 
     private static bool Same(Entry a, Entry b) => a with { Occupant = 0 } == b with { Occupant = 0 };
 
-    /// <summary>Puts "N. " in front of the name box's text if the entry is queued, and takes an old one off otherwise.</summary>
+    /// <summary>Puts the numbered badge in front of the name box's text if the entry is queued, and takes an old one off otherwise.</summary>
     private void Label(nint box, Entry entry)
     {
         if (box != 0) Gui.Number(box, _queue.FindIndex(e => Same(e, entry)) + 1);

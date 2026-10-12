@@ -42,7 +42,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 
 ### Queues
-**Shift+click** to queue, again to unqueue. Queued items show `N. ` in front of their name.
+**Shift+click** to queue, again to unqueue. Queued items show their position as a gold numbered badge in front of their name (`[31]` and up past 30).
 - **Research, national focus, intelligence agency upgrades:** the first queued item starts as soon as a slot is free.
   - Repeatable agency upgrades queue one more level per click (`1x3`).
   - Unqueueing a focus also unqueues the queued focuses that need it.

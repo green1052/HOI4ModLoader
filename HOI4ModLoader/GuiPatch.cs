@@ -91,6 +91,8 @@ internal static class GameFiles
         {
             Log.Error($"can't clear {Dir}: {e.Message}");
         }
+        try { Gui.WriteNumberIcons(Dir); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"number icons: {e.Message}"); }
         var built = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // file -> text so far: patches of one file stack
         foreach (var assembly in assemblies)
         foreach (var patch in assembly.GetCustomAttributes<GuiPatchAttribute>())

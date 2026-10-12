@@ -59,7 +59,7 @@ public static class Signatures
 /// Research, national focus and intelligence agency upgrade queues. Shift+click a tech, focus or agency upgrade to
 /// queue/unqueue it; whenever a research slot, the focus or the agency is idle, the first queued entry the game accepts
 /// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
-/// "N." on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (added to its GUI below).
+/// a numbered badge (Gui.Number) on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (added to its GUI below).
 /// Entries that can no longer start (researched techs, focuses completed or shut out by a mutually exclusive one, agency
 /// levels done) are dropped. The political power queue (<see cref="PoliticalQueue"/>) comes with it.
 /// </summary>
@@ -104,7 +104,7 @@ public unsafe class Queues : Plugin
     private IHook<NodeStatesFn>? _focusNodeStates;
     private delegate* unmanaged<nint, void> _techViewUpdateAllItems;
     private delegate* unmanaged<nint, nint, byte> _focusCompleted;
-    private readonly HashSet<nint> _numberedFocusItems = []; // focus items whose name has our "N. "
+    private readonly HashSet<nint> _numberedFocusItems = []; // focus items whose name has our badge
     private nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
     private bool _reportedNumberBox;
 
@@ -207,7 +207,7 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>
-    /// Keeps "N. " in front of queued focuses' names (set once by the game when it builds the items), and takes it off
+    /// Keeps the badge in front of queued focuses' names (set once by the game when it builds the items), and takes it off
     /// focuses no longer queued. Runs every frame while the tree is open; SetText only when something changed.
     /// </summary>
     private void LabelFocuses(nint view)

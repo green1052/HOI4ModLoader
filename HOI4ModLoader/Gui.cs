@@ -83,17 +83,91 @@ public static unsafe partial class Gui
     }
 
     /// <summary>
-    /// Puts "N. " (<paramref name="position"/>) in front of the text box's text, replacing an earlier "N. ", or takes it off
-    /// for position 0. Idempotent; sets the text only when it changes.
+    /// Puts <paramref name="position"/> in front of the text box's text as a numbered badge (an inline text icon, see
+    /// <see cref="WriteNumberIcons"/>; "[N] " past the last one), replacing an earlier one, or takes it off for position 0.
+    /// Idempotent; sets the text only when it changes.
     /// </summary>
     public static void Number(nint box, int position)
     {
         var text = Text(box);
-        var digits = 0;
-        while (digits < text.Length && char.IsAsciiDigit((char)text[digits])) digits++;
-        var rest = digits > 0 && text[digits..].StartsWith(". "u8) ? text[(digits + 2)..] : text;
-        byte[] shown = position > 0 ? [.. Encoding.ASCII.GetBytes($"{position}. "), .. rest] : [.. rest];
+        var shown = Numbered(text, position);
         if (!text.SequenceEqual(shown)) SetText(box, shown);
+    }
+
+    /// <summary><paramref name="text"/> with its badge (if any) replaced by <paramref name="position"/>'s (none for 0).</summary>
+    internal static byte[] Numbered(ReadOnlySpan<byte> text, int position)
+    {
+        var rest = text;
+        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith("["u8) ? 1 : 0;
+        if (open > 0)
+        {
+            var end = open;
+            while (end < text.Length && char.IsAsciiDigit((char)text[end])) end++;
+            var close = open == 1 ? "] "u8 : " "u8;
+            if (end > open && text[end..].StartsWith(close)) rest = text[(end + close.Length)..];
+        }
+        return position <= 0 ? [.. rest]
+            : position <= NumberIcons ? [.. NumberIcon, .. Encoding.ASCII.GetBytes($"{position} "), .. rest]
+            : [.. Encoding.ASCII.GetBytes($"[{position}] "), .. rest];
+    }
+
+    // "£hoimod_numbers|": the game's inline sprite syntax (£name|frame, as in vanilla's £resources_strip|3), £ in its encoding.
+    private static readonly byte[] NumberIcon = [0xA3, .. "hoimod_numbers|"u8];
+    private const int NumberIcons = 30, NumberIconSize = 18, NumberIconWidth = 24; // 24 wide: two digits get a pill
+
+    /// <summary>
+    /// interface/hoimod_numbers.gfx and its texture under <paramref name="dir"/> (the game files we mount): frame N is N in
+    /// dark digits on a gold disc, like a circled number; the game's fonts have no ① .. ㉚.
+    /// </summary>
+    internal static void WriteNumberIcons(string dir)
+    {
+        // 3x5 digits, rows top to bottom, drawn at twice their size.
+        string[] glyphs = ["111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001",
+            "111100111001111", "111100111101111", "111001001001001", "111101111101111", "111101111001111"];
+        const int s = NumberIconSize, w = NumberIconWidth, width = w * NumberIcons;
+        const double radius = s / 2.0 - 0.5;
+        var pixels = new byte[width * s * 4]; // BGRA, top row first
+        for (var frame = 0; frame < NumberIcons; frame++)
+        {
+            var digits = (frame + 1).ToString();
+            var text = digits.Length * 8 - 2; // 6 px a digit, 2 between
+            var left = frame * w + (w - text) / 2;
+            var stretch = Math.Max(0, (text + 8 - s) / 2.0); // two digits: a pill, its round ends clear of the digits
+            const int top = (s - 10) / 2;
+            for (var y = 0; y < s; y++)
+            for (var x = 0; x < w; x++)
+            {
+                var inside = 0; // 4x4 samples: an anti-aliased disc (or pill)
+                var rim = 0;
+                for (var sy = 0; sy < 4; sy++)
+                for (var sx = 0; sx < 4; sx++)
+                {
+                    var dx = Math.Max(0, Math.Abs(x + (sx + 0.5) / 4 - w / 2.0) - stretch);
+                    var d = Math.Sqrt(dx * dx + Math.Pow(y + (sy + 0.5) / 4 - s / 2.0, 2));
+                    if (d <= radius) inside++;
+                    if (d > radius - 1.5) rim++;
+                }
+                var px = frame * w + x;
+                var glyph = (px - left) is var gx && gx >= 0 && gx % 8 < 6 && gx / 8 < digits.Length && y - top is >= 0 and < 10
+                    && glyphs[digits[gx / 8] - '0'][(y - top) / 2 * 3 + gx % 8 / 2] == '1';
+                (byte b, byte g, byte r) = glyph ? ((byte)0x1A, (byte)0x1A, (byte)0x1A) : rim > 8 ? ((byte)0x10, (byte)0x6A, (byte)0x9A) : ((byte)0x44, (byte)0xC7, (byte)0xF2);
+                var at = (y * width + px) * 4;
+                (pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]) = (b, g, r, (byte)(inside * 255 / 16));
+            }
+        }
+        // Uncompressed 32-bit TGA, origin top left (descriptor 0x28: 8 alpha bits, top-down rows).
+        var tga = new byte[18 + pixels.Length];
+        tga[2] = 2;
+        BitConverter.GetBytes((ushort)width).CopyTo(tga, 12);
+        BitConverter.GetBytes((ushort)s).CopyTo(tga, 14);
+        tga[16] = 32;
+        tga[17] = 0x28;
+        pixels.CopyTo(tga, 18);
+        Directory.CreateDirectory(Path.Combine(dir, "gfx", "interface"));
+        File.WriteAllBytes(Path.Combine(dir, "gfx", "interface", "hoimod_numbers.tga"), tga);
+        Directory.CreateDirectory(Path.Combine(dir, "interface"));
+        File.WriteAllText(Path.Combine(dir, "interface", "hoimod_numbers.gfx"),
+            $"spriteTypes = {{\n\tspriteType = {{\n\t\tname = \"GFX_hoimod_numbers\"\n\t\ttexturefile = \"gfx/interface/hoimod_numbers.tga\"\n\t\tnoOfFrames = {NumberIcons}\n\t}}\n}}\n");
     }
 
     /// <summary>Puts <paramref name="prefix"/> in front of the text box's text when <paramref name="on"/>, else takes it off. Idempotent.</summary>
