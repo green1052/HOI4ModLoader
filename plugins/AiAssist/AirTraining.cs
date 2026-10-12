@@ -27,7 +27,9 @@ public unsafe partial class AiAssist
     private static delegate* unmanaged<nint, int, byte> _atWarAny;
     private static delegate* unmanaged<nint, int*, byte> _postAi;
     private static readonly ConcurrentDictionary<int, (int Day, int Count)> TrainingPosted = new(); // not yet in the wings' bits
-    private static int _training;
+    private static int _training, _keptBase;
+    private const int BackAfterHours = 7 * 24;
+    private static readonly ConcurrentDictionary<nint, (nint From, int Hour)> Moved = new(); // wing: the base it last left, when
 
     private void LoadAirTraining()
     {
@@ -42,9 +44,56 @@ public unsafe partial class AiAssist
         _assignWing = Patches.Hook<AssignWingFn>(Sig.Find(Signatures.AssignWing), (wing, airbase, region, mission, cancelTransfer) =>
         {
             var train = false;
+            var keep = false;
             Safely(() => train = Train(wing, airbase, region, mission));
-            return train ? (byte)1 : _assignWing!.OriginalFunction(wing, airbase, region, mission, cancelTransfer);
-        });
+            if (!train) Safely(() => keep = MovingBack(wing, airbase));
+            return train || keep ? (byte)1 : _assignWing!.OriginalFunction(wing, airbase, region, mission, cancelTransfer);
+        });        MainThread.Every(TimeSpan.FromSeconds(1), TrainIdleWings);
+    }
+
+    private const int StateOfAirBase = 0x68; // CAirBase: its state; none for a carrier's
+
+    private static bool OnCarrier(nint airbase) => airbase != 0 && *(nint*)(airbase + StateOfAirBase) == 0;
+
+    private const int IdleWingsHours = 24;
+    private static int _idleWingsAt;
+
+    /// <summary>
+    /// Daily: green AI wings with no mission at all (the air AI found none for them: Germany's naval bombers at war sat
+    /// waiting) go on training, within the half of a country's wings. Wings the AI sends somewhere go through
+    /// <see cref="Train"/> instead. Main thread.
+    /// </summary>
+    private static void TrainIdleWings()
+    {
+        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _idleWingsAt, IdleWingsHours)) return;
+        var (day, player) = (Game.Hour / 24, Game.ControlledTag);
+        foreach (var country in Game.Countries)
+        {
+            var tag = country == 0 ? 0 : Game.Tag(country);
+            var air = tag <= 0 || tag == player ? 0 : Game.StrategicAir(tag);
+            if (air == 0) continue;
+            foreach (var pool in Native.PdxArray(air + PoolsOfAir).ToArray())
+            {
+                if (pool == 0) continue;
+                foreach (var wing in Native.PdxArray(pool + WingsOfPool).ToArray())
+                {
+                    if (wing == 0 || *(int*)(wing + MissionsOfWing) != 0 || *(long*)(wing + DestinationOfWing) != 0 || *(nint*)(wing + AttachedArmyOfWing) != 0) continue;
+                    if (OnCarrier(_baseOf(wing))) continue; // a carrier's wings fly with it
+                    if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel || !RoomToTrain(tag, day)) continue;
+                    var cmd = Allocator.AllocZeroed(SetMissionSize);
+                    _setMission(cmd, wing, TrainingMission, 1, 1);
+                    *(byte*)(cmd + StopAtMaxOfSetMission) = 1;
+                    if (!Commands.CanExecute(cmd))
+                    {
+                        Commands.Free(cmd);
+                        continue;
+                    }
+                    if (!Commands.Post(cmd, true)) continue;
+                    TrainingPosted.AddOrUpdate(tag, (day, 1), (_, sent) => sent.Day == day ? (day, sent.Count + 1) : (day, 1));
+                    Interlocked.Increment(ref _training);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -56,15 +105,18 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool Train(nint wing, nint airbase, nint region, int mission)
     {
-        if (mission < 0 || region == 0 || *(long*)(wing + DestinationOfWing) != 0 || *(nint*)(wing + AttachedArmyOfWing) != 0) return false;
-        if (airbase == 0 || _baseOf(wing) != airbase) return false;
-        if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel) return false;
+        if (mission < 0 || region == 0 || *(nint*)(wing + AttachedArmyOfWing) != 0) return false;
+        if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel || OnCarrier(_baseOf(wing))) return false; // a carrier's wings fly its missions
         var tag = WingOwner(wing);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
         var country = Game.Country(tag);
         var diplomacy = country == 0 ? 0 : *(nint*)(country + DiplomacyOfCountry);
         if (diplomacy == 0) return false;
-        if (_atWarAny(diplomacy, 0) != 0 && !(mission is AirSuperiorityIndex or InterceptionIndex && LandRegion(region) && Quiet(tag, region))) return false;
+        var atWar = _atWarAny(diplomacy, 0) != 0;
+        // At war only a wing staying at its base trains (one being moved goes: its base may be lost); at peace any: the AI
+        // shuffles idle wings between bases with nothing to do, and they sat waiting (Italy after Ethiopia).
+        if (atWar && (*(long*)(wing + DestinationOfWing) != 0 || airbase == 0 || _baseOf(wing) != airbase)) return false;
+        if (atWar && !(mission is AirSuperiorityIndex or InterceptionIndex && LandRegion(region) && Quiet(tag, region))) return false;
         if ((*(int*)(wing + MissionsOfWing) & TrainingMission) != 0) return true; // already training: kept
         var day = Game.Hour / 24;
         if (!RoomToTrain(tag, day)) return false;
@@ -82,15 +134,44 @@ public unsafe partial class AiAssist
         return true;
     }
 
-    /// <summary>No enemy air superiority in the region, by the country's own air records.</summary>
+    /// <summary>
+    /// No enemy air superiority in the region, by the country's own air records, and none of its divisions fighting there:
+    /// over its own battles air superiority still counts (the enemy fights under it) even with no enemy planes, as over
+    /// Italy's offensive in Ethiopia.
+    /// </summary>
     private static bool Quiet(int tag, nint region)
     {
         var air = Game.StrategicAir(tag);
         if (air == 0) return false;
+        var country = Game.Country(tag);
+        foreach (var unit in country == 0 ? [] : Game.Units(country))
+            if (unit != 0 && Division.IsLand(unit) && Division.Fighting(unit) && Division.Location(unit) is var at && at != 0 && *(nint*)(at + RegionOfProvince) == region)
+                return false;
         var id = *(int*)(region + SuperiorityIdOfRegion);
         if (id <= 0 || id >= Native.PdxArray<byte>(air + SuperiorityRecords).Length) return false;
         var record = *(nint*)(air + SuperiorityRecords) + (nint)id * SuperiorityRecordSize;
         return *(long*)(record + EnemySuperiority) <= 0;
+    }
+
+    /// <summary>
+    /// Whether the AI sends the wing back to the base it left less than a week ago: refused, the wing keeps its mission where it
+    /// is. The air AI's daily pass flips wings between two bases (each move frees room at the base left, which then scores
+    /// best), so they spent their days in transit. Otherwise a move is remembered. AI worker thread.
+    /// </summary>
+    private static bool MovingBack(nint wing, nint airbase)
+    {
+        var from = airbase == 0 ? 0 : _baseOf(wing);
+        if (from == 0 || from == airbase || OnCarrier(from) || OnCarrier(airbase)) return false; // carriers move: their wings go where they are
+        var tag = WingOwner(wing);
+        if (tag <= 0 || tag == Game.ControlledTag) return false;
+        var hour = Game.Hour;
+        if (Moved.TryGetValue(wing, out var last) && last.From == airbase && hour - last.Hour < BackAfterHours)
+        {
+            Interlocked.Increment(ref _keptBase);
+            return true;
+        }
+        Moved[wing] = (from, hour);
+        return false;
     }
 
     /// <summary>Fewer than half of the country's wings train, counting training posted today (it shows in the bits once run).</summary>

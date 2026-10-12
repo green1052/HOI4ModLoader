@@ -55,11 +55,12 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// The best neck among the enemy provinces on our line: one province, or two next to each other, whose taking cuts off the
+    /// The best neck among the enemy provinces on our line: one province, two next to each other, or three in a row (the middle
+    /// one may be off our line: Cuenca's bulge had a neck three wide), whose taking cuts off the
     /// most enemy divisions (2 per division) for the least defence (<see cref="Province.AttackWeight"/>, from our easiest side); null
     /// when none cuts off <see cref="MinTrapped"/> divisions for more than it costs.
     /// </summary>
-    // ponytail: necks of one or two adjacent provinces on the line, pockets up to MaxSalient provinces; a deeper or wider neck is missed.
+    // ponytail: necks of up to three provinces in a row, pockets up to MaxSalient provinces; a wider neck is missed.
     private static int[]? Search(nint country, int tag, HashSet<nint> enemyLine)
     {
         var map = new SalientMap(country, tag);
@@ -71,7 +72,12 @@ public partial class AiAssist
         {
             Try([c]);
             foreach (var n in map.Neighbours(c))
+            {
                 if (n > c && candidates.Contains(n)) Try([c, n]);
+                if (!map.IsTheirs(n)) continue;
+                foreach (var m in map.Neighbours(n))
+                    if (m > c && m != n && candidates.Contains(m)) Try([c, n, m]);
+            }
         }
         return best.Neck;
 
@@ -100,6 +106,8 @@ public partial class AiAssist
                 : Province.Enemy(country, tag, p) ? SalientFill.Theirs : Province.Friendly(country, tag, p) ? SalientFill.Ours : SalientFill.Neutral;
             return _sides[id] = side;
         }
+
+        public bool IsTheirs(int id) => Side(id) == SalientFill.Theirs;
 
         /// <summary>See <see cref="SalientFill.Cut"/>.</summary>
         public int Cut(int[] neck) => SalientFill.Cut(neck, Neighbours, Side, id => Province.Divisions(Game.Province(id)), MaxSalient);

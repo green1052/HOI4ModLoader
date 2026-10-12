@@ -150,6 +150,55 @@ public static class Signatures
     /// mission share-out (0x1412C3F20, region and mission) and the rebasing (0x1412CDB20, -1), from CAIMilitaryMinister's
     /// daily and hourly updates: the country's AI worker thread.
     /// </summary>
+    /// <summary>
+    /// CAIGeneral's daily army training pass (CCountry*, bool haltAll, CPdxArray&lt;CAIFront*&gt;* fronts): stops every exercise when
+    /// haltAll (surrender progress, 10 %+ of divisions fighting, war preparation), else decides per army of its fronts.
+    /// AI worker thread.
+    /// </summary>
+    [Signature] public const string UpdateArmyTraining = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 30 4C 8B E1 4D 8B 38 49 63 40 0C";
+
+    /// <summary>COrdersGroup: any of its divisions below the training cap (TRAINING_MAX_LEVEL, regular) (group) -> bool.</summary>
+    [Signature] public const string BelowMaxLevel = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 80 79 39 00 75 ? 48 8B 59 50 48 63 41";
+
+    /// <summary>
+    /// Naval AI: the task forces no objective took (CPdxArray&lt;slot*&gt;* slots, int* tag; slot+0 the task force's CRef): each gets
+    /// hold, is sent to the nearest base if at sea, and merged into a fleet. Country's AI worker thread.
+    /// </summary>
+    [Signature] public const string UnassignedTaskForces = "48 89 54 24 ? 48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 48 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B E9";
+
+    /// <summary>CNavalMissionSetTypeCommand ctor (mem[0x48], CTaskForce*, int mission); +0x44 stop training at max.</summary>
+    [Signature] public const string SetNavalMission = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 48 83 EC 30 41 8B D8 48 8B F2 48 8B F9 C6 41 ? ? C7 41 ? ? ? ? ? 33 C9 89 4F ? C7 47 ? ? ? ? ? 66 89 4F ? 48 89 4F ? 48 8D 05 ? ? ? ? 48 89 07 48 8D 4F ? E8 ? ? ? ? 90 89 5F ? 66 C7 47";
+
+    /// <summary>CNavalMissionMoveCommand ctor (mem[0x48], CTaskForce*, int sea province, bool).</summary>
+    [Signature] public const string NavalMove = "48 89 4C 24 ? 53 55 56 57 41 56 48 83 EC 30 41 0F B6 D9 41 8B F8";
+
+    /// <summary>CTaskForce: a ship can still gain experience from training (under the training cap) (tf) -> bool.</summary>
+    [Signature] public const string TaskForceCanTrain = "48 89 5C 24 18 57 48 83 EC 20 48 8B F9 48 8D 4C 24 30 E8 ? ? ? ? 48 8B 9F 48 03 00 00 48 63 87 54 03 00 00 48 8D 3C C3 48 3B DF 74 22 66 90";
+
+    /// <summary>CTaskForce: its ships' shore bombardment (tf, long* out) -> out.</summary>
+    [Signature] public const string TaskForceShoreBombardment = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 C7 02 00 00 00 00 48 8B FA 48 8B 99";
+
+    /// <summary>
+    /// CMoveShipsCommand ctor (mem[0x58], CPdxArray&lt;CShip*&gt;* ships, CTaskForce* toNavy, bool createNew, int province, bool move):
+    /// with no task force and createNew, the ships (all of one task force) become a new task force of its fleet, where it is.
+    /// </summary>
+    [Signature] public const string MoveShips = "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 0F 29 74 24 30 41 0F B6 D9 49 8B F8 4C 8B FA 4C 8B F1 C6 41 08 00 C7 41 0C FF FF FF FF 45 33 ED 44 89 69 10";
+
+    /// <summary>CShip: its shore bombardment (ship, long* out) -> out (a task force's is the sum over its ships).</summary>
+    [Signature] public const string ShipShoreBombardment = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 4C 8B 81 28 07 00 00 48 8D B9 80 00 00 00";
+
+    /// <summary>
+    /// Naval AI allocator's first filter (CPdxArray&lt;slot*&gt;* list) -> removed: drops reserve-fleet and dead task forces from
+    /// the list the objectives then take from (slot+0 the task force's CRef, +0x18 its objective). Country's AI worker thread.
+    /// </summary>
+    [Signature] public const string FilterTaskForces = "41 56 48 83 EC 30 48 89 5C 24 ? 4C 8B F1 48 89 6C 24 ? 48 89 74 24 ? 33 F6 48 89 7C 24 ? 4C 89 7C 24 ? 39 71 0C";
+
+    /// <summary>
+    /// AI leader score (0x14194B960), the candidate who commands another group: `cmp rbp,rax; je; call InCombat(group); test al,al;
+    /// jnz reject(-100); sub esi,200`. Every AI leader choice (FindBestLeader 0x14194C710) scores through it.
+    /// </summary>
+    [Signature] public const string LeaderStealBranch = "48 3B E8 74 ? 48 8B C8 E8 ? ? ? ? 84 C0 75 ? 81 EE C8 00 00 00";
+
     [Signature] public const string AssignWing = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC 30 45 8B F9";
 
     /// <summary>

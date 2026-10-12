@@ -61,8 +61,9 @@ public partial class AiAssist
         var frontier = new List<nint> { at };
         for (var depth = 1; depth < FeintDistance && frontier.Count > 0; depth++)
             frontier = frontier.SelectMany(p => Game.Neighbours(p)).Select(Game.Province).Where(q => q != 0 && near.Add(q)).ToList();
-        var feint = enemyLine.Where(p => !near.Contains(p) && Province.Divisions(p) > 0).MaxBy(Province.Divisions);
-        if (feint == 0) return;
+        var held = enemyLine.Where(p => !near.Contains(p) && Province.Divisions(p) > 0).ToList();
+        if (held.Count == 0) return;
+        var feint = held.MaxBy(Province.Divisions);
         Feints[general] = (tag, hour + FeintHours, Rings(Game.Id(feint)), Game.Id(feint));
         Interlocked.Increment(ref _feinted);
         _log?.Info($"#{tag}: feints at {Game.Id(feint)} ({Province.Divisions(feint)} enemy division(s)) for {FeintHours} hours before its push at {anchor}");

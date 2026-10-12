@@ -44,9 +44,135 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    /// <summary>At war on a land line, and no enemy at war holds a port (from the last controller scan).</summary>
+    private static int _bystanders;
+
+    private const int ExpectedTagsOfDiplomacy = 0xF8; // CPdxArray<int>, index-aligned with WarSignalsOfDiplomacy: rebuilt daily
+    private const int RelationsOfDiplomacy = 0x08, GuaranteesOfRelation = 0x290; // CRelation*[tag index]; non-zero: it guarantees that one
+
+    /// <summary>
+    /// The border across these provinces is a bystanders' one: at least BystanderShare % of it is held by countries that are no
+    /// threat, and none of the rest is at war with the country or expected to be. No threat: one its AI marks as no target (a
+    /// negative conquer, or ignore, befriend, alliance or protect: Germany toward Switzerland, the Low Countries, Italy) or
+    /// in its faction, or a neutral too small to attack (in no faction, under a third of its land divisions: the Low
+    /// Countries and Switzerland against Germany, not Poland). Never one it expects a war with (the game's daily list: at war,
+    /// a war goal or justification either way, a focus either way, a war preparation strategy, their factions and subjects),
+    /// a guarantor of one of those, or a rival (a positive conquer or contain).
+    /// </summary>
+    private static bool Bystanders(nint country, int tag, IEnumerable<nint> across)
+    {
+        var diplomacy = *(nint*)(country + DiplomacyOfCountry);
+        if (diplomacy == 0) return false;
+        var expected = Native.PdxArray<int>(diplomacy + ExpectedTagsOfDiplomacy).ToArray();
+        var ours = 0;
+        foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) ours++;
+        int safe = 0, other = 0;
+        var verdicts = new Dictionary<int, bool?>(); // per country: true no threat, false keeps the front, null neither
+        foreach (var p in across)
+        {
+            var c = Province.Controller(p);
+            if (c <= 0 || c == tag) continue;
+            if (!verdicts.TryGetValue(c, out var verdict))
+            {
+                verdicts[c] = verdict = Verdict(country, tag, c, expected, ours);
+            }
+            if (verdict == false) return false;
+            if (verdict == true) safe++;
+            else other++;
+        }
+        return safe > 0 && safe * 100 >= (safe + other) * BystanderShare;
+    }
+
+    private const int AllyLosingHours = 7 * 24;
+
+    /// <summary>The enemy took ground on or next to this line in the last week.</summary>
+    private static bool AllyLosing(nint country, int tag, IEnumerable<nint> line, int hour)
+    {
+        foreach (var p in line)
+            foreach (var id in Game.Neighbours(p).Append(Game.Id(p)))
+                if (Taken(id, hour, AllyLosingHours) && Game.Province(id) is var q && q != 0 && Province.Enemy(country, tag, q)) return true;
+        return false;
+    }
+
+    private const int MaxLandLink = 4000; // provinces searched for a land route home
+    private static int _overseas;
+
+    /// <summary>A land route through our and allied ground leads from <paramref name="from"/> to ground of ours (true too when the search gives up).</summary>
+    private static bool LandLinked(nint country, int tag, nint from)
+    {
+        var seen = new HashSet<int> { Game.Id(from) };
+        var queue = new Queue<nint>();
+        queue.Enqueue(from);
+        while (queue.Count > 0)
+        {
+            if (seen.Count > MaxLandLink) return true;
+            foreach (var id in Game.Neighbours(queue.Dequeue()))
+            {
+                if (!seen.Add(id) || Game.Province(id) is not (var p and not 0)) continue;
+                var c = Province.Controller(p);
+                if (c == tag) return true;
+                if (c > 0 && Province.Friendly(country, tag, p)) queue.Enqueue(p);
+            }
+        }
+        return false;
+    }
+
+    private const int BystanderShare = 80, SmallArmyPercent = 33, FactionOfDiplomacy = 0x290;
+
+    /// <summary>True: the country is no threat (see <see cref="Bystanders"/>); false: it keeps the front; null: neither.</summary>
+    private static bool? Verdict(nint country, int tag, int c, int[] expected, int ours)
+    {
+        if (Array.IndexOf(expected, c) >= 0 || Game.AtWar(country, c) || Guarantees(c, expected)) return false;
+        var index = Game.TagIndex(c);
+        var conquer = Strategy(country, ConquerStrategy, index);
+        if (conquer > 0) return false;
+        // Antagonize is the scripts' ideological hostility (Germany at 100 toward every democracy): no military intent, and a
+        // negative conquer (-99999 toward the Low Countries) says outright it won't attack.
+        if (conquer < 0 || Game.Allied(country, c) || Strategy(country, IgnoreStrategy, index) > 0 || Strategy(country, BefriendStrategy, index) > 0
+            || Strategy(country, AllianceStrategy, index) > 0 || Strategy(country, ProtectStrategy, index) > 0) return true;
+        if (Strategy(country, ContainStrategy, index) > 0) return false;
+        var them = Game.Country(c);
+        var theirs = them == 0 ? 0 : *(nint*)(them + DiplomacyOfCountry);
+        if (theirs == 0 || *(nint*)(theirs + FactionOfDiplomacy) != 0) return null; // in a faction: its friends are a threat
+        var divisions = 0;
+        foreach (var u in Game.Units(them)) if (u != 0 && Division.IsLand(u)) divisions++;
+        return divisions * 100 < ours * SmallArmyPercent ? true : null;
+    }
+
+    private const int AiOfCountry = 0x228, StrategiesOfAi = 0x68, StrategyValueSlot = 4; // CCountry -> CCountryAI; its strategy table, GetValue(type, tag index, 0)
+    // ai_strategy types, in the game's token table order (0x1429CAD60): conquer 0, antagonize 1, befriend 2, protect 3,
+    // alliance 6, contain 13, ignore 37, prepare_for_war 43.
+    private const int ConquerStrategy = 0, AntagonizeStrategy = 1, BefriendStrategy = 2, ProtectStrategy = 3, AllianceStrategy = 6, ContainStrategy = 13, IgnoreStrategy = 37;
+
+    /// <summary>The country's AI strategy value of <paramref name="type"/> toward the country at tag index <paramref name="index"/>; 0 for a player's or none.</summary>
+    private static int Strategy(nint country, int type, int index)
+    {
+        var ai = *(nint*)(country + AiOfCountry);
+        if (ai == 0 || index < 0) return 0;
+        var strategies = ai + StrategiesOfAi;
+        return ((delegate* unmanaged<nint, int, int, int, int>)(*(nint**)strategies)[StrategyValueSlot])(strategies, type, index, 0);
+    }
+
+    /// <summary>The country of <paramref name="tag"/> guarantees one of <paramref name="targets"/>.</summary>
+    private static bool Guarantees(int tag, int[] targets)
+    {
+        var other = Game.Country(tag);
+        var diplomacy = other == 0 ? 0 : *(nint*)(other + DiplomacyOfCountry);
+        if (diplomacy == 0) return false;
+        var relations = *(nint**)(diplomacy + RelationsOfDiplomacy);
+        var count = *(int*)(diplomacy + RelationsOfDiplomacy + 0xC);
+        foreach (var target in targets)
+            if (Game.TagIndex(target) is var i && i >= 0 && i < count && relations[i] != 0 && *(nint*)(relations[i] + GuaranteesOfRelation) != 0) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// At war on a land line, and no enemy at war holds a port (from the last controller scan), or its line went unmanned in
+    /// the last two days: then the coast and city garrisons are wanted on the line more (Germany's West Wall held eleven
+    /// divisions while its ports were guarded); landings are left to the beach defence.
+    /// </summary>
     private static bool CantBeInvaded(nint country, int tag) =>
-        _portHolders is { } ports && HasLine(tag) && !ports.Any(holder => Game.AtWar(country, holder));
+        _portHolders is { } ports && HasLine(tag) && (!ports.Any(holder => Game.AtWar(country, holder))
+            || ShortOfMen.TryGetValue(tag, out var short_) && Game.Hour - short_ is >= 0 and < ShortHours);
 
     /// <summary>A tracked line of the tag's. Enumerates the dictionary lock-free (Values locks every bucket and copies).</summary>
     private static bool HasLine(int tag)
@@ -72,6 +198,7 @@ public unsafe partial class AiAssist
 
     private void LoadFronts()
     {
+        _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         if (_axis) _ = Sig.Find(Signatures.ConcentrationActive) + Sig.Find(Signatures.ConcentrationPath) + Sig.Find(Signatures.ConcentrationAttacking); // the force concentration offsets are still where they were
         _unitRequests = Patches.Hook<GeneralRetFn>(Sig.Find(Signatures.UpdateFrontUnitRequests), general =>
         {
@@ -160,7 +287,7 @@ public unsafe partial class AiAssist
                     if (!UnguardedAt.TryGetValue(tag, out var at) || hour - at is < 0 or >= 24)
                     {
                         UnguardedAt[tag] = hour;
-                        _log?.Info($"#{tag}: its enemies hold no port, so its port and home garrisons (area defence) go to the land fronts");
+                        _log?.Info($"#{tag}: its enemies hold no port or its line is short of divisions, so its port and home garrisons (area defence) go to the land fronts");
                     }
                 }
                 continue;
@@ -219,12 +346,38 @@ public unsafe partial class AiAssist
             // takes a front's divisions for other fronts only beyond its minimum (CollectReassignableUnits and the donation pass
             // 0x141A5D070 keep AI_THEATRE_DISTRIBUTION_PERCENTAGE_OF_MINIMUM_UNITS_TO_KEEP x +0x90): left alone, Italy shipped its
             // Somali divisions to Eritrea and Ethiopia walked in.
+            // A front on a bystander's border (every country across marked no target by the AI's own strategies): no divisions
+            // wanted, so the theatre distribution sends them where a war is or may come (Germany kept seven facing Switzerland).
+            if (_holdLine && !hostile && enemyHeld.Count > 0 && *(int*)(front + MaxWanted) > 0 && Bystanders(country, tag, enemyHeld.Keys))
+            {
+                *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
+                *(int*)(front + ArmiesOfAiFront + 0xC) = 0; // no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered)
+                Interlocked.Increment(ref _bystanders);
+                continue;
+            }
+            // An ally's front overseas (its line all in an ally's ground, which no land route links to ours): no divisions wanted,
+            // so none are shipped there (Germany sent nine to Italian East Africa against the British), unless the ally is losing
+            // ground there and our own line is manned (an Afrika Korps when Italy needs one).
+            if (_holdLine && contact.Count > 0 && *(int*)(front + MaxWanted) > 0 && contact.All(p => Province.Controller(p) != tag) && !LandLinked(country, tag, contact.First())
+                && !(AllyLosing(country, tag, contact, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours)))
+            {
+                *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
+                *(int*)(front + ArmiesOfAiFront + 0xC) = 0; // no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered)
+                Interlocked.Increment(ref _overseas);
+                continue;
+            }
             if (!_holdLine || !hostile || Grads.ContainsKey(tag) // on a grad, it gets the divisions, not the old border
                 || *(int*)(front + AreaDefense) != 0 || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
             var facing = 0;
             foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);
-            var need = Math.Max(contact.Count, facing);
+            var holding = 0;
+            foreach (var p in contact)
+            foreach (var unit in Province.Units(p))
+                if (unit != 0 && Division.Commander(unit) == tag) holding++;
+            // Twice the enemy there already (an offensive front, Germany in Poland): one per line province is its minimum, so its
+            // surplus can go where a front is short (the West Wall held eleven divisions against France's forty).
+            var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, facing);
             if (*(int*)(front + MinWanted) >= need) continue;
             *(int*)(front + MinWanted) = need;
             *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);

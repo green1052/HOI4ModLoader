@@ -90,6 +90,144 @@ public unsafe partial class AiAssist
         return ours <= facing; // a line province keeps as many as the enemy divisions next to it
     }
 
+    private const int UnitsOfAssignCommand = 0x28; // COrderAssignCommand: CPdxArray<CRef id> (then the group's CRef at +0x40, the order id at +0x48)
+
+    /// <summary>
+    /// An AI assign command can't take a division its line needs (<see cref="Pinned"/>) onto another order: vanilla made a new
+    /// front around a pocket and pulled its divisions off the main line, which stood open meanwhile. Divisions next to the
+    /// pocket (or any encircled enemy ground) may go: they are the ones to wall it in. Strips them in place; false when none
+    /// is left. AI threads.
+    /// </summary>
+    private static bool KeepsLine(nint cmd, int tag)
+    {
+        if (*(nint*)cmd != _assignVTable) return true;
+        var country = Game.Country(tag);
+        if (country == 0) return true;
+        var byRef = new Dictionary<long, nint>(); // the country's own divisions by CRef: never resolve ids blind (a stale one read a garbage tag)
+        foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) byRef[Division.Ref(u)] = u;
+        var units = Native.PdxArray<long>(cmd + UnitsOfAssignCommand);
+        var kept = 0;
+        foreach (var reference in units)
+        {
+            var unit = byRef.GetValueOrDefault(reference);
+            if (unit == 0 || !Division.IsHeadquarters(unit) && (!Pinned(unit) || NextToPocket(unit))) units[kept++] = reference;
+            else Interlocked.Increment(ref _keptOnLine);
+        }
+        if (kept == units.Length) return true;
+        Native.SetPdxArraySize(cmd + UnitsOfAssignCommand, kept);
+        return kept > 0;
+    }
+
+    private static int _keptOnLine;
+
+    // Root front order commands: COrderReplaceRootCommands (0x70: +0x48 front line CRef, +0x50 section id, +0x58/+0x60 start/end
+    // 0..100000), CArmyGroupCommand (0x80, a new army with its front: the same at +0x60/+0x68/+0x70/+0x78), COrderEditRootCommand
+    // (0x50: +0x28 group CRef, +0x30 the order's id). CFrontSection: +0x30 CProvince* of our side; COrder: +0x88 its pairs.
+    private static nint _replaceRootVTable, _editRootVTable, _armyGroupVTable;
+    private const int ProvincesOfSection = 0x30, PairsOfOrder = 0x88, FullStretch = 100_000;
+    private static int _frontOrdersDropped;
+
+    /// <summary>
+    /// An AI front order drawn, redrawn or given a new army along a bystanders' border (<see cref="Bystanders"/>) or an ally's
+    /// line overseas is dropped before it exists: deleting it afterwards made it flicker, the general drawing it again hourly.
+    /// AI threads.
+    /// </summary>
+    private static bool KeepsFrontOrder(nint cmd, int tag)
+    {
+        var vtable = *(nint*)cmd;
+        List<nint> ours = [], theirs = [];
+        if (vtable == _replaceRootVTable || vtable == _armyGroupVTable)
+        {
+            var at = vtable == _replaceRootVTable ? 0x48 : 0x60;
+            var front = _resolve(cmd + at);
+            if (front == 0) return true;
+            var id = *(int*)(cmd + at + 8);
+            long start = *(long*)(cmd + at + 0x10), end = *(long*)(cmd + at + 0x18);
+            nint section = 0;
+            foreach (var s in Native.PdxArray(front + SectionsOfFront))
+                if (s != 0 && *(int*)(s + IdOfSection) == id) { section = s; break; }
+            if (section == 0) return true;
+            var provinces = Native.PdxArray(section + ProvincesOfSection);
+            var n = provinces.Length;
+            if (n == 0) return true;
+            int lo = (int)Math.Clamp((Math.Min(start, end) * (n - 1) + FullStretch / 2) / FullStretch, 0, n - 1);
+            int hi = (int)Math.Clamp((Math.Max(start, end) * (n - 1) + FullStretch / 2) / FullStretch, 0, n - 1);
+            var covered = new HashSet<nint>();
+            for (var i = lo; i <= hi; i++) covered.Add(provinces[i]);
+            var pairs = *(nint*)(section + PairsOfSection);
+            for (int i = 0, count = *(int*)(section + PairsOfSection + 0xC); i < count; i++)
+                if (covered.Contains(*(nint*)(pairs + 16 * i)))
+                {
+                    ours.Add(*(nint*)(pairs + 16 * i));
+                    theirs.Add(*(nint*)(pairs + 16 * i + 8));
+                }
+        }
+        else if (vtable == _editRootVTable)
+        {
+            var group = _resolve(cmd + 0x28);
+            var order = group == 0 ? 0 : _findOrder(group, *(int*)(cmd + 0x30));
+            if (order == 0) return true;
+            var pairs = *(nint*)(order + PairsOfOrder);
+            for (int i = 0, count = *(int*)(order + PairsOfOrder + 0xC); i < count; i++)
+            {
+                ours.Add(*(nint*)(pairs + 16 * i));
+                theirs.Add(*(nint*)(pairs + 16 * i + 8));
+            }
+        }
+        else return true;
+        if (ours.Count == 0) return true;
+        var country = Game.Country(tag);
+        if (country == 0) return true;
+        var hour = Game.Hour;
+        var overseas = ours.All(p => p != 0 && Province.Controller(p) != tag) && !LandLinked(country, tag, ours[0])
+            && !(AllyLosing(country, tag, ours, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
+        return !overseas && !Bystanders(country, tag, theirs.Where(p => p != 0));
+    }
+
+    private const int ShortHours = 48;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> ShortOfMen = new(); // tag -> hour its line was last unmanned
+
+    private const int HeadquartersHours = 2;
+    private static int _headquartersAt, _headquartersPulled;
+
+    /// <summary>
+    /// AI army HQs stay off the fronts (taken off once, never assigned again: <see cref="KeepsLine"/>) and step back when they
+    /// stand next to enemy ground: vanilla's battle plans sent them into the attack with the line, where they died. An HQ's
+    /// bonuses reach its army from behind the line. Main thread, every two game hours.
+    /// </summary>
+    private static void KeepHeadquarters()
+    {
+        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _headquartersAt, HeadquartersHours)) return;
+        var player = Game.ControlledTag;
+        foreach (var country in Game.Countries)
+        {
+            var tag = country == 0 ? 0 : Game.Tag(country);
+            if (tag <= 0 || tag == player) continue;
+            foreach (var unit in Game.Units(country).ToArray())
+            {
+                if (unit == 0 || !Division.IsLand(unit) || !Division.IsHeadquarters(unit) || Division.Fighting(unit) || Division.Group(unit) is not (var g and not 0)) continue;
+                if (OnOrder(unit, g))
+                {
+                    if (Commands.Unassign(unit, g, true)) Interlocked.Increment(ref _headquartersPulled);
+                }
+                else if (!Division.Walking(unit) && Division.Location(unit) is var at && at != 0 && Province.NextToEnemy(country, tag, at)
+                         && RestProvince(country, tag, at) is var rear and > 0) Commands.Move(unit, rear, true);
+            }
+        }
+    }
+
+    /// <summary>The division stands next to encircled enemy ground with enemy divisions in it.</summary>
+    private static bool NextToPocket(nint unit)
+    {
+        var tag = Division.Commander(unit);
+        var country = Game.Country(tag);
+        var at = Division.Location(unit);
+        if (country == 0 || at == 0) return false;
+        foreach (var id in Game.Neighbours(at))
+            if (Game.Province(id) is var p && p != 0 && Province.Divisions(p) > 0 && Province.Enemy(country, tag, p) && Province.Encircled(country, tag, p)) return true;
+        return false;
+    }
+
     /// <summary>The country's tracked threatened line (refreshed within the last two days) that it still holds, or null. AI threads too.</summary>
     private static HashSet<nint>? LineOf(int tag, int hour)
     {
@@ -195,6 +333,7 @@ public unsafe partial class AiAssist
             if (tag <= 0 || tag == player) continue;
             PrunePosted(country, tag);
             DropAreaDefence(country, tag);
+            DropBystanderFronts(country, tag);
             var fresh = NewDivisions(country, tag); // every pass: one deployed in peace isn't new once war comes
             var grad = _postures ? Posture(country, tag, hour) : null; // a much stronger enemy: its grad is the line
             var line = grad != null ? Held(grad, tag) : LineOf(tag, hour);
@@ -225,7 +364,10 @@ public unsafe partial class AiAssist
                 Interlocked.Increment(ref _backfilled);
             }
             var manned = Manned(tag, line);
+            if (!manned) ShortOfMen[tag] = hour;
             if (grad == null && !manned && !dominant) HoldOffensives(country, tag, hour);
+            StopTrappedOffensives(country, tag);
+            StopBeatenOffensives(country, tag, hour);
             if (!manned) continue;
             if (MicroElsewhere) continue;
             Reserve(country, tag, line, hour);
@@ -251,6 +393,40 @@ public unsafe partial class AiAssist
             var divisions = Order.Members(order).Length;
             if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;
             _log?.Info($"#{tag}: deleted an area defence order of {divisions} division(s): its enemies hold no port");
+        }
+    }
+
+    /// <summary>
+    /// The tag's front orders whose divisions all stand on bystanders' borders (<see cref="Bystanders"/>: no country across that
+    /// it expects a war with) are deleted: their divisions go where a war is or may come, instead of facing Luxembourg, Belgium
+    /// or Switzerland. A target being prepared (focus, justification, war goal, war preparation) keeps its front.
+    /// </summary>
+    private static void DropBystanderFronts(nint country, int tag)
+    {
+        foreach (var group in OrdersGroup.OfCountry(country))
+        {
+            if (group == 0 || new OrdersGroup(group).IsArmyGroup) continue;
+            foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray())
+            {
+                if (order == 0 || Order.Type(order) != Order.Front) continue;
+                var members = Order.Members(order);
+                if (members.Length == 0) continue;
+                var across = new HashSet<nint>();
+                foreach (var member in members)
+                    if (Division.Location(member - MemberOfUnit) is var at && at != 0)
+                        foreach (var id in Game.Neighbours(at))
+                            if (Game.Province(id) is var q && q != 0 && Province.Controller(q) is var c && c > 0 && c != tag) across.Add(q);
+                var standing = new List<nint>();
+                foreach (var member in members) if (Division.Location(member - MemberOfUnit) is var at && at != 0) standing.Add(at);
+                var hour = Game.Hour;
+                var overseas = standing.Count > 0 && standing.All(p => Province.Controller(p) != tag) && !LandLinked(country, tag, standing[0])
+                    && !(AllyLosing(country, tag, standing, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
+                if (!overseas && (across.Count == 0 || !Bystanders(country, tag, across))) continue;
+                var divisions = members.Length;
+                if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;
+                Interlocked.Increment(ref overseas ? ref _overseas : ref _bystanders);
+                _log?.Info($"#{tag}: deleted a front order of {divisions} division(s) {(overseas ? "on an ally's front overseas" : "on a neutral border")}: they go where they are needed");
+            }
         }
     }
 
@@ -306,6 +482,109 @@ public unsafe partial class AiAssist
                         Interlocked.Increment(ref _stopped);
             }
         }
+    }
+
+    /// <summary>
+    /// Running front offensives with a division in a salient whose way back is closing (<see cref="Closing"/>) are called off:
+    /// vanilla kept pushing single divisions deeper until the enemy cut the salient's neck (Japan around Guangzhou). Their
+    /// divisions then hold, and those inside pull out as worn ones do. The AI's own execute command, posted forced.
+    /// </summary>
+    private static void StopTrappedOffensives(nint country, int tag)
+    {
+        var closing = new Dictionary<nint, bool>();
+        foreach (var group in OrdersGroup.OfCountry(country))
+        {
+            if (group == 0 || new OrdersGroup(group).IsArmyGroup) continue;
+            foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray())
+            {
+                if (order == 0 || Order.Type(order) != Order.Front || !Order.Executing(order)) continue;
+                var trapped = false;
+                foreach (var member in Order.Members(order))
+                {
+                    var at = Division.Location(member - MemberOfUnit);
+                    if (at == 0) continue;
+                    if (!closing.TryGetValue(at, out var c)) closing[at] = c = Closing(country, tag, at);
+                    if (trapped = c) break;
+                }
+                if (trapped && Commands.TryPost(Commands.NewOrderCommand(Commands.ExecuteOrder, new OrdersGroup(group).Ref, Order.Id(order), 0), true))
+                {
+                    Interlocked.Increment(ref _trappedStops);
+                    _log?.Info($"#{tag}: calls off an offensive: a division of it stands in a salient whose way back is closing");
+                }
+            }
+        }
+    }
+
+    private static int _trappedStops;
+
+    private const int DefenderOfCombat = 0x30, DivisionsOfSide = 0x20, ReservesOfSide = 0x100, ProgressSlot = 25;
+    private const int LosingProgressPercent = 40, HopelessProgressPercent = 25, OutnumberedPercent = 150, BeatenHours = 72, GroupOfOrder = 0x38;
+    // army -> hour its offensive was called off: by army, not order, as the general redraws its front order (a new one) at once
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> Beaten = new();
+    private static int _beatenStops;
+
+    /// <summary>
+    /// Running front offensives losing more of their attacks than they win are called off, and don't start again for three
+    /// days (the army's: the general redraws the order at once): an attack is losing while the attacker holds under 25 % of the
+    /// battle, or under 40 % with the defenders, reserves counted, half again as many as the attackers next to it. Vanilla kept
+    /// feeding three divisions into five with seven in reserve.
+    /// </summary>
+    private static void StopBeatenOffensives(nint country, int tag, int hour)
+    {
+        var landCombat = Sig.VTable(LandCombat);
+        var losing = new HashSet<nint>();  // our attacks being lost: the battles' provinces
+        var winning = new HashSet<nint>();
+        foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState).ToArray())
+        {
+            if (combat == 0 || *(nint*)combat != landCombat || *(nint*)(combat + ProvinceOfCombat) is not (var p and not 0) || !Province.Enemy(country, tag, p)) continue;
+            var defender = *(nint*)(combat + DefenderOfCombat);
+            if (defender == 0) continue;
+            var attackers = 0;
+            foreach (var id in Game.Neighbours(p))
+                if (Game.Province(id) is var q && q != 0)
+                    foreach (var unit in Province.Units(q))
+                        if (unit != 0 && Division.Commander(unit) == tag && Division.IsLand(unit) && Division.Fighting(unit)) attackers++;
+            if (attackers == 0) continue; // not our attack
+            var defenders = *(int*)(defender + DivisionsOfSide + 0xC) + *(int*)(defender + ReservesOfSide + 0xC);
+            long progress;
+            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress); // attacker's share
+            if (progress * 100 < HopelessProgressPercent * Native.FixedPoint
+                || progress * 100 < LosingProgressPercent * Native.FixedPoint && defenders * 100 >= OutnumberedPercent * attackers) losing.Add(p);
+            else winning.Add(p);
+        }
+        if (losing.Count == 0) return;
+        foreach (var group in OrdersGroup.OfCountry(country))
+        {
+            if (group == 0 || new OrdersGroup(group).IsArmyGroup) continue;
+            foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray())
+            {
+                if (order == 0 || Order.Type(order) != Order.Front || !Order.Executing(order)) continue;
+                var (lost, won) = (new HashSet<nint>(), new HashSet<nint>());
+                foreach (var member in Order.Members(order))
+                    if (Division.Location(member - MemberOfUnit) is var at && at != 0)
+                        foreach (var id in Game.Neighbours(at))
+                            if (Game.Province(id) is var q && q != 0)
+                            {
+                                if (losing.Contains(q)) lost.Add(q);
+                                else if (winning.Contains(q)) won.Add(q);
+                            }
+                if (lost.Count == 0 || lost.Count <= won.Count) continue;
+                if (!Commands.TryPost(Commands.NewOrderCommand(Commands.ExecuteOrder, new OrdersGroup(group).Ref, Order.Id(order), 0), true)) continue;
+                Beaten[group] = hour;
+                Interlocked.Increment(ref _beatenStops);
+                _log?.Info($"#{tag}: calls off an offensive losing {lost.Count} of its {lost.Count + won.Count} attack(s)");
+            }
+        }
+    }
+
+    /// <summary>A member stands in a salient whose way back is closing. AI threads.</summary>
+    private static bool Trapped(ReadOnlySpan<nint> members, int tag)
+    {
+        var country = Game.Country(tag);
+        if (country == 0) return false;
+        foreach (var member in members)
+            if (Division.Location(member - MemberOfUnit) is var at && at != 0 && Closing(country, tag, at)) return true;
+        return false;
     }
 
     /// <summary>The tag's land divisions that weren't there at its last pass (just deployed, or come from elsewhere); none on its first pass in a game.</summary>
@@ -628,8 +907,12 @@ public unsafe partial class AiAssist
     private void LoadPostAiCommand()
     {
         _findOrder = (delegate* unmanaged<nint, int, nint>)Sig.Find(Signatures.FindOrder);
+        _replaceRootVTable = Sig.VTable("COrderReplaceRootCommands");
+        _editRootVTable = Sig.VTable("COrderEditRootCommand");
+        _armyGroupVTable = Sig.VTable("CArmyGroupCommand");
         _executeVTable = Sig.VTable(Commands.ExecuteOrder);
         if (_holdLine) _redeployVTable = Sig.VTable("CStrategicRedeploymentCommand"); // here, not on an AI thread
+        _assignVTable = Sig.VTable(Signatures.AssignOrderCommand);
         _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAiCommand), (cmd, tag) =>
         {
             if (*(int*)tag == Game.ControlledTag || !SheepMod.Active) return _post!.OriginalFunction(cmd, tag);
@@ -637,6 +920,12 @@ public unsafe partial class AiAssist
             try
             {
                 keep = !_paradrops || KeepsParadrops(cmd);
+                if (keep && _holdLine) keep = KeepsLine(cmd, *(int*)tag);
+                if (keep && _holdLine && !KeepsFrontOrder(cmd, *(int*)tag))
+                {
+                    keep = false;
+                    Interlocked.Increment(ref _frontOrdersDropped);
+                }
                 if (keep && _holdLine && Redeploys(cmd))
                 {
                     keep = false;
@@ -770,6 +1059,42 @@ public unsafe partial class AiAssist
         }
         return over * 2 > members.Length && counted > 0 ? (int)(shares / counted) : 0;
     }
+    private const int MinFortLevel = 3, FortAttackRatioPercent = 200;
+
+    /// <summary>
+    /// Why the order's divisions shouldn't attack yet: half or more of the enemy provinces next to them have forts of level
+    /// MinFortLevel or more, and their power is under twice the enemy divisions' there; null otherwise. Vanilla attacked the
+    /// Maginot line with Germany's western armies, wore them out on its forts, and France then walked into Germany. Power
+    /// counts strength and organisation, not quality, so open ground is left to vanilla (Japan beats China's numbers). AI threads.
+    /// </summary>
+    private static string? Outgunned(ReadOnlySpan<nint> members, int tag)
+    {
+        var country = Game.Country(tag);
+        if (country == 0) return null;
+        var ahead = new HashSet<nint>();
+        long ours = 0;
+        foreach (var member in members)
+        {
+            var unit = member - MemberOfUnit;
+            ours += Division.Power(unit);
+            var at = Division.Location(unit);
+            if (at == 0) continue;
+            foreach (var id in Game.Neighbours(at))
+                if (Game.Province(id) is var p && p != 0 && Province.Enemy(country, tag, p)) ahead.Add(p);
+        }
+        if (ahead.Count == 0) return null;
+        long theirs = 0;
+        var forts = 0;
+        foreach (var p in ahead)
+        {
+            if (Province.FortLevel(p) >= MinFortLevel) forts++;
+            foreach (var unit in Province.Units(p))
+                if (unit != 0 && Division.IsLand(unit) && Game.AtWar(country, Division.Commander(unit))) theirs += Division.Power(unit);
+        }
+        if (forts * 2 < ahead.Count || ours * 100 >= theirs * FortAttackRatioPercent) return null;
+        return $"{forts} of the {ahead.Count} enemy provinces ahead are fortified and it has {ours * 100 / Math.Max(1, theirs)}% of the defenders' power, under {FortAttackRatioPercent}%";
+    }
+
     private static bool _timing;
     private static int _waited;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> WaitedAt = new(); // order -> hour last logged
@@ -794,6 +1119,9 @@ public unsafe partial class AiAssist
             : walking * 100 > MaxGatheringPercent * members.Length ? $"{walking} of its {members.Length} divisions are still on their way"
             : EnemyAirOver(members, tag) is var air and > 0 ? $"the enemy holds {air}% of the air over it"
             : Muddy(members) ? "most of its divisions stand in mud"
+            : Outgunned(members, tag) is { } ahead ? ahead
+            : Trapped(members, tag) ? "a division of it stands in a salient whose way back is closing"
+            : Beaten.TryGetValue(*(nint*)(order + GroupOfOrder), out var beaten) && hour - beaten is >= 0 and < BeatenHours ? "its attacks were beaten back in the last three days"
             : null;
         if (why == null) return true;
         Interlocked.Increment(ref _waited);

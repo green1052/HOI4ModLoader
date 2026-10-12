@@ -18,6 +18,7 @@ public unsafe partial class AiAssist
 
     private static bool _paradrops;
     private static int _paradropped, _activeDrops, _beachDrops; // _activeDrops: Drops.Count for AI threads (ConcurrentDictionary.IsEmpty takes every lock)
+    private static int _paratroopersReserved;
     private static int _noParatroopers, _noAirbase, _notReady, _noTarget; // why the planner didn't drop, for the log (Sheep Mod's AI builds no paratroopers or transports)
     private int _dropAt = Never, _planAt = Never;
     private static nint _deleteVTable, _assignVTable, _unassignVTable;
@@ -59,6 +60,7 @@ public unsafe partial class AiAssist
         Drops.Clear();
         NextParadrop.Clear();
         Paratroopers.Clear();
+        Reserved.Clear();
         ParadropOrders.Clear();
         Volatile.Write(ref _activeDrops, 0);
     }
@@ -72,14 +74,15 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool KeepsParadrops(nint cmd)
     {
-        if (Volatile.Read(ref _activeDrops) == 0) return true;
+        if (Volatile.Read(ref _activeDrops) == 0 && Reserved.IsEmpty) return true;
         var vtable = *(nint*)cmd;
         if (vtable == _deleteVTable) return !ParadropOrders.ContainsKey((*(long*)(cmd + Commands.GroupOfOrderCommand), *(int*)(cmd + Commands.OrderOfOrderCommand)));
         if (vtable != _assignVTable && vtable != _unassignVTable) return true;
+        var assign = vtable == _assignVTable; // reserved paratroopers are never assigned to a front
         var units = Native.PdxArray<long>(cmd + UnitsOfAssign);
         var kept = 0;
         foreach (var unit in units)
-            if (!Paratroopers.ContainsKey(unit)) units[kept++] = unit;
+            if (!Paratroopers.ContainsKey(unit) && !(assign && Reserved.ContainsKey(unit))) units[kept++] = unit;
         if (kept == units.Length) return true;
         Native.SetPdxArraySize(cmd + UnitsOfAssign, kept);
         return kept > 0;
@@ -107,6 +110,7 @@ public unsafe partial class AiAssist
                     if (!AdvanceDrop(country, tag, drop, hour)) EndDrop(tag, drop, hour);
                     continue;
                 }
+                ReserveParatroopers(country, tag); // every pass: a new or replaced front takes its army's free divisions again
                 if (!plan || NextParadrop.TryGetValue(tag, out var next) && hour - next < 0 || Grads.ContainsKey(tag)) continue; // on its grad: no new drops behind the enemy
                 NextParadrop[tag] = hour + RetryHours;
                 StartDrop(country, tag, hour);
@@ -184,6 +188,79 @@ public unsafe partial class AiAssist
             return;
         }
         StartBeachDrop(country, tag, hour);
+    }
+
+    /// <summary>
+    /// The paratroopers of AI countries off their grad: kept off the fronts (taken off once, and never assigned again), so they
+    /// stand ready for a drop instead of fighting as line infantry in vanilla's offensives, which kept every one of Germany's
+    /// worn out. Without transport planes yet (Germany at the start of the war) they are the reserve FrontLine plugs and
+    /// thickens the line with (unassigned divisions). AI threads read it.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, int> Reserved = new(); // paratrooper CRef -> tag
+
+    private static void ReserveParatroopers(nint country, int tag)
+    {
+        foreach (var (unit, owner) in Reserved) if (owner == tag) Reserved.TryRemove(unit, out _);
+        var paratroopers = Game.Units(country).ToArray().Where(u => u != 0 && CanDrop(u)).ToList();
+        if (paratroopers.Count == 0 || Grads.ContainsKey(tag)) return;
+        foreach (var unit in paratroopers)
+        {
+            Reserved[Division.Ref(unit)] = tag;
+            if (Paratrooper(unit) || Division.Fighting(unit) || !Division.Ready(unit, tag) || Division.Group(unit) is not (var g and not 0)) continue;
+            if (OnOrder(unit, g) && Commands.Unassign(unit, g, true)) Interlocked.Increment(ref _paratroopersReserved);
+            // Off its order it stays where it stood: it waits at an airbase instead, where a drop can start from.
+            else if (!Division.Walking(unit) && Division.Location(unit) is var at && at != 0 && DropBase(country, tag, at, g) is var wait and > 0
+                && wait != Game.Id(at)) Commands.Move(unit, wait, true);
+        }
+    }
+
+    private const int DropBaseSearch = 12; // provinces from the paratrooper: drops are flown from near the front
+
+    /// <summary>
+    /// Where a paratrooper off the fronts waits, as a province id: within DropBaseSearch of it and with no enemy next to it, a
+    /// province vanilla accepts as a paradrop source (transports there), else the main province of the state with the best
+    /// air base, else where it stands when that is safe, else a province behind the line (-1: none).
+    /// </summary>
+    private static int DropBase(nint country, int tag, nint from, nint group)
+    {
+        var seen = new HashSet<int> { Game.Id(from) };
+        var ring = new List<nint> { from };
+        var (bestState, bestLevel) = ((nint)0, 0);
+        for (var depth = 0; depth <= DropBaseSearch && ring.Count > 0; depth++)
+        {
+            var next = new List<nint>();
+            foreach (var p in ring)
+            {
+                if (Province.Controller(p) != tag) continue;
+                if (!Province.NextToEnemy(country, tag, p))
+                {
+                    if (_isParadropSource(p, group) != 0) return Game.Id(p);
+                    if (Province.State(p) is var s && s != 0)
+                    {
+                        var level = 0;
+                        foreach (var type in Buildings.AirBaseTypes) level += Buildings.WorkingLevel(State.Buildings(s), type);
+                        if (level > bestLevel) (bestState, bestLevel) = (s, level);
+                    }
+                }
+                foreach (var id in Game.Neighbours(p))
+                    if (seen.Add(id) && Game.Province(id) is var q && q != 0) next.Add(q);
+            }
+            ring = next;
+        }
+        if (bestState != 0 && State.MainProvince(bestState) is var main && main != 0 && Province.Controller(main) == tag && !Province.NextToEnemy(country, tag, main))
+            return Province.State(from) == bestState ? Game.Id(from) : Game.Id(main);
+        return Province.NextToEnemy(country, tag, from) ? RestProvince(country, tag, from) : Game.Id(from);
+    }
+
+    /// <summary>The unit is a member of one of its army's or army group's orders.</summary>
+    private static bool OnOrder(nint unit, nint group)
+    {
+        var member = unit + MemberOfUnit;
+        foreach (var owner in (ReadOnlySpan<nint>)[group, *(nint*)(group + OrdersGroup.ParentOffset)])
+            if (owner != 0)
+                foreach (var order in Native.PdxArray(owner + OrdersGroup.RootOrdersOffset))
+                    if (order != 0 && Order.Members(order).Contains(member)) return true;
+        return false;
     }
 
     private static void Begin(int tag, Drop drop)

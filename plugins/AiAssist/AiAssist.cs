@@ -93,6 +93,17 @@ public unsafe partial class AiAssist : Plugin
         var airTraining = Config.Bind("AI", "AirTraining", true,
             "The AI trains its green air wings (under the second experience level) on the training mission instead of flying them where nothing happens: at peace any wing it would send on a mission, "
             + "at war fighters it would send to patrol a land region no enemy plane flies in. At most half of a country's wings train at once; trained ones go back to the AI's missions.");
+        var armyTraining = Config.Bind("AI", "ArmyTraining", true,
+            "AI armies with nothing to do train their divisions up to regular: at peace any army, at war armies holding no front (garrisons, reserves), "
+            + "while none of their divisions fights, stands next to enemy ground or is under 70 % strength. Vanilla stops every exercise once a war starts and never trains armies on no front.");
+        var navalTraining = Config.Bind("AI", "NavalTraining", true,
+            "At peace, AI task forces no naval objective takes train until their ships are regulars, instead of waiting in port (vanilla stops training once world tension passes 50 %).");
+        var shoreBombardment = Config.Bind("AI", "ShoreBombardment", true,
+            "At war, AI task forces with guns no naval objective takes go to the sea next to the country's coastal land battles and hold there, "
+            + "where their shore bombardment weakens the enemy divisions (vanilla sends them to port).");
+        var stableLeaders = Config.Bind("AI", "StableLeaders", true,
+            "The AI doesn't take a general or field marshal from an army or army group he commands: vanilla's daily leader choice took them from each other's groups "
+            + "and back again (a group left without a leader took the next best, even one leading elsewhere), so every army changed its leader every day or two.");
         var productionLines = Config.Bind("AI", "ProductionLines", true,
             "The AI keeps factories on production lines that have built up efficiency: a small cut (up to a quarter) to equipment whose lines average 35 %+ efficiency is held for a while "
             + "and the factories come off the smallest increases elsewhere; vanilla moves them to other equipment, where they start over at 10 %. Big cuts and full stops go through.");
@@ -184,6 +195,9 @@ public unsafe partial class AiAssist : Plugin
         if (refit) LoadRefit();
         if (_airRetreat || _bombingTargets || _strategicInvasions) LoadRegionPriorities();
         if (airTraining) LoadAirTraining();
+        if (armyTraining) LoadArmyTraining();
+        if (stableLeaders) Patches.Bytes(Sig.Find(Signatures.LeaderStealBranch) + 0xF, "75", "EB"); // jnz -> jmp: a leader of another group scores -100, as one whose group is fighting
+        if (navalTraining || shoreBombardment) LoadNavy(navalTraining, shoreBombardment);
         if (productionLines) LoadProductionLines(stickyDays);
         if (_axis) LoadCas();
         if (_holdLine || _axis) LoadFronts();
@@ -202,6 +216,7 @@ public unsafe partial class AiAssist : Plugin
         if (supplyHubs) LoadSupplyHubs();
         if (groundCrews) LoadGroundCrews();
         if (_holdLine || _attackTargets) MainThread.Every(TimeSpan.FromSeconds(1), Micro);
+        if (_holdLine) MainThread.Every(TimeSpan.FromSeconds(1), KeepHeadquarters);
         if (_beachDefense) MainThread.Every(TimeSpan.FromSeconds(1), DefendBeachheads);
         MainThread.Every(TimeSpan.FromMinutes(1), LogStats);
     }
@@ -226,8 +241,19 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _pulled, "lowered {0} lost air region(s)");
         Add(ref _bombing, "aimed {0} strategic bombing plan(s) at the front");
         Add(ref _training, "put {0} green air wing(s) on training");
+        Add(ref _armiesTraining, "started training in {0} AI army/armies");
+        Add(ref _armiesStopped, "stopped training in {0} AI army/armies");
+        Add(ref _fleetsTraining, "put {0} AI task force(s) on training");
+        Add(ref _fleetsSplit, "split {0} AI task force(s) to bombard two coastal battles");
+        Add(ref _fleetsBombarding, "sent {0} AI task force(s) to bombard a coastal battle");
+        Add(ref _headquartersPulled, "took {0} army HQ(s) off the front");
+        Add(ref _keptOnLine, "kept {0} line division(s) from being reassigned off the line (pocket fronts)");
+        Add(ref _keptBase, "kept {0} air wing(s) from flying back to the base they left this week");
         Add(ref _stuck, "held factories on efficient lines in {0} AI production plan(s)");
         Add(ref _raised, "raised {0} front request(s) to cover the line");
+        Add(ref _frontOrdersDropped, "dropped {0} AI front order(s) on bystanders' borders or allies' lines overseas");
+        Add(ref _overseas, "freed {0} front request(s) on allies' fronts overseas");
+        Add(ref _bystanders, "freed {0} front request(s) on borders the AI marks as no target");
         Add(ref _unguarded, "freed {0} coast and home garrison request(s) of countries whose enemies hold no port");
         Add(ref _backfilled, "filled {0} hole(s) in AI lines");
         Add(ref _drives, "drove {0} mobile division(s) through gaps in enemy lines");
@@ -239,6 +265,8 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _depth, "posted {0} second-line division(s) behind key line provinces");
         Add(ref _returned, "put {0} division(s) back on their own order");
         Add(ref _stopped, "stopped {0} running offensive(s) on thinly manned fronts");
+        Add(ref _beatenStops, "called off {0} offensive(s) losing most of their attacks");
+        Add(ref _trappedStops, "called off {0} offensive(s) pushing into a salient whose way back is closing");
         Add(ref _fireBrigade, "sent {0} reserve(s) against break-ins");
         Add(ref _rested, "rested {0} worn-out division(s)");
         Add(ref _escaped, "pulled {0} division(s) out of closing salients");
@@ -249,6 +277,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _spearheads, "put {0} breakthrough axis/axes on the AI's armoured spearhead");
         Add(ref _paradropped, "launched {0} AI paradrop(s)");
         Add(ref _beachDrops, "readied {0} AI paradrop(s) behind a beachhead");
+        Add(ref _paratroopersReserved, "took {0} paratrooper division(s) off the front for drops");
         Add(ref _noParatroopers, "paradrops: {0} axis check(s) found no ready paratroopers");
         Add(ref _noAirbase, "paradrops: {0} found no source airbase with transport planes");
         Add(ref _noTarget, "paradrops: {0} found no target");
