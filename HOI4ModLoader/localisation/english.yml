@@ -7,4 +7,5 @@
     HOIMOD_STATUS_OFF_MP:0 "Enabled: it changes game rules, so it rests in multiplayer and starts again in single player."
     HOIMOD_STATUS_FAILED:0 "Failed to load: see HOI4ModLoader/LogOutput.log."
     HOIMOD_SP_ONLY:0 "Single player only: it changes game rules."
+    HOIMOD_SETTING_NONE:0 "(none)"
     HOIMOD_UPDATE_INSTALLED:0 "{0} installed: restart the game to use it"

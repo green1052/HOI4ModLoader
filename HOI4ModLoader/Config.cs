@@ -11,12 +11,19 @@ public sealed class ConfigFile
     private readonly string _path;
     private readonly List<string> _lines;
     private readonly HashSet<(string Section, string Key)> _bound = []; // bound through this instance
+    // Settings with a list of values, by file: the settings menu reads its own ConfigFile of the same file.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, string Section, string Key), Func<IReadOnlyList<string>>> ChoiceLists = new();
 
     public ConfigFile(string path)
     {
         _path = path;
         _lines = File.Exists(path) ? [.. File.ReadAllLines(path)] : [];
     }
+
+    /// <summary>The values the settings menu's arrows step through for a text setting (made each time it is shown).</summary>
+    public void Choices(string section, string key, Func<IReadOnlyList<string>> choices) => ChoiceLists[(_path, section, key)] = choices;
+
+    internal IReadOnlyList<string>? ChoicesOf(string section, string key) => ChoiceLists.TryGetValue((_path, section, key), out var choices) ? choices() : null;
 
     public T Bind<T>(string section, string key, T defaultValue, string description) where T : IConvertible
     {

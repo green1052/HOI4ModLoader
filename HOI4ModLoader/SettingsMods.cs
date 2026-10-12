@@ -265,18 +265,18 @@ internal static unsafe class SettingsMods
             var index = _first + row;
             Visible(container, index < _entries.Count);
             if (index >= _entries.Count) continue;
-            var (_, key, value, _) = _entries[index];
+            var (section, key, value, _) = _entries[index];
             Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Gui.Literal(Loc.Get($"{_plugin}.{key}", key)));
             var isBool = bool.TryParse(value, out var on);
-            var isNumber = !isBool && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+            var stepped = !isBool && (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) || Loader.Config(_plugin!).ChoicesOf(section, key) != null);
             var check = Gui.Find(container, CheckBoxSlot, "hoimod_setting_check");
             Shown(check, isBool);
             if (isBool) Check(check, on);
-            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), isNumber);
-            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), isNumber);
+            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_decrease"), stepped);
+            Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), stepped);
             var shownValue = Gui.FindTextBox(container, "hoimod_setting_value");
             Shown(shownValue, !isBool);
-            if (!isBool) Gui.SetText(shownValue, Gui.Literal(value));
+            if (!isBool) Gui.SetText(shownValue, value == "" ? Loc.Get("HOIMOD_SETTING_NONE", "(none)") : Gui.Literal(value));
         }
     }
 
@@ -286,12 +286,21 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnIncrease(nint row) => Guard(() => Step(row, +1));
 
-    /// <summary>Changes a number by a step that fits its size (1 for 0..99, 10 for 100..999, ...); Shift: 10 steps.</summary>
+    /// <summary>
+    /// Changes a number by a step that fits its size (1 for 0..99, 10 for 100..999, ...), or a text setting with choices to
+    /// the next or previous one (wrapping around); Shift: 10 steps.
+    /// </summary>
     private static void Step(nint row, int direction)
     {
         if (_plugin == null || _first + row >= _entries.Count) return;
         var (section, key, value, description) = _entries[_first + (int)row];
-        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole))
+        if (Loader.Config(_plugin).ChoicesOf(section, key) is { Count: > 0 } choices)
+        {
+            var at = Math.Max(0, choices.ToList().FindIndex(c => c.Equals(value, StringComparison.OrdinalIgnoreCase)));
+            var next = ((at + direction * (Gui.ShiftHeld ? 10 : 1)) % choices.Count + choices.Count) % choices.Count;
+            Save(section, key, choices[next], description);
+        }
+        else if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole))
         {
             var step = (long)Math.Max(1, Math.Pow(10, Math.Floor(Math.Log10(Math.Max(1, Math.Abs(whole)))) - 1));
             Save(section, key, (whole + direction * step * (Gui.ShiftHeld ? 10 : 1)).ToString(CultureInfo.InvariantCulture), description);

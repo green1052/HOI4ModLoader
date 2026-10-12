@@ -32,6 +32,9 @@ public static class Loader
     private static int _generation;
     private static bool _started; // the first load (at startup) ran
 
+    /// <summary>Plugins are loading for the first time, before the game reads its files; false on later (hot) reloads.</summary>
+    public static bool AtStartup { get; private set; } = true;
+
     /// <summary>Called once by the native bootstrap (version.dll), before the game's entry point.</summary>
     [UnmanagedCallersOnly]
     public static void Init()
@@ -89,6 +92,7 @@ public static class Loader
             Patches.Owner = null;
 
             LoadPlugins();
+            AtStartup = false;
 
             Patches.Owner = "HOI4ModLoader";
             if (followMultiplayer) MainThread.Every(TimeSpan.FromMilliseconds(250), FollowMultiplayer);

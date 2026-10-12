@@ -31,11 +31,21 @@ public sealed class Fonts : Plugin
             "Glyph size against the original font's line height (%): bigger or smaller text in the same lines."), 50, 150);
         var keep = Config.Bind("Fonts", "Keep", "typewriter",
             "Fonts that stay the game's own: comma-separated parts of their file names (e.g. typewriter,mapfont).").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (font == "") return;
+        var dir = FontDir();
+        // The settings menu's arrows step through the installed fonts that have the language's characters.
+        var installed = new Lazy<IReadOnlyList<string>>(() => ["", .. Gdi.Families(dir switch
+        {
+            "gfx/fonts/korean" => 129,   // HANGEUL_CHARSET
+            "gfx/fonts/japanese" => 128, // SHIFTJIS_CHARSET
+            "gfx/fonts/chinese" => 134,  // GB2312_CHARSET
+            _ => 1,                      // DEFAULT_CHARSET: all
+        })]);
+        Config.Choices("Fonts", "Font", () => installed.Value);
+        Config.Choices("Fonts", "HeaderFont", () => installed.Value);
+        if (font == "" || !Loader.AtStartup) return; // a reload (a setting changed in the menu): the game read its fonts already
         if (header == "") header = font;
 
         var gameDir = Path.GetDirectoryName(Loader.ModsDir)!;
-        var dir = FontDir();
         var fnts = Directory.GetFiles(Path.Combine(gameDir, dir), "*.fnt")
             .Where(f => !keep.Any(k => Path.GetFileName(f).Contains(k, StringComparison.OrdinalIgnoreCase))).Order().ToList();
         var faces = new[] { font, header }.Distinct().ToDictionary(spec => spec, Face);
@@ -311,6 +321,8 @@ internal sealed unsafe class Gdi : IDisposable
     [DllImport("gdi32")] private static extern bool DeleteDC(nint dc);
     [DllImport("gdi32", CharSet = CharSet.Unicode)] private static extern int GetTextFaceW(nint dc, int count, char* face);
     [DllImport("gdi32", CharSet = CharSet.Unicode)] private static extern uint GetGlyphIndicesW(nint dc, char* text, int count, ushort* indices, uint flags);
+    [DllImport("gdi32", CharSet = CharSet.Unicode)]
+    private static extern int EnumFontFamiliesExW(nint dc, byte* logFont, delegate* unmanaged<byte*, nint, uint, nint, int> proc, nint param, uint flags);
     [DllImport("gdi32")] private static extern uint GetFontData(nint dc, uint table, uint offset, byte* buffer, uint size);
     [DllImport("gdi32")] private static extern uint GetGlyphOutlineW(nint dc, uint glyph, uint format, GlyphMetrics* metrics, uint size, byte* buffer, int* matrix);
 
@@ -327,6 +339,32 @@ internal sealed unsafe class Gdi : IDisposable
         SelectObject(_dc, _font);
         var name = stackalloc char[64];
         Face = new string(name, 0, Math.Max(0, GetTextFaceW(_dc, 64, name) - 1));
+    }
+
+    /// <summary>Installed outline (TrueType/OpenType) families with characters of <paramref name="charSet"/>, sorted; vertical "@" variants left out.</summary>
+    public static List<string> Families(byte charSet)
+    {
+        var dc = CreateCompatibleDC(0);
+        var logFont = stackalloc byte[92]; // LOGFONTW, an empty face name: every family
+        new Span<byte>(logFont, 92).Clear();
+        logFont[23] = charSet;              // lfCharSet
+        var found = new HashSet<string>();
+        var handle = GCHandle.Alloc(found);
+        try { EnumFontFamiliesExW(dc, logFont, &OnFamily, GCHandle.ToIntPtr(handle), 0); }
+        finally
+        {
+            handle.Free();
+            DeleteDC(dc);
+        }
+        return [.. found.Order(StringComparer.CurrentCulture)];
+    }
+
+    [UnmanagedCallersOnly]
+    private static int OnFamily(byte* logFont, nint metrics, uint type, nint param)
+    {
+        var name = new string((char*)(logFont + 28)); // lfFaceName
+        if ((type & 1) == 0 && !name.StartsWith('@')) ((HashSet<string>)GCHandle.FromIntPtr(param).Target!).Add(name); // 1: a bitmap font
+        return 1;
     }
 
     /// <summary>The selected font's family names, in every language it has (Windows matches any of them).</summary>
