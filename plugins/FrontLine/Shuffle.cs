@@ -9,7 +9,7 @@ public partial class FrontLine
     private const int LostHours = 48, LosingProvinces = 3; // several provinces lost (or being lost) in two days: a crisis
     private const int CrisisHours = 24;                    // a crisis is over a day after the front last looked like one
     private const int MaxShufflesPerTurn = 2, ShuffleRadius = 25, MinThreat = 4;
-    private const int MaxPins = 6, MaxPinsPerTurn = 2, PinRadius = 2, PinOdds = 2, PinOrg = 70, PinStopOrg = 40;
+    private const int MaxPins = 6, MaxPinsPerTurn = 2, PinRadius = 2, PinOdds = 2, PinStopOrg = 40;
 
     /// <summary>A front order of ours, rebuilt every turn. Key: its army or army group and order id (stable across turns).</summary>
     private sealed class Front(nint order, (nint Group, int Id) key)
@@ -134,7 +134,7 @@ public partial class FrontLine
                 bool Spare(nint u)
                 {
                     var order = _orders[u + MemberOfUnit]; // members of budget fronts only
-                    if (budget[order] <= 0 || Org(u) < 80 || Str(u) < 70) return false;
+                    if (budget[order] <= 0 || Org(u) < FreshOrg || Str(u) < FreshStr) return false;
                     budget[order]--;
                     return true;
                 }
@@ -195,7 +195,7 @@ public partial class FrontLine
                 if (target == 0 || !Enemy(country, tag, target)) continue;
                 var defenders = Province.Units(target).ToArray().Where(u => u != 0).ToArray();
                 if (defenders.Length == 0 || defenders.Length * (Province.FortLevel(target) / 2 + 1) > PinOdds || defenders.Any(Division.Fighting)) continue; // empty: Attack's; busy already
-                var unit = here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= PinOrg && Str(u) >= 70).OrderByDescending(Org).FirstOrDefault();
+                var unit = here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr).OrderByDescending(Org).FirstOrDefault();
                 if (unit == 0) break;
                 Send(unit, id, Job.Pin, Game.Id(from), id, crisis.Key);
                 here.Remove(unit);

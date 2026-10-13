@@ -177,6 +177,7 @@ public unsafe partial class FrontLine
 
     private const int ReserveLine = 4, MaxReserves = 4, MinReserveLine = 3, MaxPostsPerTurn = 2, FireRadius = 3, MaxCountersPerTurn = 2;
     private const int ReserveReach = 12; // provinces a mobile reserve may come from: armour is few and often far (Germany's in Poland)
+    private const int StrikeOrg = 70, StrikeStr = 50; // a reserve on its post strikes down to this (it fights next door, then rests there)
 
     /// <summary>
     /// Reserves back from a counterattack return to their post; ones whose post the line moved away from (or onto) go back to
@@ -184,32 +185,7 @@ public unsafe partial class FrontLine
     /// </summary>
     private void Counterattack(nint country, int tag, IEnumerable<Front> all)
     {
-        var fronts = all.ToList();
-        var ready = new Dictionary<nint, List<nint>>(); // province -> reserves there ready to strike
-        foreach (var (unit, held) in _held.ToArray())
-        {
-            if (held.Job is not (Job.Reserve or Job.Counter) || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
-            var front = fronts.FirstOrDefault(f => f.Key == held.Front);
-            var post = Game.Province(held.Post);
-            if (front == null || post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post) || !Near(post, front.Line))
-            {
-                if (Release(unit, tag)) Log.Info("fire brigade: the line moved, a reserve goes back to its front");
-                continue;
-            }
-            var location = Division.Location(unit);
-            if (location != post)
-            {
-                Commands.Move(unit, held.Post, _force); // back from a counterattack, or pushed off its post
-                _pending[unit] = _now + PendingMs;
-                _held[unit] = held with { Job = Job.Reserve, Target = 0 };
-                continue;
-            }
-            if (held.Job == Job.Counter) _held[unit] = held with { Job = Job.Reserve, Target = 0 };
-            if (Org(unit) < 70 || Str(unit) < 50) continue;
-            if (!ready.TryGetValue(location, out var here)) ready[location] = here = [];
-            here.Add(unit);
-        }
-
+        var ready = ReadyReserves(country, tag, all.ToList());
         var counters = 0;
         foreach (var (location, here) in ready.ToArray())
         {
@@ -241,6 +217,39 @@ public unsafe partial class FrontLine
             counters++;
             Log.Info($"fire brigade: {team.Count} reserve(s) counterattack a break-in ({defenders} enemy division(s))");
         }
+    }
+
+    /// <summary>
+    /// The reserves' upkeep: back to their post after a counterattack (or pushed off it), back to their front where the line
+    /// moved. The ones on their post fit to strike, by province.
+    /// </summary>
+    private Dictionary<nint, List<nint>> ReadyReserves(nint country, int tag, List<Front> fronts)
+    {
+        var ready = new Dictionary<nint, List<nint>>(); // province -> reserves there ready to strike
+        foreach (var (unit, held) in _held.ToArray())
+        {
+            if (held.Job is not (Job.Reserve or Job.Counter) || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
+            var front = fronts.FirstOrDefault(f => f.Key == held.Front);
+            var post = Game.Province(held.Post);
+            if (front == null || post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post) || !Near(post, front.Line))
+            {
+                if (Release(unit, tag)) Log.Info("fire brigade: the line moved, a reserve goes back to its front");
+                continue;
+            }
+            var location = Division.Location(unit);
+            if (location != post)
+            {
+                Commands.Move(unit, held.Post, _force); // back from a counterattack, or pushed off its post
+                _pending[unit] = _now + PendingMs;
+                _held[unit] = held with { Job = Job.Reserve, Target = 0 };
+                continue;
+            }
+            if (held.Job == Job.Counter) _held[unit] = held with { Job = Job.Reserve, Target = 0 };
+            if (Org(unit) < StrikeOrg || Str(unit) < StrikeStr) continue;
+            if (!ready.TryGetValue(location, out var here)) ready[location] = here = [];
+            here.Add(unit);
+        }
+        return ready;
     }
 
     /// <summary>
@@ -298,11 +307,11 @@ public unsafe partial class FrontLine
             if (_held.Values.Count(h => h.Job is Job.Reserve or Job.Counter && h.Front == front.Key) >= want) continue;
             var post = Post(country, tag, front.Line, posts);
             if (post == 0) continue;
-            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Division.Motorized(u) && Org(u) >= 80 && Str(u) >= 70);
+            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Division.Motorized(u) && Org(u) >= FreshOrg && Str(u) >= FreshStr);
             var unit = Take(tag, post, ReserveReach, pool);
             if (unit == 0 && _force)
             {
-                infantry ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Org(u) >= 80 && Str(u) >= 70);
+                infantry ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => Org(u) >= FreshOrg && Str(u) >= FreshStr);
                 unit = Take(tag, post, FireRadius + 3, infantry);
             }
             if (unit == 0) continue;
@@ -363,7 +372,7 @@ public unsafe partial class FrontLine
         foreach (var (wall, breach) in walls.OrderByDescending(w => Game.Neighbours(w.Key).Count(n => Game.Province(n) is var e && e != 0 && Enemy(country, tag, e))))
         {
             if (posted == MaxCordonsPerTurn) break;
-            pool ??= Pool(country, tag, units, true, u => Org(u) >= 60 && Str(u) >= 50);
+            pool ??= Pool(country, tag, units, true, u => Org(u) >= WallOrg && Str(u) >= WallStr);
             var unit = Take(tag, wall, CordonRadius, pool);
             if (unit == 0) continue;
             Send(unit, Game.Id(wall), Job.Cordon, Game.Id(wall), Game.Id(breach));
@@ -430,7 +439,7 @@ public unsafe partial class FrontLine
             if (posted == MaxDepthPerTurn) return;
             var post = Post(country, tag, [province], posts);
             if (post == 0) continue;
-            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => !(_fireBrigade && Division.Motorized(u)) && Org(u) >= 70 && Str(u) >= 60);
+            pool ??= Pool(country, tag, fronts.SelectMany(f => f.Units), false, u => !(_fireBrigade && Division.Motorized(u)) && Org(u) >= HelperOrg && Str(u) >= HelperStr);
             var unit = Take(tag, post, DepthRadius, pool);
             if (unit == 0) continue;
             var id = Game.Id(post);

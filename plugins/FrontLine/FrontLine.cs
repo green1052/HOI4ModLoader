@@ -50,6 +50,10 @@ public unsafe partial class FrontLine : Plugin
     private const int MaxSwapsPerArmy = 2;    // sent to rest at a time, so a front never changes all at once
     private const int MaxRestHours = 14 * 24; // resting this long, it goes back whatever its state (supply may never let it recover)
     private const int GuardHours = 7 * 24;    // a plugging or thicken helper holds its defence that long at most
+    // Organisation and strength (%) a division needs for a job. Fresh: a post or a reinforcement that may wait a while (reserves,
+    // thickening, a quiet front's spare). Attack: an attack of its own (pins too). Helper: into a defence being lost, or a
+    // second line (help that arrives beats the best help that doesn't). Wall: an empty province next to a breach.
+    private const int FreshOrg = 80, FreshStr = 70, AttackOrg = 70, AttackStr = 70, HelperOrg = 70, HelperStr = 60, WallOrg = 60, WallStr = 50;
     private const long PendingMs = 30_000;    // a unit we gave orders to is left alone meanwhile (multiplayer: a round trip)
     private const long AiBudgetMs = 20;       // AI countries' turns per tick, round robin: the rest wait for the next tick
 
@@ -487,7 +491,7 @@ public unsafe partial class FrontLine : Plugin
             var id = Game.Id(province);
             if (_sent.ContainsKey(id)) continue; // its helpers are on their way
             if (_force && _lure && Lure(country, tag, province)) continue;
-            helpers ??= Pool(country, tag, units, true, u => Org(u) >= 70 && Str(u) >= 60);
+            helpers ??= Pool(country, tag, units, true, u => Org(u) >= HelperOrg && Str(u) >= HelperStr);
             var eta = _eta.GetValueOrDefault(province, double.PositiveInfinity);
             var sent = new List<nint>();
             for (var n = eta < UrgentPlugHours ? 2 : 1; n > 0; n--)
@@ -528,7 +532,7 @@ public unsafe partial class FrontLine : Plugin
         foreach (var (province, enemy, ours) in thin.OrderByDescending(t => t.Enemy / (double)Math.Max(1, t.Ours)))
         {
             if (thickened == MaxThickensPerTurn) break;
-            helpers ??= Pool(country, tag, units, true, u => Org(u) >= 80 && Str(u) >= 70);
+            helpers ??= Pool(country, tag, units, true, u => Org(u) >= FreshOrg && Str(u) >= FreshStr);
             var helper = Take(tag, province, MaxRestSearch, helpers);
             if (helper == 0) continue;
             var id = Game.Id(province);
@@ -563,7 +567,7 @@ public unsafe partial class FrontLine : Plugin
             frontier = frontier.SelectMany(p => Game.Neighbours(p)).Select(Game.Province).Where(p => p != 0 && seen.Add(p) && Province.Controller(p) == tag).ToList();
             foreach (var p in frontier)
             foreach (var u in Province.Units(p))
-                if (u != 0 && Division.IsLand(u) && Division.Commander(u) == tag && Division.Motorized(u) && Org(u) >= 70 && !Division.Fighting(u)) reserves++;
+                if (u != 0 && Division.IsLand(u) && Division.Commander(u) == tag && Division.Motorized(u) && Org(u) >= AttackOrg && !Division.Fighting(u)) reserves++;
         }
         if (reserves < MinLureReserves || attackers > 2 * reserves) return false;
         var id = Game.Id(province);
@@ -596,9 +600,10 @@ public unsafe partial class FrontLine : Plugin
             if (_orders.TryGetValue(unit + MemberOfUnit, out var order))
             {
                 var stay = left.GetValueOrDefault((order, location)) - 1;
-                if (!IsFront(order) || !wanted(unit)) continue;
+                if (!IsFront(order)) continue;
                 if (InContact(country, tag, unit) ? stay < 2 || Division.Fighting(unit) || stay < EnemiesNext(country, tag, location)
                     : stay < 1 && Province.NextToEnemy(country, tag, location)) continue; // needed where it is (behind the line nobody is)
+                if (!wanted(unit)) continue; // last: it may count the division as taken (Shuffle's budget)
                 left[(order, location)]--;
             }
             else if (!(unassigned || resting) || !wanted(unit)) continue;

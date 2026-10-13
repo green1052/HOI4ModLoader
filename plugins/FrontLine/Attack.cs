@@ -6,7 +6,7 @@ public partial class FrontLine
 {
     // ---- Attack: empty and surrounded enemy provinces next to the line, best targets first ----
 
-    private const int MinValue = 15;
+    private const int MinValue = 15, MaxFrontChange = 2; // a target worth less than MinValue may lengthen the front this much at most
     private const int SupplyShare = 25; // % of what the attacking province needs it must get, or a friendly neighbour of the target must have spare
 
     /// <summary>
@@ -25,7 +25,7 @@ public partial class FrontLine
         foreach (var (from, here) in _at)
         {
             if (here.Count < 2) continue; // one stays
-            var ready = fresh[from] = here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= 70 && Str(u) >= 70).OrderByDescending(Org).ToList();
+            var ready = fresh[from] = here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr).OrderByDescending(Org).ToList();
             if (ready.Count == 0) continue;
             foreach (var id in Game.Neighbours(from))
             {
@@ -38,7 +38,7 @@ public partial class FrontLine
                 var pocket = defenders > 0 ? defenders : Province.Pocket(country, tag, target);
                 if (pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue; // our supply can't follow
                 var (value, change) = (Value(target) + PortPull(country, tag, from, target), Province.FrontChange(country, tag, target));
-                if (pocket == 0 && value < MinValue && change > 2) continue;      // a much longer front for nothing
+                if (pocket == 0 && value < MinValue && change > MaxFrontChange) continue; // a much longer front for nothing
                 targets.Add((from, id, need, defenders, pocket, value, change));
             }
         }
@@ -52,14 +52,7 @@ public partial class FrontLine
             if (t.Need > ready.Count || t.Need >= here.Count) continue;
             var sent = ready.GetRange(0, t.Need);
             ready.RemoveRange(0, t.Need);
-            foreach (var unit in sent)
-            {
-                Arrow(unit, t.To, "assault", t.Pocket > 0 ? ((byte)255, (byte)40, (byte)40) : ((byte)255, (byte)140, (byte)0));
-                Commands.Move(unit, t.To, _force);
-                _pending[unit] = _now + PendingMs;
-                here.Remove(unit);
-            }
-            _sent[t.To] = ([.. sent], true);
+            Strike(sent, t.To, t.Pocket > 0);
             attacks++;
             Log.Info(t.Defenders == 0 ? $"opportunity: a fresh division takes an empty enemy province (value {t.Value:0}, cuts off {t.Pocket} enemy division(s))"
                 : $"mop-up: {t.Need} fresh division(s) attack {t.Defenders} surrounded enemy division(s)");
@@ -77,73 +70,85 @@ public partial class FrontLine
     /// </summary>
     private void Assault(nint country, int tag, int max)
     {
-        int Keep(nint from) => NextToEnemy(country, tag, from) ? 1 : 0; // a province on the line keeps one
         var candidates = new Dictionary<int, nint>(); // province id -> it: enemy with divisions, or ours with enemy divisions in it
         foreach (var (from, here) in _at)
         {
-            if (here.Count <= Keep(from)) continue;
+            if (here.Count <= Keep(country, tag, from)) continue;
             foreach (var id in Game.Neighbours(from))
                 if (!_sent.ContainsKey(id) && Game.Province(id) is var p && p != 0
                     && (Enemy(country, tag, p) ? Province.Divisions(p) > 0 : Friendly(country, tag, p) && Hostiles(country, p) > 0))
                     candidates.TryAdd(id, p);
         }
-        var plans = new List<(int To, List<nint> Units, int Pocket, double Odds, double Value, int Port)>();
-        foreach (var (id, target) in candidates)
-        {
-            long defence = 0;
-            foreach (var unit in Province.Units(target))
-                if (unit != 0 && Division.IsLand(unit) && AtWar(country, Division.Commander(unit))) defence += Division.Power(unit);
-            if (defence == 0) continue;
-            var intruders = !Enemy(country, tag, target);
-            var encircled = !intruders && Province.Encircled(country, tag, target);
-            var mopUp = intruders || encircled; // cut off already: any of ours may finish them, at even odds
-            var hard = 1 + Province.FortLevel(target) / 2.0;
-            if ((Province.TerrainCategory(target) & (Province.Mountain | Province.Urban | Province.Marsh | Province.Jungle)) != 0) hard *= 1.5;
-            var (value, change) = (Value(target), Province.FrontChange(country, tag, target));
-            var port = Game.Neighbours(target).Select(Game.Province).Where(_at.ContainsKey).Select(from => PortPull(country, tag, from, target)).DefaultIfEmpty(0).Max();
-            value += port;
-            var pocket = mopUp ? Hostiles(country, target) : Province.Pocket(country, tag, target);
-            if (!mopUp && pocket == 0 && value < MinValue && change > 2) continue;
-            var attackers = new List<(nint Unit, double Power)>();
-            foreach (var nid in Game.Neighbours(target))
-            {
-                var from = Game.Province(nid);
-                if (from == 0 || !_at.TryGetValue(from, out var here) || here.Count <= Keep(from) || Game.AdjacencyType(from, id) == Province.Impassable) continue;
-                if (!mopUp && pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue;
-                var river = Game.AdjacencyType(from, id) is Province.River or Province.LargeRiver ? 1.5 : 1;
-                attackers.AddRange(here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= 70 && Str(u) >= 70 && (_force || mopUp || OnRunningPlan(u)))
-                    .OrderByDescending(Division.Power).Take(here.Count - Keep(from)).Select(u => (u, Division.Power(u) / river)));
-            }
-            var need = defence * hard * (mopUp ? 100 : _odds) / 100;
-            var sent = new List<nint>();
-            double power = 0;
-            foreach (var (unit, p) in attackers.OrderByDescending(a => a.Power))
-            {
-                if (power >= need) break;
-                sent.Add(unit);
-                power += p;
-            }
-            if (power >= need) plans.Add((id, sent, pocket, power / (defence * hard), value, port));
-        }
+        var plans = candidates.Select(c => PlanAssault(country, tag, c.Key, c.Value)).OfType<AssaultPlan>().ToList();
 
         var used = new HashSet<nint>();
         foreach (var plan in plans.OrderByDescending(p => p.Pocket).ThenByDescending(p => p.Port).ThenByDescending(p => p.Odds).ThenByDescending(p => p.Value))
         {
             if (max == 0) break;
             if (plan.Units.Any(used.Contains)) continue; // promised to a better one this turn
-            if (plan.Units.GroupBy(Division.Location).Any(g => _at[g.Key].Count - g.Count() < Keep(g.Key))) continue; // a better one left that province its last
-            foreach (var unit in plan.Units)
-            {
-                Arrow(unit, plan.To, "assault", plan.Pocket > 0 ? ((byte)255, (byte)40, (byte)40) : ((byte)255, (byte)140, (byte)0));
-                Commands.Move(unit, plan.To, _force);
-                _pending[unit] = _now + PendingMs;
-                used.Add(unit);
-                _at[Division.Location(unit)].Remove(unit);
-            }
-            _sent[plan.To] = ([.. plan.Units], true);
+            if (plan.Units.GroupBy(Division.Location).Any(g => _at[g.Key].Count - g.Count() < Keep(country, tag, g.Key))) continue; // a better one left that province its last
+            used.UnionWith(plan.Units);
+            Strike(plan.Units, plan.To, plan.Pocket > 0);
             max--;
             Log.Info($"assault: {plan.Units.Count} fresh division(s) attack a province they outgun {plan.Odds:0.0} to 1 (cuts off {plan.Pocket} enemy division(s))");
         }
+    }
+
+    /// <summary>A province on the line keeps one division; one behind it may send all.</summary>
+    private int Keep(nint country, int tag, nint from) => NextToEnemy(country, tag, from) ? 1 : 0;
+
+    private sealed record AssaultPlan(int To, List<nint> Units, int Pocket, double Odds, double Value, int Port);
+
+    /// <summary>Who of ours next to <paramref name="target"/> would attack it, strongest first, enough to outgun it; null if they can't (or it isn't worth it).</summary>
+    private AssaultPlan? PlanAssault(nint country, int tag, int id, nint target)
+    {
+        long defence = 0;
+        foreach (var unit in Province.Units(target))
+            if (unit != 0 && Division.IsLand(unit) && AtWar(country, Division.Commander(unit))) defence += Division.Power(unit);
+        if (defence == 0) return null;
+        var intruders = !Enemy(country, tag, target);
+        var encircled = !intruders && Province.Encircled(country, tag, target);
+        var mopUp = intruders || encircled; // cut off already: any of ours may finish them, at even odds
+        var hard = 1 + Province.FortLevel(target) / 2.0;
+        if ((Province.TerrainCategory(target) & (Province.Mountain | Province.Urban | Province.Marsh | Province.Jungle)) != 0) hard *= 1.5;
+        var (value, change) = (Value(target), Province.FrontChange(country, tag, target));
+        var port = Game.Neighbours(target).Select(Game.Province).Where(_at.ContainsKey).Select(from => PortPull(country, tag, from, target)).DefaultIfEmpty(0).Max();
+        value += port;
+        var pocket = mopUp ? Hostiles(country, target) : Province.Pocket(country, tag, target);
+        if (!mopUp && pocket == 0 && value < MinValue && change > MaxFrontChange) return null;
+        var attackers = new List<(nint Unit, double Power)>();
+        foreach (var nid in Game.Neighbours(target))
+        {
+            var from = Game.Province(nid);
+            if (from == 0 || !_at.TryGetValue(from, out var here) || here.Count <= Keep(country, tag, from) || Game.AdjacencyType(from, id) == Province.Impassable) continue;
+            if (!mopUp && pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue;
+            var river = Game.AdjacencyType(from, id) is Province.River or Province.LargeRiver ? 1.5 : 1;
+            attackers.AddRange(here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr && (_force || mopUp || OnRunningPlan(u)))
+                .OrderByDescending(Division.Power).Take(here.Count - Keep(country, tag, from)).Select(u => (u, Division.Power(u) / river)));
+        }
+        var need = defence * hard * (mopUp ? 100 : _odds) / 100;
+        var sent = new List<nint>();
+        double power = 0;
+        foreach (var (unit, p) in attackers.OrderByDescending(a => a.Power))
+        {
+            if (power >= need) break;
+            sent.Add(unit);
+            power += p;
+        }
+        return power >= need ? new AssaultPlan(id, sent, pocket, power / (defence * hard), value, port) : null;
+    }
+
+    /// <summary>Attack moves into <paramref name="to"/> (plain moves: front divisions go back to their front by themselves afterwards); nothing more goes there this turn.</summary>
+    private void Strike(List<nint> units, int to, bool pocket)
+    {
+        foreach (var unit in units)
+        {
+            Arrow(unit, to, "assault", pocket ? ((byte)255, (byte)40, (byte)40) : ((byte)255, (byte)140, (byte)0));
+            Commands.Move(unit, to, _force);
+            _pending[unit] = _now + PendingMs;
+            _at[Division.Location(unit)].Remove(unit);
+        }
+        _sent[to] = ([.. units], true);
     }
 
     /// <summary>On an order of a battle plan that is running (the player's go-ahead to attack).</summary>
