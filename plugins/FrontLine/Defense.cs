@@ -231,11 +231,13 @@ public unsafe partial class FrontLine
             if (held.Job is not (Job.Reserve or Job.Counter) || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
             var front = fronts.FirstOrDefault(f => f.Key == held.Front);
             var post = Game.Province(held.Post);
-            if (front == null || post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post) || !Near(post, front.Line))
+            var overrun = post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post);
+            if (overrun || (front == null || !Near(post, front.Line)) && Settled(held))
             {
                 if (Release(unit, tag)) Log.Info("fire brigade: the line moved, a reserve goes back to its front");
                 continue;
             }
+            if (front == null) continue; // its front redrawn this turn: kept until the post settles
             var location = Division.Location(unit);
             if (location != post && _force && held.Job == Job.Reserve)
             {
@@ -305,6 +307,7 @@ public unsafe partial class FrontLine
         Dictionary<nint, List<nint>>? pool = null;
         var posted = 0;
         Dictionary<nint, List<nint>>? infantry = null;
+        if (!PostingDay(tag, "reserve")) return;
         foreach (var front in fronts.OrderByDescending(f => f.Line.Count))
         {
             if (posted == MaxPostsPerTurn || front.Line.Count < MinReserveLine) return;
@@ -329,7 +332,26 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>Provinces our reserves and second-line divisions stand on.</summary>
-    private HashSet<int> Posts() => _held.Values.Where(h => h.Job is Job.Reserve or Job.Counter or Job.Depth or Job.Cordon).Select(h => h.Post).ToHashSet();
+    // An AI post is kept a week however its front's line wobbles (only one overrun or touching the enemy goes at once), and an
+    // AI country takes new posts once a day: let go and taken anew hourly, the posts were most of the AI's back and forth,
+    // each division taken off a battle plan or put back reshuffling the rest of it too.
+    private const int SettleHours = 7 * 24;
+    private readonly Dictionary<(int Tag, string What), int> _postedOn = []; // AI country and feature -> the day it last took posts
+
+    private bool Settled(Held held) => !_force || Game.Hour - held.Since >= SettleHours;
+
+    /// <summary>The player's posts follow the line every turn; an AI country takes new ones on one game day in each.</summary>
+    private bool PostingDay(int tag, string what)
+    {
+        if (!_force) return true;
+        var day = Game.Hour / 24;
+        if (_postedOn.TryGetValue((tag, what), out var last) && last == day) return false;
+        _postedOn[(tag, what)] = day;
+        return true;
+    }
+
+    private HashSet<int> Posts() => _held.Values.Where(h => h.Job is Job.Reserve or Job.Counter or Job.Depth or Job.Cordon).Select(h => h.Post)
+        .Concat(_vacated.Keys.Where(Vacated)).ToHashSet();
 
     // ---- Cordon (defence in depth): a breach is walled in, not fed ----
 
@@ -426,8 +448,8 @@ public unsafe partial class FrontLine
             var post = Game.Province(held.Post);
             // On the line as Survey drew it, not only next to enemy ground: before a war no border is, and every post was
             // given up the turn after it was taken, then taken again three days later (back and forth along the border).
-            if (key == 0 || post == 0 || Province.Controller(key) != tag || !(lines.Contains(key) || NextToEnemy(country, tag, key))
-                || Province.Controller(post) != tag || NextToEnemy(country, tag, post) || lines.Contains(post))
+            var overrun = post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post);
+            if (overrun || (key == 0 || Province.Controller(key) != tag || !(lines.Contains(key) || NextToEnemy(country, tag, key))) && Settled(held))
             {
                 if (Release(unit, tag)) Log.Info("depth defence: the line moved, a second-line division goes back to its front");
             }
@@ -442,9 +464,10 @@ public unsafe partial class FrontLine
         var backed = _held.Values.Where(h => h.Job == Job.Depth).Select(h => h.Target).ToHashSet();
         var posts = Posts();
         posts.UnionWith(lines.Select(Game.Id)); // a post on the line itself would be given up the next turn
+        if (!PostingDay(tag, "depth")) return;
         Dictionary<nint, List<nint>>? pool = null;
         var posted = 0;
-        foreach (var (province, _) in fronts.SelectMany(f => f.Line).Distinct().Where(p => !backed.Contains(Game.Id(p)))
+        foreach (var (province, _) in fronts.SelectMany(f => f.Line).Distinct().Where(p => !backed.Contains(Game.Id(p)) && !Vacated(Game.Id(p)))
                      .Select(p => (Province: p, Key: Key(country, tag, p))).Where(k => k.Key >= MinKey).OrderByDescending(k => k.Key).ToList())
         {
             if (posted == MaxDepthPerTurn) return;

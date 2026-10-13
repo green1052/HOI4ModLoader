@@ -182,8 +182,7 @@ public unsafe partial class AiAssist
         var country = Game.Country(tag);
         if (country == 0) return true;
         var hour = Game.Hour;
-        var overseas = ours.All(p => p != 0 && Province.Controller(p) != tag) && !LandLinked(country, tag, ours[0])
-            && !(AllyLosing(country, tag, ours, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
+        var overseas = Overseas(country, tag, ours.ToHashSet(), hour);
         return !overseas && !Bystanders(country, tag, theirs.Where(p => p != 0));
     }
 
@@ -395,12 +394,12 @@ public unsafe partial class AiAssist
             if (order == 0 || Order.Type(order) != AreaDefenceOrder) continue;
             var divisions = Order.Members(order).Length;
             if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;
-            _log?.Info($"#{tag}: deleted an area defence order of {divisions} division(s): its enemies hold no port");
+            _log?.Info($"#{tag}: deleted an area defence order of {divisions} division(s): its garrisons go to the land fronts");
         }
     }
 
     /// <summary>
-    /// The tag's front orders whose divisions all stand on bystanders' borders (<see cref="Bystanders"/>: no country across that
+    /// The tag's front orders along bystanders' borders (<see cref="Bystanders"/>: no country across that
     /// it expects a war with) are deleted: their divisions go where a war is or may come, instead of facing Luxembourg, Belgium
     /// or Switzerland. A target being prepared (focus, justification, war goal, war preparation) keeps its front.
     /// </summary>
@@ -414,16 +413,19 @@ public unsafe partial class AiAssist
                 if (order == 0 || Order.Type(order) != Order.Front) continue;
                 var members = Order.Members(order);
                 if (members.Length == 0) continue;
+                // The order's own line (its province pairs), as KeepsFrontOrder judged it when drawn: by where its divisions
+                // stood (still walking up, or past a neutral corner on the way) it was drawn and deleted again every day.
                 var across = new HashSet<nint>();
-                foreach (var member in members)
-                    if (Division.Location(member - MemberOfUnit) is var at && at != 0)
-                        foreach (var id in Game.Neighbours(at))
-                            if (Game.Province(id) is var q && q != 0 && Province.Controller(q) is var c && c > 0 && c != tag) across.Add(q);
                 var standing = new List<nint>();
-                foreach (var member in members) if (Division.Location(member - MemberOfUnit) is var at && at != 0) standing.Add(at);
+                var pairs = *(nint*)(order + PairsOfOrder);
+                for (int i = 0, count = *(int*)(order + PairsOfOrder + 0xC); i < count; i++)
+                {
+                    nint ours = *(nint*)(pairs + 16 * i), theirs = *(nint*)(pairs + 16 * i + 8);
+                    if (ours != 0) standing.Add(ours);
+                    if (theirs != 0 && Province.Controller(theirs) is var c && c > 0 && c != tag) across.Add(theirs);
+                }
                 var hour = Game.Hour;
-                var overseas = standing.Count > 0 && standing.All(p => Province.Controller(p) != tag) && !LandLinked(country, tag, standing[0])
-                    && !(AllyLosing(country, tag, standing, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
+                var overseas = Overseas(country, tag, standing.ToHashSet(), hour);
                 if (!overseas && (across.Count == 0 || !Bystanders(country, tag, across))) continue;
                 var divisions = members.Length;
                 if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;

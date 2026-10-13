@@ -235,6 +235,7 @@ public unsafe partial class FrontLine : Plugin
         var side = SideOf(tag);
         (_pending, _held, _sent, _lastSeen, _crisis, _recent) = (side.Pending, side.Held, side.Sent, side.LastSeen, side.Crisis, side.Recent);
         foreach (var (unit, hour) in _recent.ToArray()) if (Game.Hour - hour is < 0 or >= RepeatHours) _recent.Remove(unit);
+        foreach (var (id, hour) in _vacated.ToArray()) if (Game.Hour - hour is < 0 or >= RepeatHours) _vacated.Remove(id);
         _force = tag != Game.ControlledTag;
         var country = Game.Country(tag);
         units = [];
@@ -444,6 +445,7 @@ public unsafe partial class FrontLine : Plugin
             }
             if (held.Job != Job.Rest) continue;
             var overdue = Game.Hour - held.Since >= MaxRestHours;
+            if (!overdue && Game.Hour - held.Since < MinRestHours) continue; // back sooner, the next squeeze of the neck (or drop) sent it off again
             if (!overdue && post != 0 && Province.Controller(post) == tag && Neck(country, tag, post) >= 0) continue; // escaped: its salient still closing
             if (!overdue && (Org(unit) < _returnOrg || Str(unit) < _returnStrength)) continue;
             if (Release(unit, tag)) Log.Info($"a division ({Org(unit):0}% organisation, {Str(unit):0}% strength) is back on its front after {Game.Hour - held.Since} hours off it");
@@ -700,6 +702,8 @@ public unsafe partial class FrontLine : Plugin
         if (!Ready(unit, tag, _now)) return false;
         var held = _held[unit];
         _held.Remove(unit);
+        _recent[unit] = Game.Hour; // not taken again for RepeatHours: retaken at once, it walked to and fro between a post and its order
+        Vacate(held);
         if (held.Order == 0 || Division.Group(unit) != held.Group) return true; // in another army now: the player's
         if (Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs; // its order gone: it stays in the army's reserve
         return true;
@@ -712,10 +716,26 @@ public unsafe partial class FrontLine : Plugin
     /// </summary>
     private void GiveUp(nint unit, string job)
     {
-        if (!_held.Remove(unit)) return;
+        if (!_held.Remove(unit, out var held)) return;
         _recent[unit] = Game.Hour;
+        Vacate(held);
         Log.Info($"{job}: the AI moved a division off its post; left to the AI");
     }
+
+    /// <summary>
+    /// A post (and a second line's key province) left is not filled again for RepeatHours: the next division standing there
+    /// went in its place and was taken back the same way, a new one every day or two.
+    /// </summary>
+    private void Vacate(Held held)
+    {
+        if (held.Job is not (Job.Reserve or Job.Counter or Job.Depth or Job.Cordon)) return;
+        if (held.Post != 0) _vacated[held.Post] = Game.Hour;
+        if (held.Job == Job.Depth && held.Target != 0) _vacated[held.Target] = Game.Hour;
+    }
+
+    private readonly Dictionary<int, int> _vacated = []; // province id -> hour a post (or key) there was left
+
+    private bool Vacated(int id) => _vacated.TryGetValue(id, out var at) && Game.Hour - at is >= 0 and < RepeatHours;
 
     private static bool IsFront(nint order) => Order.Type(order) == Order.Front;
 
@@ -725,8 +745,9 @@ public unsafe partial class FrontLine : Plugin
         && (_held.ContainsKey(unit) || !_recent.ContainsKey(unit)); // an AI division its front order took back: not again for RepeatHours
 
     // The AI's front orders put a division we took off straight back on: sent again it walked to and fro (rotation, escape
-    // in Shandong every few hours). An AI division we sent isn't sent again for three days from then, unless still ours.
-    private const int RepeatHours = 72;
+    // in Shandong every few hours). An AI division we sent isn't sent again for three days from then, unless still ours, and
+    // no division we let go is taken again for three days.
+    private const int RepeatHours = 72, MinRestHours = 72;
     private Dictionary<nint, int> _recent = [];
 
     /// <summary>Ready, and doing no job for us.</summary>

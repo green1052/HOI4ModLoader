@@ -19,6 +19,7 @@ public unsafe partial class AiAssist
     private IHook<BalanceFn>? _armyBalancing;
     private int _raised, _unguarded;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // front line section -> hour last logged
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Need)> Needs = new(); // section -> the week's highest minimum
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> UnguardedAt = new(); // tag -> hour last logged
 
     /// <summary>
@@ -167,12 +168,50 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// At war on a land line, and no enemy at war holds a port (from the last controller scan), or its line went unmanned in
-    /// the last two days: then the coast and city garrisons are wanted on the line more (Germany's West Wall held eleven
-    /// divisions while its ports were guarded); landings are left to the beach defence.
+    /// the last GarrisonHours: then the coast and city garrisons are wanted on the line more (Germany's West Wall held eleven
+    /// divisions while its ports were guarded); landings are left to the beach defence. A month, not the two days a line
+    /// counts as short: the garrisons manned it, two days later they went back to the coast and it was short again (France's
+    /// Maginot Line thin while most of its army guarded the coast).
     /// </summary>
     private static bool CantBeInvaded(nint country, int tag) =>
-        _portHolders is { } ports && HasLine(tag) && (!ports.Any(holder => Game.AtWar(country, holder))
-            || ShortOfMen.TryGetValue(tag, out var short_) && Game.Hour - short_ is >= 0 and < ShortHours);
+        _portHolders is { } ports && (HasLine(tag) && (!ports.Any(holder => Game.AtWar(country, holder))
+            || ShortOfMen.TryGetValue(tag, out var short_) && Game.Hour - short_ is >= 0 and < GarrisonHours) || LandWarAtHome(country, tag));
+
+    private const int GarrisonHours = 30 * 24, CoresOfState = 0xB0;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Day, bool On)> LandWars = new();
+
+    /// <summary>
+    /// A war on its home land border is on or coming: a country at war with it, or one it expects a war with (justification,
+    /// war goal, focus, war preparation, either way), holds ground next to its core ground. The garrisons go to that border
+    /// then, before the war too (Poland guarded its coast while Germany justified a war over Danzig; France its coast in the
+    /// war while the Maginot Line was thin). Not a border far from home (Japan's in China). Cached a day.
+    /// </summary>
+    private static bool LandWarAtHome(nint country, int tag)
+    {
+        var day = Game.Hour / 24;
+        if (LandWars.TryGetValue(tag, out var cached) && cached.Day == day) return cached.On;
+        var on = false;
+        var diplomacy = *(nint*)(country + DiplomacyOfCountry);
+        var controllers = _controllers;
+        if (diplomacy != 0 && controllers.Length > 0)
+        {
+            var hostile = Native.PdxArray<int>(diplomacy + ExpectedTagsOfDiplomacy).ToArray().ToHashSet();
+            var checkedTags = new Dictionary<int, bool>();
+            bool Hostile(int c) => c > 0 && c != tag && (hostile.Contains(c) || (checkedTags.TryGetValue(c, out var w) ? w : checkedTags[c] = Game.AtWar(country, c)));
+            for (var id = 1; id < controllers.Length && !on; id++)
+            {
+                if (controllers[id] != tag) continue;
+                var near = false;
+                foreach (var n in Game.Neighbours(Game.Province(id)))
+                    if ((uint)n < (uint)controllers.Length && Hostile(controllers[n])) { near = true; break; }
+                if (!near) continue;
+                var state = Game.Province(id) is var p && p != 0 ? Province.State(p) : 0;
+                on = state != 0 && Native.PdxArray<int>(state + CoresOfState).Contains(tag);
+            }
+        }
+        LandWars[tag] = (day, on);
+        return on;
+    }
 
     /// <summary>A tracked line of the tag's. Enumerates the dictionary lock-free (Values locks every bucket and copies).</summary>
     private static bool HasLine(int tag)
@@ -270,6 +309,8 @@ public unsafe partial class AiAssist
         nint theatre = 0; // the theatre's country (at war)
         HashSet<nint>? enemyLine = null; // enemy provinces on the theatre's line: the salients' necks are among them
         List<(nint Front, HashSet<nint> Threatened)>? atWar = null; // for railway guns
+        var areaFronts = 0;
+        foreach (var f in Native.PdxArray(general + FrontsOfGeneral)) if (f != 0 && *(int*)(f + AreaDefense) != 0) areaFronts++;
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
@@ -280,7 +321,7 @@ public unsafe partial class AiAssist
             // its Somali line divisions to Kismayo, and its Eritrean ones to ports in Libya and Italy, against Ethiopia.
             if (*(int*)(front + AreaDefense) != 0)
             {
-                if (_holdLine) UnguardAreaDefence(front, country, tag, hour);
+                if (_holdLine) UnguardAreaDefence(front, country, tag, hour, areaFronts);
                 continue;
             }
             var frontLine = Game.Resolve(*(long*)(front + FrontOfAiFront));
@@ -363,18 +404,34 @@ public unsafe partial class AiAssist
         PruneFronts(hour);
     }
 
+    private const int AreaSharePercent = 33;
+
     /// <summary>
     /// Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't land:
-    /// it wants no divisions, and a land war takes them all.
+    /// it wants no divisions, and a land war takes them all. Otherwise, while the country fights on a land line (its own or
+    /// an ally's), its area defence fronts together want at most AreaSharePercent of its land divisions: the British guarded
+    /// France's coast with 36 of their 97 and their Dominions with all of theirs while the line in Belgium was short.
     /// </summary>
-    private void UnguardAreaDefence(nint front, nint country, int tag, int hour)
+    private void UnguardAreaDefence(nint front, nint country, int tag, int hour, int areaFronts)
     {
-        if (*(int*)(front + MaxWanted) <= 0 || !CantBeInvaded(country, tag)) return;
+        if (*(int*)(front + MaxWanted) <= 0) return;
+        if (!CantBeInvaded(country, tag))
+        {
+            if (!HasLine(tag)) return;
+            var divisions = 0;
+            foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) divisions++;
+            var cap = Math.Max(1, divisions * AreaSharePercent / 100 / Math.Max(1, areaFronts));
+            if (*(int*)(front + MaxWanted) <= cap) return;
+            *(int*)(front + MaxWanted) = cap;
+            *(int*)(front + DesiredWanted) = Math.Min(*(int*)(front + DesiredWanted), cap);
+            *(int*)(front + MinWanted) = Math.Min(*(int*)(front + MinWanted), cap);
+            return;
+        }
         *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
         Interlocked.Increment(ref _unguarded);
         if (UnguardedAt.TryGetValue(tag, out var at) && hour - at is >= 0 and < 24) return; // once a day per country in the log
         UnguardedAt[tag] = hour;
-        _log?.Info($"#{tag}: its enemies hold no port or its line is short of divisions, so its port and home garrisons (area defence) go to the land fronts");
+        _log?.Info($"#{tag}: its enemies hold no port, its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) go to the land fronts");
     }
 
     /// <summary>A front that wants no divisions and has no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered).</summary>
@@ -389,23 +446,63 @@ public unsafe partial class AiAssist
     /// own line is manned.
     /// </summary>
     private static bool Overseas(nint country, int tag, HashSet<nint> contact, int hour) =>
-        contact.All(p => Province.Controller(p) != tag) && !LandLinked(country, tag, contact.First())
+        contact.Count > 0 && contact.All(p => p != 0 && Province.Controller(p) != tag) && !LandLinked(country, tag, contact.First()) && !AllyHome(contact)
         && !(AllyLosing(country, tag, contact, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
 
     /// <summary>
-    /// Hold the line's minimum: a defender per line province, and as many divisions as the enemy has across the front; twice the
-    /// enemy there already (an offensive front, Germany in Poland), one per line province, so its surplus can go where a front is
-    /// short (the West Wall held eleven divisions against France's forty).
+    /// Part of the line is the core ground of the ally holding it: its homeland (the British and the Dominions in France),
+    /// which help is shipped to, unlike a colony (Germany's nine divisions in Italian East Africa). Dropped as overseas, the
+    /// Commonwealth's divisions already in France stood guarding its coast.
+    /// </summary>
+    private static bool AllyHome(IEnumerable<nint> line)
+    {
+        foreach (var p in line)
+        {
+            var owner = p == 0 ? 0 : Province.Controller(p);
+            var state = owner > 0 ? Province.State(p) : 0;
+            if (state != 0 && Native.PdxArray<int>(state + CoresOfState).Contains(owner)) return true;
+        }
+        return false;
+    }
+
+    private const int MaxPerLineProvince = 3, NeedHours = 7 * 24;
+
+    /// <summary>
+    /// Every country whose ground this line is on has at least as many land divisions as <paramref name="tag"/>: the line is
+    /// theirs to man (Hungary on Germany's), not one a stronger country holds for a weaker ally (France in Belgium).
+    /// </summary>
+    private static bool StrongerOwners(int tag, HashSet<nint> line)
+    {
+        static int LandDivisions(int tag)
+        {
+            var n = 0;
+            foreach (var u in Game.Units(Game.Country(tag))) if (u != 0 && Division.IsLand(u)) n++;
+            return n;
+        }
+        var ours = LandDivisions(tag);
+        return line.Select(Province.Controller).Where(c => c > 0 && c != tag).Distinct().All(owner => LandDivisions(owner) >= ours);
+    }
+
+    /// <summary>
+    /// Hold the line's minimum: a defender per line province, and as many divisions as the enemy has across the front, up to
+    /// MaxPerLineProvince a province; twice the enemy there already (an offensive front, Germany in Poland), one per line
+    /// province, so its surplus can go where a front is short (the West Wall held eleven divisions against France's forty).
+    /// The week's highest is kept: following the enemy's daily moves, two fronts asking for more than the country had (the
+    /// Maginot Line's eight provinces wanted 48 to 60 against France) traded divisions every day. Not on a line all in the
+    /// ground of allies at least as strong (Hungary's on Germany's border: theirs to man), but France's in Belgium counts.
     /// </summary>
     private void KeepMinimum(nint front, nint section, int tag, Dictionary<nint, bool> enemyHeld, HashSet<nint> contact, int hour)
     {
+        if (!contact.Any(p => Province.Controller(p) == tag) && StrongerOwners(tag, contact)) return;
         var facing = 0;
         foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);
         var holding = 0;
         foreach (var p in contact)
         foreach (var unit in Province.Units(p))
             if (unit != 0 && Division.Commander(unit) == tag) holding++;
-        var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, facing);
+        var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, Math.Min(facing, MaxPerLineProvince * contact.Count));
+        if (Needs.TryGetValue(section, out var kept) && hour - kept.Hour is >= 0 and < NeedHours && kept.Need >= need) need = kept.Need;
+        else Needs[section] = (hour, need);
         if (*(int*)(front + MinWanted) >= need) return;
         *(int*)(front + MinWanted) = need;
         *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
@@ -423,6 +520,7 @@ public unsafe partial class AiAssist
         foreach (var (g, kept) in SecondArms) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) SecondArms.TryRemove(g, out _);
         foreach (var (g, kept) in Feints) if (hour - kept.Until is < -FeintHours or >= 2 * AxisHours) Feints.TryRemove(g, out _);
         foreach (var (s, at) in RaisedAt) if (hour - at is < 0 or >= 48) RaisedAt.TryRemove(s, out _); // fronts are rebuilt: their sections go
+        foreach (var (s, need) in Needs) if (hour - need.Hour is < 0 or >= NeedHours) Needs.TryRemove(s, out _);
         foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) AxisArmies.TryRemove(g, out _);
         foreach (var entry in Line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) Line.TryRemove(entry); // matched by value: one refreshed meanwhile stays
     }
