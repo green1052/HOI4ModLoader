@@ -143,11 +143,17 @@ public partial class AiAssist
         }
         var before = (int[])_controllers.Clone();
         var ports = new HashSet<int>();
+        var homePorts = new Dictionary<int, int>();
         for (var id = 1; id <= _provinceCount; id++)
         {
             var p = Game.Province(id);
             var taker = p == 0 ? 0 : Province.Controller(p);
-            if (taker > 0 && Province.BuildingLevel(p, Buildings.NavalBaseSlot) > 0) ports.Add(taker);
+            if (taker > 0 && Province.BuildingLevel(p, Buildings.NavalBaseSlot) > 0)
+            {
+                ports.Add(taker);
+                if (Province.State(p) is var state && state != 0 && Native.PdxArray<int>(state + CoresOfState).Contains(taker))
+                    homePorts[taker] = homePorts.GetValueOrDefault(taker) + 1;
+            }
             if (taker == before[id]) continue;
             _controllers[id] = taker;
             if (first || taker <= 0 || before[id] <= 0) continue; // the first scan, sea or wasteland
@@ -155,7 +161,11 @@ public partial class AiAssist
             _landed[id] = FromSea(p, taker, before, hour) ? hour : Never;
         }
         _portHolders = ports;
+        _homePorts = homePorts;
     }
+
+    /// <summary>Naval bases each country holds on its own core ground, from the last controller scan. Read by AI worker threads.</summary>
+    private static volatile Dictionary<int, int> _homePorts = [];
 
     /// <summary>Countries holding a naval base, from the last controller scan (null before it): the ones that can land troops. Read by AI worker threads.</summary>
     private static volatile HashSet<int>? _portHolders;

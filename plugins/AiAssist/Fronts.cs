@@ -434,16 +434,17 @@ public unsafe partial class AiAssist
             // land line up to AreaSharePercent.
             var divisions = 0;
             foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) divisions++;
-            var floor = Math.Max(1, divisions * AreaFloorPercent / 100);
+            var toLine = GarrisonsToLine(country, tag);
+            // Before a land war too (in peace, or at war with no land line yet) only the floor: the rest stand ready on the
+            // fronts the AI draws for the war it expects, not along every coast. That floor is a division per home port then
+            // (its own naval bases on core ground: where a landing would come), else AreaFloorPercent.
+            var minimal = toLine || !HasLine(tag);
+            var floor = minimal ? Math.Max(1, Math.Min(_homePorts.GetValueOrDefault(tag), divisions / 2)) : Math.Max(1, divisions * AreaFloorPercent / 100);
             if (main)
             {
                 *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(floor, *(int*)(front + MaxWanted)));
                 *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), *(int*)(front + MinWanted));
             }
-            var toLine = GarrisonsToLine(country, tag);
-            // Before a land war too (in peace, or at war with no land line yet) only the floor: the rest stand ready on the
-            // fronts the AI draws for the war it expects, not along every coast.
-            var minimal = toLine || !HasLine(tag);
             var cap = minimal ? (main ? floor : Math.Max(1, floor / Math.Max(1, areaFronts)))
                 : Math.Max(main ? floor : 1, divisions * AreaSharePercent / 100 / Math.Max(1, areaFronts));
             if (*(int*)(front + MaxWanted) <= cap) return;
@@ -452,7 +453,7 @@ public unsafe partial class AiAssist
             *(int*)(front + MinWanted) = Math.Min(*(int*)(front + MinWanted), cap);
             if (!toLine || UnguardedAt.TryGetValue(tag, out var seen) && hour - seen is >= 0 and < 24) return; // once a day per country in the log
             UnguardedAt[tag] = hour;
-            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a tenth of its divisions");
+            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a division per home port");
             return;
         }
         *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
