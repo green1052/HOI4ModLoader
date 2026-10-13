@@ -409,7 +409,7 @@ public unsafe partial class AiAssist
         PruneFronts(hour);
     }
 
-    private const int AreaSharePercent = 33, AreaFloorPercent = 10;
+    private const int AreaSharePercent = 33, AreaFloorPercent = 20;
 
     /// <summary>
     /// Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't land:
@@ -428,17 +428,18 @@ public unsafe partial class AiAssist
             if (!toLine && !HasLine(tag)) return;
             var divisions = 0;
             foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) divisions++;
-            var cap = Math.Max(1, divisions * (toLine ? AreaFloorPercent : AreaSharePercent) / 100 / Math.Max(1, areaFronts));
+            var floor = Math.Max(1, divisions * AreaFloorPercent / 100 / Math.Max(1, areaFronts));
+            var cap = toLine ? floor : Math.Max(1, divisions * AreaSharePercent / 100 / Math.Max(1, areaFronts));
             // The floor is kept too (a minimum the theatre distribution serves first): only capped, the fronts' raised
             // minimums took every division and France's coast stood empty.
-            if (toLine) *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(cap, *(int*)(front + MaxWanted)));
+            *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(floor, *(int*)(front + MaxWanted)));
             if (*(int*)(front + MaxWanted) <= cap) return;
             *(int*)(front + MaxWanted) = cap;
             *(int*)(front + DesiredWanted) = Math.Min(*(int*)(front + DesiredWanted), cap);
             *(int*)(front + MinWanted) = Math.Min(*(int*)(front + MinWanted), cap);
             if (!toLine || UnguardedAt.TryGetValue(tag, out var seen) && hour - seen is >= 0 and < 24) return; // once a day per country in the log
             UnguardedAt[tag] = hour;
-            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a tenth of its divisions");
+            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a fifth of its divisions");
             return;
         }
         *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
@@ -479,7 +480,7 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    private const int MaxPerLineProvince = 3, NeedHours = 7 * 24;
+    private const int MaxPerLineProvince = 3, NeedHours = 7 * 24, AllyHelpPercent = 25;
 
     /// <summary>
     /// Every country whose ground this line is on has at least as many land divisions as <paramref name="tag"/>: the line is
@@ -502,12 +503,13 @@ public unsafe partial class AiAssist
     /// MaxPerLineProvince a province; twice the enemy there already (an offensive front, Germany in Poland), one per line
     /// province, so its surplus can go where a front is short (the West Wall held eleven divisions against France's forty).
     /// The week's highest is kept: following the enemy's daily moves, two fronts asking for more than the country had (the
-    /// Maginot Line's eight provinces wanted 48 to 60 against France) traded divisions every day. Not on a line all in the
-    /// ground of allies at least as strong (Hungary's on Germany's border: theirs to man), but France's in Belgium counts.
+    /// Maginot Line's eight provinces wanted 48 to 60 against France) traded divisions every day. On a line all in the ground
+    /// of allies at least as strong (Hungary's on Germany's border), up to AllyHelpPercent of ours: allies help each other
+    /// without one front taking a minor's whole army; France's in Belgium counts in full.
     /// </summary>
     private void KeepMinimum(nint front, nint section, int tag, Dictionary<nint, bool> enemyHeld, HashSet<nint> contact, int hour)
     {
-        if (!contact.Any(p => Province.Controller(p) == tag) && StrongerOwners(tag, contact)) return;
+        var helping = !contact.Any(p => Province.Controller(p) == tag) && StrongerOwners(tag, contact);
         var facing = 0;
         foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);
         var holding = 0;
@@ -515,6 +517,12 @@ public unsafe partial class AiAssist
         foreach (var unit in Province.Units(p))
             if (unit != 0 && Division.Commander(unit) == tag) holding++;
         var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, Math.Min(facing, MaxPerLineProvince * contact.Count));
+        if (helping) // a stronger ally's line: help it with up to AllyHelpPercent of our divisions, not the whole enemy count
+        {
+            var ours = 0;
+            foreach (var u in Game.Units(Game.Country(tag))) if (u != 0 && Division.IsLand(u)) ours++;
+            need = Math.Min(need, Math.Max(1, ours * AllyHelpPercent / 100));
+        }
         if (Needs.TryGetValue(section, out var kept) && hour - kept.Hour is >= 0 and < NeedHours && kept.Need >= need) need = kept.Need;
         else Needs[section] = (hour, need);
         if (*(int*)(front + MinWanted) >= need) return;
