@@ -415,7 +415,7 @@ public unsafe partial class AiAssist
         PruneFronts(hour);
     }
 
-    private const int AreaSharePercent = 33, AreaFloorPercent = 20;
+    private const int AreaSharePercent = 33, AreaFloorPercent = 10;
 
     /// <summary>
     /// Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't land:
@@ -452,7 +452,7 @@ public unsafe partial class AiAssist
             *(int*)(front + MinWanted) = Math.Min(*(int*)(front + MinWanted), cap);
             if (!toLine || UnguardedAt.TryGetValue(tag, out var seen) && hour - seen is >= 0 and < 24) return; // once a day per country in the log
             UnguardedAt[tag] = hour;
-            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a fifth of its divisions");
+            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a tenth of its divisions");
             return;
         }
         *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
