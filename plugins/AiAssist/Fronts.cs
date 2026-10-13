@@ -429,6 +429,9 @@ public unsafe partial class AiAssist
             var divisions = 0;
             foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) divisions++;
             var cap = Math.Max(1, divisions * (toLine ? AreaFloorPercent : AreaSharePercent) / 100 / Math.Max(1, areaFronts));
+            // The floor is kept too (a minimum the theatre distribution serves first): only capped, the fronts' raised
+            // minimums took every division and France's coast stood empty.
+            if (toLine) *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(cap, *(int*)(front + MaxWanted)));
             if (*(int*)(front + MaxWanted) <= cap) return;
             *(int*)(front + MaxWanted) = cap;
             *(int*)(front + DesiredWanted) = Math.Min(*(int*)(front + DesiredWanted), cap);
