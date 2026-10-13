@@ -315,7 +315,13 @@ public unsafe partial class AiAssist
         HashSet<nint>? enemyLine = null; // enemy provinces on the theatre's line: the salients' necks are among them
         List<(nint Front, HashSet<nint> Threatened)>? atWar = null; // for railway guns
         var areaFronts = 0;
-        foreach (var f in Native.PdxArray(general + FrontsOfGeneral)) if (f != 0 && *(int*)(f + AreaDefense) != 0) areaFronts++;
+        nint mainArea = 0; // the area defence front asking most: the capital's (vanilla's capital defence, max 100)
+        foreach (var f in Native.PdxArray(general + FrontsOfGeneral))
+            if (f != 0 && *(int*)(f + AreaDefense) != 0)
+            {
+                areaFronts++;
+                if (mainArea == 0 || *(int*)(f + MaxWanted) > *(int*)(mainArea + MaxWanted)) mainArea = f;
+            }
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
@@ -326,7 +332,7 @@ public unsafe partial class AiAssist
             // its Somali line divisions to Kismayo, and its Eritrean ones to ports in Libya and Italy, against Ethiopia.
             if (*(int*)(front + AreaDefense) != 0)
             {
-                if (_holdLine) UnguardAreaDefence(front, country, tag, hour, areaFronts);
+                if (_holdLine) UnguardAreaDefence(front, country, tag, hour, areaFronts, front == mainArea);
                 continue;
             }
             var frontLine = Game.Resolve(*(long*)(front + FrontOfAiFront));
@@ -417,22 +423,27 @@ public unsafe partial class AiAssist
     /// an ally's), its area defence fronts together want at most AreaSharePercent of its land divisions: the British guarded
     /// France's coast with 36 of their 97 and their Dominions with all of theirs while the line in Belgium was short.
     /// </summary>
-    private void UnguardAreaDefence(nint front, nint country, int tag, int hour, int areaFronts)
+    private void UnguardAreaDefence(nint front, nint country, int tag, int hour, int areaFronts, bool main)
     {
         if (*(int*)(front + MaxWanted) <= 0) return;
         if (!NoLandings(country, tag))
         {
-            // Landings stay possible: a floor of AreaFloorPercent always guards the coast (none left, Britain and France
-            // stood open to any landing); to the line (a war at home, a short line) only that floor, else up to AreaSharePercent.
-            var toLine = GarrisonsToLine(country, tag);
-            if (!toLine && !HasLine(tag)) return;
+            // Landings stay possible: AreaFloorPercent of the divisions always guards home, all of it on the capital's front
+            // (vanilla's other area fronts mostly want none: Britain's home islands held five divisions, the floor spread
+            // over nine fronts reached none of them). To the line (a war at home, a short line) only that floor; at war on a
+            // land line up to AreaSharePercent.
             var divisions = 0;
             foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) divisions++;
-            var floor = Math.Max(1, divisions * AreaFloorPercent / 100 / Math.Max(1, areaFronts));
-            var cap = toLine ? floor : Math.Max(1, divisions * AreaSharePercent / 100 / Math.Max(1, areaFronts));
-            // The floor is kept too (a minimum the theatre distribution serves first): only capped, the fronts' raised
-            // minimums took every division and France's coast stood empty.
-            *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(floor, *(int*)(front + MaxWanted)));
+            var floor = Math.Max(1, divisions * AreaFloorPercent / 100);
+            if (main)
+            {
+                *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(floor, *(int*)(front + MaxWanted)));
+                *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), *(int*)(front + MinWanted));
+            }
+            var toLine = GarrisonsToLine(country, tag);
+            if (!toLine && !HasLine(tag)) return;
+            var cap = toLine ? (main ? floor : Math.Max(1, floor / Math.Max(1, areaFronts)))
+                : Math.Max(main ? floor : 1, divisions * AreaSharePercent / 100 / Math.Max(1, areaFronts));
             if (*(int*)(front + MaxWanted) <= cap) return;
             *(int*)(front + MaxWanted) = cap;
             *(int*)(front + DesiredWanted) = Math.Min(*(int*)(front + DesiredWanted), cap);
