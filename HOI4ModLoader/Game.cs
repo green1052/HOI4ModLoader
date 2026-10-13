@@ -222,7 +222,8 @@ public static unsafe class Game
     // each UpdateSupply (main thread, hourly, before the AI pass): +0 need left after local nodes, +8 supply flowing in,
     // +0x30 flow entries {u16 node, u16 country tag index, pad, i64 amount}.
     private const int SupplyOfGameState = 0x3D8, FlowOfSupply = 0x138, FlowSize = 0xD8;
-    internal const int NeedOfFlow = 0, SuppliedOfFlow = 8;
+    /// <summary>A province's supply flow (<see cref="SupplyFlow"/>): what its divisions need and what reaches it (long, fixed point).</summary>
+    public const int NeedOfFlow = 0, SuppliedOfFlow = 8;
     public const int EntriesOfFlow = 0x30;
 
     /// <summary>CSupplySystem, or 0.</summary>

@@ -137,18 +137,18 @@ public unsafe partial class AiAssist
     }
 
     // ---- The PostAICommand gate: an "attack on" is dropped while the country's threatened line is thinly manned (or it holds
-    //      a grad), a landing while its beach is crowded; the AI asks again every hour. Also our paradrops' guard ----
+    //      a grad), a landing while its beach is crowded; the AI asks again every hour ----
 
     [Function(CallingConventions.Microsoft)] public delegate byte PostFn(nint cmd, nint tag);
 
     private IHook<PostFn>? _post;
     private static delegate* unmanaged<nint, int, nint> _findOrder;
-    private static nint _executeVTable;
+    private static nint _executeVTable, _assignVTable;
     private static int _held;
 
     /// <summary>
-    /// The one PostAICommand hook (every AI command): AI order commands that would undo a paradrop of ours (StrategicParadrops),
-    /// then the launch gate: invasions by their beach (StrategicInvasions), other attacks by the grad and the line (HoldTheLine).
+    /// The one PostAICommand hook (every AI command): the line's divisions kept on it (HoldTheLine), AI front orders on
+    /// bystanders' borders dropped, then the launch gate: invasions by their beach (StrategicInvasions), other attacks by the grad and the line (HoldTheLine).
     /// </summary>
     private void LoadPostAiCommand()
     {
@@ -165,8 +165,7 @@ public unsafe partial class AiAssist
             bool keep;
             try
             {
-                keep = !_paradrops || KeepsParadrops(cmd);
-                if (keep && _holdLine) keep = KeepsLine(cmd, *(int*)tag);
+                keep = !_holdLine || KeepsLine(cmd, *(int*)tag);
                 if (keep && _holdLine && !KeepsFrontOrder(cmd, *(int*)tag))
                 {
                     keep = false;

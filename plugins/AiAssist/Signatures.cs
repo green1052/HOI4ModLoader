@@ -36,8 +36,6 @@ public static class Signatures
 
     [VTable] public const string DeleteOrderCommand = "COrderDeleteCommand";
     [VTable] public const string AssignOrderCommand = "COrderAssignCommand";
-    [VTable] public const string UnassignOrderCommand = "COrderUnassignCommand";
-    [VTable] public const string ParadropTargetCommand = "COrderSetParadropTargetCommand"; // 0x38: {group CRef @0x28, order id @0x30, province @0x34} (ctor 0x14183AF60)
 
     /// <summary>River crossing in land combat: `mov r8,[rcx+138h]; mov rdx,[rip+RIVER_CROSSING_PENALTY]; cmovnz rdx,[rip+..._LARGE]`.</summary>
     [Signature] public const string RiverPenalty = "4C 8B 81 38 01 00 00 48 8B 15 ? ? ? ? 48 0F 45 15 ? ? ? ?";
@@ -124,23 +122,9 @@ public static class Signatures
     /// <summary>CAIForceConcentration::SetExecute: `movzx edi,byte [rcx+84h]; cmp byte [rdx+248h],0; setnz al` (attack on vs the order executing). Never called.</summary>
     [Signature] public const string ConcentrationAttacking = "0F B6 B9 84 00 00 00 80 BA 48 02 00 00 00 0F 95 C0";
 
-    /// <summary>
-    /// COrderSetParadropSourceCommand ctor (mem[0x50], COrdersGroup*, int source province, int order id (0: a new paradrop order),
-    /// CPdxArray&lt;CArmy*&gt;* paratroopers). Only the map UI builds it: the vanilla AI never makes paradrop orders.
-    /// </summary>
-    [Signature] public const string ParadropSourceCommand = "48 89 5C 24 10 48 89 6C 24 20 48 89 4C 24 08 56 57 41 55 41 56 41 57 48 83 EC 30 41 8B D9 41 8B F8 4C 8B EA 48 8B F1 C6 41 08 00 C7 41 0C FF FF FF FF";
 
-    /// <summary>IsParadropSource(CProvince*, COrdersGroup*) -> bool: our airbase province holding NAir.MIN_PLANE_COUNT_PARADROP transports (`lea rsi,[rdx+3Ch]`: group tag).</summary>
-    [Signature] public const string IsParadropSource = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8D 72 3C 48 8B DA 48 8B D6 45 33 C9 45 33 C0 48 8B F9 E8 ? ? ? ? 3B 05 ? ? ? ? 0F 8C ? ? ? ?";
 
-    /// <summary>IsParadropTarget(COrder*, CProvince*) -> bool: land, and in range of the order's source airbase (reads province+0xB8 unchecked: land provinces only).</summary>
-    [Signature] public const string IsParadropTarget = "40 53 55 57 48 83 EC 30 48 8B 82 B8 00 00 00 48 8B DA 48 8B E9 F6 80 D2 00 00 00 01 0F 84 ? ? ? ? 8B B9 B8 00 00 00";
 
-    /// <summary>
-    /// COrder check (order, std::string* reason or null) -> bool: invasion/paradrop prepared, route air superiority (cached at +0x11A
-    /// with a null reason), transport planes for the divisions standing at the source (none there: passes).
-    /// </summary>
-    [Signature] public const string OrderReady = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 8B 41 30 48 8B F1 83 F8 03 75 ? E8 ? ? ? ? EB ? 83 F8 04 75 ? E8 ? ? ? ?";
 
     /// <summary>
     /// CAIGeneral's daily army training pass (CCountry*, bool haltAll, CPdxArray&lt;CAIFront*&gt;* fronts): stops every exercise when
@@ -189,6 +173,10 @@ public static class Signatures
     /// AI leader score (0x14194B960), the candidate who commands another group: `cmp rbp,rax; je; call InCombat(group); test al,al;
     /// jnz reject(-100); sub esi,200`. Every AI leader choice (FindBestLeader 0x14194C710) scores through it.
     /// </summary>
+    /// <summary>`mov ecx,48h; call alloc; ...; mov r8b,1; mov rdx,rsi; mov rcx,rax; call CCancelMovementCommand ctor (mem[0x48], CArmy*, bool)`
+    /// (+28: the call): stops a division's move or attack, as the UI's stop does.</summary>
+    [Signature] public const string CancelMovement = "B9 48 00 00 00 E8 ? ? ? ? 48 89 45 ? 48 85 C0 74 ? 41 B0 01 48 8B D6 48 8B C8 E8";
+
     [Signature] public const string LeaderStealBranch = "48 3B E8 74 ? 48 8B C8 E8 ? ? ? ? 84 C0 75 ? 81 EE C8 00 00 00";
 
     /// <summary>

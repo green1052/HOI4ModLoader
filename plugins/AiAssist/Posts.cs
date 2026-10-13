@@ -241,8 +241,7 @@ public unsafe partial class AiAssist
     /// <summary>A land division of the tag (not lent) that can take orders now: not fighting, retreating or embarked, not one we sent or rest.</summary>
     private static bool Movable(nint unit, int tag)
     {
-        return Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Paratrooper(unit) && !Jobs.Taken(unit, Id)
-            && (Volatile.Read(ref _reservedCount) == 0 || !Reserved.ContainsKey(Division.Ref(unit))); // paratroopers wait at their airbase
+        return Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Jobs.Taken(unit, Id);
     }
 
     /// <summary>Our divisions with a job (posted, resting, walking somewhere for us), for the other plugins to leave alone.</summary>
@@ -253,4 +252,29 @@ public unsafe partial class AiAssist
 
     /// <summary>A movable division that stands idle, rested enough to go somewhere.</summary>
     private static bool Spare(nint unit, int tag) => Movable(unit, tag) && !Division.Walking(unit) && Percent(Division.Organisation(unit)) >= MinBackfillOrg;
+
+    private const int TagOfGroup = 0x3C; // COrdersGroup: owner tag
+
+    /// <summary>A live army or army group of the tag by its CRef id, or 0 (gone, or the id is another country's).</summary>
+    private static nint GroupOf(long reference, int tag)
+    {
+        var group = Game.Resolve(reference);
+        return group != 0 && *(int*)(group + TagOfGroup) == tag ? group : 0;
+    }
+
+    /// <summary>The division is a member of one of its army's (or army group's) orders.</summary>
+    private static bool OnOrder(nint unit, nint group)
+    {
+        var member = unit + MemberOfUnit;
+        foreach (var owner in (ReadOnlySpan<nint>)[group, *(nint*)(group + OrdersGroup.ParentOffset)])
+            if (owner != 0)
+                foreach (var order in Native.PdxArray(owner + OrdersGroup.RootOrdersOffset))
+                    if (order != 0 && Order.Members(order).Contains(member)) return true;
+        return false;
+    }
+
+    /// <summary>An order command posted as the AI posts: Execute (on), Delete.</summary>
+    private static bool PostOrderCommand(string className, long group, int order, int argument) =>
+        Commands.TryPost(Commands.NewOrderCommand(className, group, order, argument), true);
 }
+

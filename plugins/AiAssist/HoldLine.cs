@@ -63,7 +63,7 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>The AI's regrouping can't take this division: a reserve, a grad garrison, resting, a new division on its way,
-    /// a paratrooper of ours, the last one of its country in a province on the line (next to enemy ground, troops there or not:
+    /// one another plugin runs, the last one of its country in a province on the line (next to enemy ground, troops there or not:
     /// vanilla strips quiet stretches of a front bare) or one of no more than the enemy divisions next to it, or one on the wall of a pocket (an enemy province with divisions whose
     /// neighbours are all ours). AI threads: read only.</summary>
     private static bool Pinned(nint unit)
@@ -71,7 +71,7 @@ public unsafe partial class AiAssist
         if (unit == 0) return false;
         var tag = Division.Commander(unit);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
-        if (Posted.ContainsKey(unit) || Resting.ContainsKey(unit) || Paratrooper(unit) || Jobs.Taken(unit)
+        if (Posted.ContainsKey(unit) || Resting.ContainsKey(unit) || Jobs.Taken(unit)
             || FreshDivisions.TryGetValue(unit, out var fresh) && Game.Hour - fresh.Hour is >= 0 and < FreshWalkHours) return true;
         var country = Game.Country(tag);
         var location = Division.Location(unit);

@@ -217,11 +217,45 @@ public unsafe partial class AiAssist
     /// Sends a task force with guns or carriers (halved when a second battle has none) to the busiest bombardment sea within reach, on hold (only ships on hold bombard); one
     /// already there or on its way stays. Whether taken.
     /// </summary>
+    private const int SpottedOfRegion = 0xF8; // CStrategicRegion: the task forces seen in it (CTaskForce*)
+    private static int _enemyRuledLogged = -1;
+
+    /// <summary>
+    /// The enemy's ships seen in the strategic region of sea province <paramref name="sea"/> (task forces of countries at war with
+    /// us) outnumber <paramref name="own"/>: bombarding there, the task force would be sunk under the battle it supports.
+    /// </summary>
+    private static bool EnemyRules(nint country, int tag, int sea, int own)
+    {
+        var p = Game.Province(sea);
+        var region = p == 0 ? 0 : *(nint*)(p + RegionOfProvince);
+        if (region == 0 || country == 0) return false;
+        var enemy = 0;
+        foreach (var tf in Native.PdxArray(region + SpottedOfRegion))
+        {
+            if (tf == 0) continue;
+            var owner = *(int*)(tf + OwnerOfTaskForce);
+            var ships = Native.PdxArray(tf + ShipsOfTaskForce).Length;
+            if (owner <= 0 || owner > 4096 || ships is < 0 or > 400) continue; // not a task force: read nothing from it
+            if (owner != tag && Game.AtWar(country, owner)) enemy += ships;
+        }
+        if (Game.Hour / 24 != _enemyRuledLogged && enemy > 0) // once a day: what the region holds, to check the reading
+        {
+            _enemyRuledLogged = Game.Hour / 24;
+            _log?.Info($"#{tag}: shore bombardment at sea {sea}: {enemy} enemy ship(s) seen in its region against our {own}");
+        }
+        return enemy > own;
+    }
+
     private static bool Bombard(nint tf, int tag, List<(int Sea, int Weight)> targets)
     {
         var hour = Game.Hour;
         var on = *(int*)(tf + MissionOfTaskForce) == HoldMission;
         var ours = Bombarding.TryGetValue(tf, out var sent) && hour - sent.Hour >= 0;
+        // Not where the enemy rules the sea: the ships the enemy has in the battle's sea region outnumber this task force's.
+        var own = Native.PdxArray(tf + ShipsOfTaskForce).Length;
+        var country = Game.Country(tag);
+        if (on && ours && EnemyRules(country, tag, sent.Province, own)) return false; // back to the naval AI, away from their fleet
+        targets = targets.Where(t => !EnemyRules(country, tag, t.Sea, own)).ToList();
         // On its way, or there; of several at one battle only one stays while another battle has none.
         var doubled = ours && Bombarding.Any(b => b.Key != tf && b.Key < tf && b.Value.Tag == tag && b.Value.Province == sent.Province && hour - b.Value.Hour is >= 0 and < BombardStayHours);
         if (on && ours && hour - sent.Hour < BombardStayHours && !(doubled && targets.Any(t => t.Sea != sent.Province

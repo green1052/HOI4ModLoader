@@ -238,7 +238,6 @@ public unsafe partial class AiAssist
     // Hour: last refreshed (hourly while the theatre has a line); Since: when its anchor was picked; Anchor: the province it is on.
     // Head: the spearhead's province, SalientHead for a salient's neck, 0 for a thin sector.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, int Head, HashSet<int> Core, HashSet<int> Line, int Since, int Anchor)> Axes = new(); // general -> its breakthrough axis
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, long[] Armies)> AxisArmies = new(); // general -> its armies at war (CRef ids), for paradrops
 
     private void LoadFronts()
     {
@@ -310,7 +309,6 @@ public unsafe partial class AiAssist
     {
         var hour = Game.Hour;
         (int Tag, nint Province, int Weight, HashSet<int> Line)? spot = null; // the thinnest enemy sector on the theatre's line, for the axis
-        List<long>? armies = null; // CRef ids of the theatre's armies at war, for paradrops
         nint theatre = 0; // the theatre's country (at war)
         HashSet<nint>? enemyLine = null; // enemy provinces on the theatre's line: the salients' necks are among them
         List<(nint Front, HashSet<nint> Threatened)>? atWar = null; // for railway guns
@@ -364,9 +362,6 @@ public unsafe partial class AiAssist
                 if (_encircle || _pincers || _feints) foreach (var (p, held) in enemyHeld) if (held) (enemyLine ??= []).Add(p);
                 if (_railGuns && threatened.Count > 0) (atWar ??= []).Add((front, threatened));
             }
-            if (_paradrops && hostile)
-                foreach (var army in Native.PdxArray(front + ArmiesOfAiFront))
-                    if (army != 0) (armies ??= []).Add(new OrdersGroup(army).Ref);
             // The attack gate and the backfill read this; a front with no threat left drops out at once.
             if (threatened.Count > 0) Line[front] = (hour, tag, threatened);
             else Line.TryRemove(front, out _);
@@ -408,10 +403,10 @@ public unsafe partial class AiAssist
                 || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
             KeepMinimum(front, section, tag, enemyHeld, contact, hour);
+            CapToSupply(front, tag, contact, hour);
         }
         if (_axis && spot is { } line && theatre != 0) Anchor(general, theatre, line.Tag, line.Province, line.Weight, line.Line, enemyLine, hour);
         if (_railGuns) PublishGunArmies(general, AxisFrontArmies(general, atWar, hour), hour);
-        if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
         PruneFronts(hour);
     }
 
@@ -480,8 +475,20 @@ public unsafe partial class AiAssist
     /// own line is manned.
     /// </summary>
     private static bool Overseas(nint country, int tag, HashSet<nint> contact, int hour) =>
-        contact.Count > 0 && contact.All(p => p != 0 && Province.Controller(p) != tag) && !LandLinked(country, tag, contact.First()) && !AllyHome(contact)
+        OverseasLine(country, tag, contact) && !AllyHome(contact) && !Spare(tag, hour)
         && !(AllyLosing(country, tag, contact, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
+
+    /// <summary>The line is all in others' ground, which no land route links to ours.</summary>
+    private static bool OverseasLine(nint country, int tag, HashSet<nint> contact) =>
+        contact.Count > 0 && contact.All(p => p != 0 && Province.Controller(p) != tag) && !LandLinked(country, tag, contact.First());
+
+    private const int SpareHours = 7 * 24, OverseasHelpPercent = 10;
+
+    /// <summary>
+    /// The country's own line has been manned all week: it can spare a little for an ally's line overseas (Germany for Italy's
+    /// Africa, up to OverseasHelpPercent of its divisions: see <see cref="KeepMinimum"/>).
+    /// </summary>
+    private static bool Spare(int tag, int hour) => !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < SpareHours);
 
     /// <summary>
     /// Part of the line is the core ground of the ally holding it: its homeland (the British and the Dominions in France),
@@ -497,6 +504,35 @@ public unsafe partial class AiAssist
             if (state != 0 && Native.PdxArray<int>(state + CoresOfState).Contains(owner)) return true;
         }
         return false;
+    }
+
+    private const int SupplyFullPercent = 80;
+    private static int _supplyCapped;
+
+    /// <summary>
+    /// A front whose line provinces get under SupplyFullPercent of the supply their divisions need asks for no more divisions
+    /// than stand on it now (its minimum too): more crammed into a narrow front only starved them all; the theatre distribution
+    /// moves the rest where supply reaches. Runs after <see cref="KeepMinimum"/>, which it overrides.
+    /// </summary>
+    private static void CapToSupply(nint front, int tag, HashSet<nint> contact, int hour)
+    {
+        long need = 0, supplied = 0;
+        var standing = 0;
+        foreach (var p in contact)
+        {
+            var flow = Game.SupplyFlow(Game.Id(p));
+            if (flow == 0) continue;
+            need += *(long*)(flow + Game.NeedOfFlow);
+            supplied += *(long*)(flow + Game.SuppliedOfFlow);
+            foreach (var u in Province.Units(p)) if (u != 0 && Division.IsLand(u) && Division.Commander(u) == tag) standing++;
+        }
+        if (need <= 0 || supplied * 100 >= need * SupplyFullPercent) return;
+        var cap = Math.Max(contact.Count, standing); // a defender per line province still
+        if (*(int*)(front + MaxWanted) <= cap) return;
+        *(int*)(front + MaxWanted) = cap;
+        *(int*)(front + DesiredWanted) = Math.Min(*(int*)(front + DesiredWanted), cap);
+        *(int*)(front + MinWanted) = Math.Min(*(int*)(front + MinWanted), cap);
+        Interlocked.Increment(ref _supplyCapped);
     }
 
     private const int MaxPerLineProvince = 3, NeedHours = 7 * 24, AllyHelpPercent = 25;
@@ -542,6 +578,8 @@ public unsafe partial class AiAssist
         // A stronger ally's stretch of the line gets up to AllyHelpPercent of our divisions, our own stretch its full share,
         // and never more than we have: a 17-division minor on a 55-province line it held two provinces of was asked for 106.
         if (helping) need = Math.Min(need, Math.Max(1, MaxPerLineProvince * own + ours * AllyHelpPercent / 100));
+        // An ally's line overseas (kept while we can spare it): a small expeditionary force, not an army shipped away.
+        if (own == 0 && !AllyHome(contact) && OverseasLine(Game.Country(tag), tag, contact)) need = Math.Min(need, Math.Max(1, ours * OverseasHelpPercent / 100));
         need = Math.Min(need, Math.Max(1, ours));
         if (Needs.TryGetValue(section, out var kept) && hour - kept.Hour is >= 0 and < NeedHours && kept.Need >= need) need = kept.Need;
         else Needs[section] = (hour, need);
@@ -563,7 +601,6 @@ public unsafe partial class AiAssist
         foreach (var (g, kept) in Feints) if (hour - kept.Until is < -FeintHours or >= 2 * AxisHours) Feints.TryRemove(g, out _);
         foreach (var (s, at) in RaisedAt) if (hour - at is < 0 or >= 48) RaisedAt.TryRemove(s, out _); // fronts are rebuilt: their sections go
         foreach (var (s, need) in Needs) if (hour - need.Hour is < 0 or >= NeedHours) Needs.TryRemove(s, out _);
-        foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) AxisArmies.TryRemove(g, out _);
         foreach (var entry in Line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) Line.TryRemove(entry); // matched by value: one refreshed meanwhile stays
     }
 

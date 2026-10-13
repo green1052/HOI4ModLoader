@@ -19,7 +19,6 @@ namespace AiAssist;
 ///   provinces: rivers, rough ground, forts, few attack directions), holds it, and counterattacks only fought-out spearheads.
 /// - Strategic invasions: naval invasions pick thinly held, valuable beaches and wait (a week at most) while their beach is crowded;
 ///   fighters and naval bombers cover the sea regions on a planned landing's route.
-/// - Strategic paradrops: paratroopers of an army on the axis drop onto empty, valuable enemy ground behind the line near it.
 /// - Attack targets: local attacks pick pocket-closing, then valuable, then front-shortening targets instead of at random
 ///   (Sheep's pocket test in script is never read); next to a pocket of our own, the target that opens a corridor to it
 ///   comes first (and breakouts from inside); fresh divisions take empty enemy provinces next to the line.
@@ -49,7 +48,7 @@ public unsafe partial class AiAssist : Plugin
         var refit = Config.Bind("AI", "RefitPriority", true,
             "Reinforcements and new equipment go to the AI's front-line divisions (in combat or next to enemy-held ground) before its rear and garrison divisions.");
         _holdLine = Config.Bind("AI", "HoldTheLine", true,
-            "At war, the AI keeps a division in every province of a front that borders the enemy, and on the front at least as many divisions as the enemy has across it (other fronts can't take them); its regrouping can't take the last defender of a province next to enemy ground (nor one of no more than the enemy divisions next to it), the divisions walling in a pocket, "
+            "At war, a front whose line gets under 80 % of the supply it needs asks for no more divisions than stand on it; the AI keeps a division in every province of a front that borders the enemy, and on the front at least as many divisions as the enemy has across it (other fronts can't take them); its regrouping can't take the last defender of a province next to enemy ground (nor one of no more than the enemy divisions next to it), the divisions walling in a pocket, "
             + "a reserve or a division that arrived this week, and no division on or right behind a line with enemy divisions near is strategically redeployed to another front. Free divisions walk back into empty line provinces (ports, victory points, river banks, cities and mountains first), "
             + "the same front's divisions first (one from another front is held there). A country with divisions to spare keeps reserves a province behind its line and a second division behind key line provinces; "
             + "ready reserves counterattack break-ins near them (enemy troops inside, ground lost in the last two days, a landing) and go back to their post. "
@@ -106,7 +105,11 @@ public unsafe partial class AiAssist : Plugin
         var shoreBombardment = Config.Bind("AI", "ShoreBombardment", true,
             "At war, AI task forces with guns or carriers go to the sea next to the country's coastal land battles and hold there, where their shore bombardment (or the carriers' wings) "
             + "weakens the enemy divisions. Taken before the naval AI's objectives do, off patrol, strike force, hold or training (never invasion support, convoys, raiding or mines): one per battle no other covers, "
-            + "within 6 sea provinces; a week at the battle, up to two weeks waiting at sea for the next, halved (4+ ships) when a second battle has none. Vanilla keeps them on its objectives or sends them to port.");
+            + "within 6 sea provinces; a week at the battle, up to two weeks waiting at sea for the next, halved (4+ ships) when a second battle has none. Not where the enemy's ships seen in that sea region outnumber the task force's. Vanilla keeps them on its objectives or sends them to port.");
+        _breakOff = Config.Bind("AI", "BreakOffLosingAttacks", true,
+            "An AI attack the attacker is losing (under 40 % of the battle against half again as many defenders, or under 25 %) is broken off and that province isn't attacked again for three days, "
+            + "unless it closes a pocket, opens the way to a pocket of the AI's own or is a feint drawing the enemy's reserves; divisions another plugin runs (breakouts, pinning attacks, operations) are left alone. "
+            + "Vanilla fights such battles to the last organisation point.");
         var stableLeaders = Config.Bind("AI", "StableLeaders", true,
             "The AI doesn't take a general or field marshal from an army or army group he commands: vanilla's daily leader choice took them from each other's groups "
             + "and back again (a group left without a leader took the next best, even one leading elsewhere), so every army changed its leader every day or two.");
@@ -123,23 +126,10 @@ public unsafe partial class AiAssist : Plugin
             "The AI picks the beach for a naval invasion by what is there: thinly held coast near victory points, capitals, supply hubs, airfields and resources first, "
             + "beaches with enemy divisions nearby, land forts or coastal bunkers last. A planned landing waits (a week at most) while the enemy divisions around its beach outnumber half the landing. "
             + "The sea regions on a planned landing's route get twice the fighters the air AI wants there (100 at least) and twice the naval bombers.");
-        _paradrops = Config.Bind("AI", "StrategicParadrops", true,
-            "The AI uses its paratroopers (needs BreakthroughAxis): up to four paradrop-capable divisions of an army of the theatre its breakthrough axis is in fly from the airbase nearest the axis that can carry them "
-            + "onto an empty enemy province behind the line near the axis (victory points, supply hubs, airfields, pockets first). They jump only when vanilla allows the drop "
-            + "(prepared, enough transport planes, air superiority on the route). With no axis drop, behind a beachhead of its own from the last ten days instead (from the airbase nearest it). "
-            + "Paratroopers are kept off the fronts and wait at the best airbase within reach. "
-            + "Vanilla's AI never paradrops, and Sheep Mod's AI builds few paratroopers or transport planes (see AirborneUnits); the log counts which check stopped them.") && _axis;
-        // Game files count toward the checksum: added at startup only (the game reads them once), so a change waits for a restart.
-        if (Config.Bind("AI", "AirborneUnits", true,
-                "Germany, the UK, the US, Japan, the USSR and Italy research paratroopers and transport planes (from 1938, 30+ military factories), keep about 4% paratrooper divisions and build transport planes "
-                + "(with the paratrooper tech, 40+ military factories), so that StrategicParadrops has something to drop with. An AI strategy file put in front of the game's own at startup: its values only add, "
-                + "so Sheep Mod's deliberate aircraft bans still win. It changes the checksum: turn it off (and restart) to join a multiplayer game of players without it. Takes effect at the next start.")
-            && Loader.AtStartup)
-            AddGameFile("common/ai_strategy/hoimod_ai_airborne.txt");
         _postures = Config.Bind("AI", "DefensivePostures", true,
             "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.6x while it lost line provinces in the last week) gives up exposed ground and holds its grad: "
             + "the most defensible short line between that enemy and its capital (rivers, mountains, marsh, forests, hills, cities and forts in front, few directions to be attacked from), redrawn weekly, "
-            + "or one line back once the enemy breaks in. Its divisions walk there and stay (victory point cities get one more), it starts no offensives or paradrops (landings still go), and it attacks only "
+            + "or one line back once the enemy breaks in. Its divisions walk there and stay (victory point cities get one more), it starts no offensives (landings still go), and it attacks only "
             + "fought-out enemy stacks next to the line, with two fresh divisions or more (reserves behind the grad too), while single divisions pin the enemy stacks that could come to their aid; worn-out attackers break off. "
             + "Once every enemy it fell back from stays under 80 % of its power for a week (a month after falling back at the earliest), its divisions go back on their orders, and for a month only twice its strength "
             + "puts it back on a grad. Out of contact, the posture stays. Needs HoldTheLine.") && _holdLine;
@@ -174,11 +164,10 @@ public unsafe partial class AiAssist : Plugin
             Axes.Clear();
             SecondArms.Clear();
             Feints.Clear();
-            AxisArmies.Clear();
             Beaches.Clear();
             Routes.Clear();
             Holds.Clear();
-            ClearParadrops();
+            LostAttacks.Clear();
             Line.Clear();
             FrontCache.Clear();
             Encircled.Clear();
@@ -214,12 +203,13 @@ public unsafe partial class AiAssist : Plugin
         if (_airRetreat || _bombingTargets || _strategicInvasions) LoadRegionPriorities();
         if (airTraining) LoadAirTraining();
         if (armyTraining) LoadArmyTraining();
+        if (_breakOff) LoadBreakOff();
         if (stableLeaders) Patches.Bytes(Sig.Find(Signatures.LeaderStealBranch) + 0xF, "75", "EB"); // jnz -> jmp: a leader of another group scores -100, as one whose group is fighting
         if (navalTraining || shoreBombardment) LoadNavy(navalTraining, shoreBombardment);
         if (productionLines) LoadProductionLines(stickyDays);
         if (_axis) LoadCas();
         if (_holdLine || _axis) LoadFronts();
-        if (_holdLine || _strategicInvasions || _paradrops) LoadPostAiCommand(); // one hook; each part runs under its own setting
+        if (_holdLine || _strategicInvasions) LoadPostAiCommand(); // one hook; each part runs under its own setting
         if (_holdLine)
         {
             _ = Sig.Find(Commands.UnassignSig);
@@ -228,7 +218,6 @@ public unsafe partial class AiAssist : Plugin
             if (_exploit) MainThread.Every(TimeSpan.FromSeconds(1), Exploit);
         }
         if (_strategicInvasions) LoadInvasions();
-        if (_paradrops) LoadParadrops();
         if (encircle) LoadEncircle();
         if (railGuns) LoadRailGuns();
         if (supplyHubs) LoadSupplyHubs();
@@ -249,6 +238,8 @@ public unsafe partial class AiAssist : Plugin
             if (n > 0) done.Add(string.Format(what, n));
         }
         Add(ref _held, "held {0} AI attack(s) or landing(s) (thin line, grad or crowded beach)");
+        Add(ref _supplyCapped, "kept {0} AI front(s) short of supply from asking for more divisions");
+        Add(ref _brokenOff, "broke off {0} division(s)' losing attack(s) (no pocket, relief or feint to fight for)");
         Add(ref _landingsHeld, "{0} of those at a crowded beach");
         Add(ref _rescored, "re-scored {0} invasion beach candidate(s)");
         Add(ref _escorted, "put fighters over {0} AI invasion route(s)");
@@ -293,13 +284,6 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _deployed, "sent {0} new division(s) where they were needed");
         Add(ref _cas, "focused {0} CAS pass(es) on the axis");
         Add(ref _spearheads, "put {0} breakthrough axis/axes on the AI's armoured spearhead");
-        Add(ref _paradropped, "launched {0} AI paradrop(s)");
-        Add(ref _beachDrops, "readied {0} AI paradrop(s) behind a beachhead");
-        Add(ref _paratroopersReserved, "took {0} paratrooper division(s) off the front for drops");
-        Add(ref _noParatroopers, "paradrops: {0} axis check(s) found no ready paratroopers");
-        Add(ref _noAirbase, "paradrops: {0} found no source airbase with transport planes");
-        Add(ref _noTarget, "paradrops: {0} found no target");
-        Add(ref _notReady, "paradrops: {0} not ready (not allowed, not prepared, too few planes or no air superiority)");
         Add(ref _fellBack, "{0} AI country/countries fell back to a grad");
         Add(ref _garrisoned, "garrisoned {0} division(s) on grads");
         Add(ref _countered, "counterattacked fought-out spearheads with {0} division(s)");
@@ -327,16 +311,6 @@ public unsafe partial class AiAssist : Plugin
 
     /// <summary>A ratio (organisation, strength: 1e5 = full) in % of full.</summary>
     private static long Percent(long ratio) => ratio * 100 / Native.FixedPoint;
-
-    /// <summary>One of the embedded gamefiles\* in front of the game's own files (GameFiles.Add).</summary>
-    private static void AddGameFile(string path)
-    {
-        using var stream = typeof(AiAssist).Assembly.GetManifestResourceStream("gamefiles/" + Path.GetFileName(path))
-            ?? throw new FileNotFoundException($"no embedded {path}");
-        using var bytes = new MemoryStream();
-        stream.CopyTo(bytes);
-        GameFiles.Add(path, bytes.ToArray());
-    }
 
     /// <summary>Runs a hook's own logic where Sheep Mod is in the game; an exception is logged (the first only) and the game goes on.</summary>
     private static void Safely(Action action)

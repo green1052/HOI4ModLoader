@@ -90,6 +90,7 @@ public unsafe partial class AiAssist
         if (Grads.ContainsKey(tag) && !Exhausted(to) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
         if (_holdLine && OnThinLine(tag, from) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
         if (_armorTerrain && BadForArmor(tag, from, to)) return Steered;
+        if (LostLately(tag, to) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered; // an attack there was lost lately (BreakOff)
         if (_supplyAware && Province.Starved(me, tag, from, to, _supplyShare) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Unsupplied;
         return 0;
     }
