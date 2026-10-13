@@ -53,7 +53,7 @@ public unsafe partial class AiAssist
     /// The border across these provinces is a bystanders' one: at least BystanderShare % of it is held by countries that are no
     /// threat, and none of the rest is at war with the country or expected to be. No threat: one its AI marks as no target (a
     /// negative conquer, or ignore, befriend, alliance or protect: Germany toward Switzerland, the Low Countries, Italy) or
-    /// in its faction, or a neutral too small to attack (in no faction, under a third of its land divisions: the Low
+    /// in its faction, or a neutral too small to attack (in no faction, under half its land divisions: the Low
     /// Countries and Switzerland against Germany, not Poland). Never one it expects a war with (the game's daily list: at war,
     /// a war goal or justification either way, a focus either way, a war preparation strategy, their factions and subjects),
     /// a guarantor of one of those, or a rival (a positive conquer or contain).
@@ -116,7 +116,7 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    private const int BystanderShare = 80, SmallArmyPercent = 33, FactionOfDiplomacy = 0x290;
+    private const int BystanderShare = 80, SmallArmyPercent = 50, FactionOfDiplomacy = 0x290;
 
     /// <summary>True: the country is no threat (see <see cref="Bystanders"/>); false: it keeps the front; null: neither.</summary>
     private static bool? Verdict(nint country, int tag, int c, int[] expected, int ours)
