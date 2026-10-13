@@ -21,7 +21,6 @@ public static class Signatures
     [Signature] public const string ApplyArmiesBalancing = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC 50 49 8B F9 49 8B F0";
 
     /// <summary>CRef::Resolve(int* ref) -> object.</summary>
-    [Signature] public const string ResolveRef = "48 83 EC 28 8B 01 3D 68 12 00 00 76";
 
     /// <summary>COrdersGroup::FindOrder(group, int id) -> COrder* (its own orders, then its parents').</summary>
     [Signature] public const string FindOrder = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B EA 48 8B D9 0F 1F 80 00 00 00 00 33 FF 39 BB A4 00 00 00 7E";

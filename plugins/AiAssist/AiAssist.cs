@@ -314,13 +314,10 @@ public unsafe partial class AiAssist : Plugin
     }
 
     // Game functions more than one feature calls: resolved once, whichever features are on.
-    private static delegate* unmanaged<nint, nint> _resolve;
-
     private static void ResolveShared()
     {
-        _resolve = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.ResolveRef);
         // The core's game functions the AI hooks call: a broken pattern fails the load, not a hook on an AI thread.
-        _ = Sig.Find(Game.IsAtWarWithSig) + Sig.Find(Game.SameOrAlliedSig) + Sig.Find(Province.FortLevelSig) + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig);
+        _ = Sig.Find(Game.ResolveRefSig) + Sig.Find(Game.IsAtWarWithSig) + Sig.Find(Game.SameOrAlliedSig) + Sig.Find(Province.FortLevelSig) + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig);
         var river = Sig.Find(Signatures.RiverPenalty);
         _riverSmall = river + 14 + *(int*)(river + 10); // mov rdx,[rip+disp] (7 bytes at +7)
         _riverLarge = river + 22 + *(int*)(river + 18); // cmovnz rdx,[rip+disp] (8 bytes at +14)

@@ -25,6 +25,9 @@ public partial class AiAssist
     private static (int[] Neck, HashSet<int> Core)? Salient(nint general, nint country, int tag, HashSet<nint> enemyLine, int hour)
     {
         var world = Game.Generation;
+        if (!Salients.ContainsKey(general)) // a new general: drop the dead ones' (generals come and go all game)
+            foreach (var (g, old) in Salients)
+                if (old.World != world || hour - old.Hour is < 0 or >= SalientHours) Salients.TryRemove(g, out _);
         if (Salients.TryGetValue(general, out var s) && s.Tag == tag && s.World == world && hour - s.Hour >= 0)
         {
             if (s.Neck.Length == 0 && hour - s.Hour < SalientSearchHours) return null; // none today

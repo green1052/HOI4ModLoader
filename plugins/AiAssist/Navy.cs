@@ -242,16 +242,27 @@ public unsafe partial class AiAssist
         var reach = targets.Where(t => steps.ContainsKey(t.Sea)).OrderBy(t => covered.Contains(t.Sea)).ThenBy(t => steps[t.Sea]).ToList(); // the nearest battle no other one covers
         var sea = reach.FirstOrDefault().Sea;
         if (sea == 0) return on && ours && hour - sent.Hour < BombardWaitHours;
+        // The move is checked first: the commands run later, on the main thread, so a refused move must not leave a hold or a
+        // split behind it (the task force back with the naval AI, half of it parked).
+        var move = Allocator.AllocZeroed(NavalCommandSize);
+        _navalMove(move, tf, sea, 0);
+        if (!Commands.CanExecute(move))
+        {
+            Commands.Free(move);
+            return false;
+        }
         if (!on)
         {
             var hold = Allocator.AllocZeroed(NavalCommandSize);
             _setNavalMission(hold, tf, HoldMission);
-            if (!Post(hold, tag)) return false;
+            if (!Post(hold, tag))
+            {
+                Commands.Free(move);
+                return false;
+            }
         }
         var other = reach.FirstOrDefault(t => t.Sea != sea && !covered.Contains(t.Sea) && !(Claimed.TryGetValue((tag, t.Sea), out var c) && hour - c is >= 0 and < BombardStayHours)).Sea;
         if (other != 0 && Split(tf, tag)) Claimed[(tag, other)] = hour; // the half left where it is takes that battle next pass
-        var move = Allocator.AllocZeroed(NavalCommandSize);
-        _navalMove(move, tf, sea, 0);
         if (!Post(move, tag)) return false;
         Bombarding[tf] = (sea, hour, tag);
         Interlocked.Increment(ref _fleetsBombarding);

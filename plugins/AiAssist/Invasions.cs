@@ -237,6 +237,9 @@ public unsafe partial class AiAssist
             return true;
         }
         var hour = Game.Hour;
+        if (!Holds.ContainsKey(group)) // a new plan: drop the holds long over (their groups may be gone)
+            foreach (var (key, old) in Holds)
+                if (hour - old.Hour is < 0 or >= 2 * BeachHoldHours + BeachHours) Holds.TryRemove(key, out _);
         var first = Holds.GetOrAdd(group, (hour, tag));
         if (first.Tag != tag || hour < first.Hour || hour - first.Hour >= 2 * BeachHoldHours + BeachHours)
             Holds[group] = first = (hour, tag); // a reused group pointer, a loaded save, or a new plan long after the last hold

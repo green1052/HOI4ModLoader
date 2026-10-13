@@ -10,7 +10,6 @@ public unsafe partial class AiAssist
     private const int TagOfGroup = 0x3C;                                                      // COrdersGroup: owner tag
     private const int CanParadrop = 0x5B5, UnitOfMemberSlot = 4;                             // CArmy stats: can-paradrop flag; COrdersGroupMember vtable: -> CArmy*
     private const int SourceOfOrder = 0xB8;                                                   // COrder: source province
-    private const int UnitsOfAssign = 0x28;                                                   // COrderAssign/UnassignCommand: CPdxArray<CRef id>
     private const int SourceCommandSize = 0x50;
     private const int MaxParatroopers = 4, ParadropMaxDefenders = 0, NearbyDefendersMax = 4, PocketBonus = 15, SourceSearchDepth = 12;
     private const int FindOrderHours = 3, GiveUpHours = 14 * 24, LaunchHours = 48, RetryHours = 24, CooldownHours = 7 * 24;
@@ -80,12 +79,12 @@ public unsafe partial class AiAssist
         if (vtable == _deleteVTable) return !ParadropOrders.ContainsKey((*(long*)(cmd + Commands.GroupOfOrderCommand), *(int*)(cmd + Commands.OrderOfOrderCommand)));
         if (vtable != _assignVTable && vtable != _unassignVTable) return true;
         var assign = vtable == _assignVTable; // reserved paratroopers are never assigned to a front
-        var units = Native.PdxArray<long>(cmd + UnitsOfAssign);
+        var units = Native.PdxArray<long>(cmd + UnitsOfAssignCommand);
         var kept = 0;
         foreach (var unit in units)
             if (!Paratroopers.ContainsKey(unit) && !(assign && Reserved.ContainsKey(unit))) units[kept++] = unit;
         if (kept == units.Length) return true;
-        Native.SetPdxArraySize(cmd + UnitsOfAssign, kept);
+        Native.SetPdxArraySize(cmd + UnitsOfAssignCommand, kept);
         return kept > 0;
     }
 
@@ -123,7 +122,7 @@ public unsafe partial class AiAssist
     /// <summary>A live army or army group of the tag by its CRef id, or 0 (gone, or the id is another country's).</summary>
     private static nint GroupOf(long reference, int tag)
     {
-        var group = _resolve((nint)(&reference));
+        var group = Game.Resolve(reference);
         return group != 0 && *(int*)(group + TagOfGroup) == tag ? group : 0;
     }
 
@@ -145,7 +144,7 @@ public unsafe partial class AiAssist
     {
         foreach (var (general, axis) in Axes)
         {
-            if (axis.Tag != tag || hour - axis.Hour is < 0 or >= AxisHours) continue;
+            if (axis.Tag != tag || hour - axis.Hour is < 0 or >= AxisFreshHours) continue;
             if (!AxisArmies.TryGetValue(general, out var armies) || armies.Tag != tag) continue;
             if (BestTarget(country, tag, axis.Core, 0) == 0)
             {

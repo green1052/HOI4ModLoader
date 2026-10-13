@@ -39,6 +39,13 @@ public partial class AiAssist
             // An island or a quiet country being invaded has no land line yet; a grad's holders stay on the grad.
             var line = (Grads.TryGetValue(tag, out var grad) ? Held(grad, tag) : LineOf(tag, hour)) ?? [];
             var sent = 0;
+            // With Hold the line, off their orders and posted, as its backfill does: a front's AI would walk them straight back. The
+            // wall is let go once no enemy is next to it, an attacker after the landing's hours; both back on their orders then.
+            // Without it nothing would let them go: only sent.
+            bool Wall(nint unit, int province) =>
+                _holdLine ? Station(unit, province, tag, hour, LandingHours, PostKind.Helper) : Send(unit, province, hour, LandingHours);
+            bool Strike(nint unit, int province) =>
+                _holdLine ? Station(unit, province, tag, hour, LandingHours, PostKind.Drive, hour + (int)LandingHours) : Send(unit, province, hour, LandingHours);
             foreach (var beachhead in beachheads)
             {
                 var first = Game.Province(beachhead.First());
@@ -54,11 +61,11 @@ public partial class AiAssist
                         var q = Game.Province(n);
                         if (q == 0 || beachhead.Contains(n) || Gap.ContainsKey(n) || Province.Controller(q) != tag || Standing(country, tag, q) > 0) continue;
                         var helper = Helper(tag, q, line, ReserveRadius);
-                        if (helper == 0 || !Send(helper, n, hour, LandingHours)) continue;
+                        if (helper == 0 || !Wall(helper, n)) continue;
                         if (++sent >= MaxLandingSends) goto nextCountry;
                     }
                     // Crush it: attack into the beachhead itself; the move turns into combat on arrival.
-                    if (!Gap.ContainsKey(id) && Helper(tag, p, line, BeachheadRadius) is var attacker && attacker != 0 && Send(attacker, id, hour, LandingHours)
+                    if (!Gap.ContainsKey(id) && Helper(tag, p, line, BeachheadRadius) is var attacker && attacker != 0 && Strike(attacker, id)
                         && ++sent >= MaxLandingSends) goto nextCountry;
                 }
             }

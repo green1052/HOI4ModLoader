@@ -280,21 +280,10 @@ public unsafe partial class AiAssist
             // its Somali line divisions to Kismayo, and its Eritrean ones to ports in Libya and Italy, against Ethiopia.
             if (*(int*)(front + AreaDefense) != 0)
             {
-                if (_holdLine && *(int*)(front + MaxWanted) > 0 && CantBeInvaded(country, tag))
-                {
-                    *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
-                    Interlocked.Increment(ref _unguarded);
-                    if (!UnguardedAt.TryGetValue(tag, out var at) || hour - at is < 0 or >= 24)
-                    {
-                        UnguardedAt[tag] = hour;
-                        _log?.Info($"#{tag}: its enemies hold no port or its line is short of divisions, so its port and home garrisons (area defence) go to the land fronts");
-                    }
-                }
+                if (_holdLine) UnguardAreaDefence(front, country, tag, hour);
                 continue;
             }
-            var reference = (int*)(front + FrontOfAiFront);
-            if (reference[0] == 0 && reference[1] == 0) continue;
-            var frontLine = _resolve((nint)reference);
+            var frontLine = Game.Resolve(*(long*)(front + FrontOfAiFront));
             if (frontLine == 0) continue;
             nint section = 0;
             foreach (var s in Native.PdxArray(frontLine + SectionsOfFront))
@@ -350,55 +339,92 @@ public unsafe partial class AiAssist
             // wanted, so the theatre distribution sends them where a war is or may come (Germany kept seven facing Switzerland).
             if (_holdLine && !hostile && enemyHeld.Count > 0 && *(int*)(front + MaxWanted) > 0 && Bystanders(country, tag, enemyHeld.Keys))
             {
-                *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
-                *(int*)(front + ArmiesOfAiFront + 0xC) = 0; // no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered)
+                DropFront(front);
                 Interlocked.Increment(ref _bystanders);
                 continue;
             }
             // An ally's front overseas (its line all in an ally's ground, which no land route links to ours): no divisions wanted,
             // so none are shipped there (Germany sent nine to Italian East Africa against the British), unless the ally is losing
             // ground there and our own line is manned (an Afrika Korps when Italy needs one).
-            if (_holdLine && contact.Count > 0 && *(int*)(front + MaxWanted) > 0 && contact.All(p => Province.Controller(p) != tag) && !LandLinked(country, tag, contact.First())
-                && !(AllyLosing(country, tag, contact, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours)))
+            if (_holdLine && contact.Count > 0 && *(int*)(front + MaxWanted) > 0 && Overseas(country, tag, contact, hour))
             {
-                *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
-                *(int*)(front + ArmiesOfAiFront + 0xC) = 0; // no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered)
+                DropFront(front);
                 Interlocked.Increment(ref _overseas);
                 continue;
             }
             if (!_holdLine || !hostile || Grads.ContainsKey(tag) // on a grad, it gets the divisions, not the old border
                 || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
-            var facing = 0;
-            foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);
-            var holding = 0;
-            foreach (var p in contact)
-            foreach (var unit in Province.Units(p))
-                if (unit != 0 && Division.Commander(unit) == tag) holding++;
-            // Twice the enemy there already (an offensive front, Germany in Poland): one per line province is its minimum, so its
-            // surplus can go where a front is short (the West Wall held eleven divisions against France's forty).
-            var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, facing);
-            if (*(int*)(front + MinWanted) >= need) continue;
-            *(int*)(front + MinWanted) = need;
-            *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
-            *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
-            Interlocked.Increment(ref _raised);
-            if (!RaisedAt.TryGetValue(section, out var last) || hour - last is < 0 or >= 24) // once a day per front in the log
-            {
-                RaisedAt[section] = hour;
-                _log?.Info($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
-            }
+            KeepMinimum(front, section, tag, enemyHeld, contact, hour);
         }
         if (_axis && spot is { } line && theatre != 0) Anchor(general, theatre, line.Tag, line.Province, line.Weight, line.Line, enemyLine, hour);
         if (_railGuns) PublishGunArmies(general, AxisFrontArmies(general, atWar, hour), hour);
-        foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) Axes.TryRemove(g, out _); // generals come and go all game
+        if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
+        PruneFronts(hour);
+    }
+
+    /// <summary>
+    /// Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't land:
+    /// it wants no divisions, and a land war takes them all.
+    /// </summary>
+    private void UnguardAreaDefence(nint front, nint country, int tag, int hour)
+    {
+        if (*(int*)(front + MaxWanted) <= 0 || !CantBeInvaded(country, tag)) return;
+        *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
+        Interlocked.Increment(ref _unguarded);
+        if (UnguardedAt.TryGetValue(tag, out var at) && hour - at is >= 0 and < 24) return; // once a day per country in the log
+        UnguardedAt[tag] = hour;
+        _log?.Info($"#{tag}: its enemies hold no port or its line is short of divisions, so its port and home garrisons (area defence) go to the land fronts");
+    }
+
+    /// <summary>A front that wants no divisions and has no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered).</summary>
+    private static void DropFront(nint front)
+    {
+        *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
+        *(int*)(front + ArmiesOfAiFront + 0xC) = 0;
+    }
+
+    /// <summary>
+    /// The line is all in an ally's ground, which no land route links to ours, and the ally isn't losing ground there while our
+    /// own line is manned.
+    /// </summary>
+    private static bool Overseas(nint country, int tag, HashSet<nint> contact, int hour) =>
+        contact.All(p => Province.Controller(p) != tag) && !LandLinked(country, tag, contact.First())
+        && !(AllyLosing(country, tag, contact, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
+
+    /// <summary>
+    /// Hold the line's minimum: a defender per line province, and as many divisions as the enemy has across the front; twice the
+    /// enemy there already (an offensive front, Germany in Poland), one per line province, so its surplus can go where a front is
+    /// short (the West Wall held eleven divisions against France's forty).
+    /// </summary>
+    private void KeepMinimum(nint front, nint section, int tag, Dictionary<nint, bool> enemyHeld, HashSet<nint> contact, int hour)
+    {
+        var facing = 0;
+        foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);
+        var holding = 0;
+        foreach (var p in contact)
+        foreach (var unit in Province.Units(p))
+            if (unit != 0 && Division.Commander(unit) == tag) holding++;
+        var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, facing);
+        if (*(int*)(front + MinWanted) >= need) return;
+        *(int*)(front + MinWanted) = need;
+        *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
+        *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
+        Interlocked.Increment(ref _raised);
+        if (RaisedAt.TryGetValue(section, out var last) && hour - last is >= 0 and < 24) return; // once a day per front in the log
+        RaisedAt[section] = hour;
+        _log?.Info($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
+    }
+
+    /// <summary>Generals and fronts come and go all game: the axes, arms, feints and lines not refreshed lately are dropped.</summary>
+    private static void PruneFronts(int hour)
+    {
+        foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) Axes.TryRemove(g, out _);
         foreach (var (g, kept) in SecondArms) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) SecondArms.TryRemove(g, out _);
         foreach (var (g, kept) in Feints) if (hour - kept.Until is < -FeintHours or >= 2 * AxisHours) Feints.TryRemove(g, out _);
         foreach (var (s, at) in RaisedAt) if (hour - at is < 0 or >= 48) RaisedAt.TryRemove(s, out _); // fronts are rebuilt: their sections go
-        if (spot is { } found && armies != null) AxisArmies[general] = (hour, found.Tag, armies.ToArray());
         foreach (var (g, kept) in AxisArmies) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) AxisArmies.TryRemove(g, out _);
-        // Fronts come and go all game: drop the stale lines (matched by value, so one refreshed meanwhile stays).
-        foreach (var entry in Line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) Line.TryRemove(entry);
+        foreach (var entry in Line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) Line.TryRemove(entry); // matched by value: one refreshed meanwhile stays
     }
 
     /// <summary>
