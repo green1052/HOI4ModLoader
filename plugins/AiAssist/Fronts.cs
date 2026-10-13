@@ -509,7 +509,8 @@ public unsafe partial class AiAssist
     /// </summary>
     private void KeepMinimum(nint front, nint section, int tag, Dictionary<nint, bool> enemyHeld, HashSet<nint> contact, int hour)
     {
-        var helping = !contact.Any(p => Province.Controller(p) == tag) && StrongerOwners(tag, contact);
+        var own = contact.Count(p => Province.Controller(p) == tag);
+        var helping = own < contact.Count && StrongerOwners(tag, contact);
         var facing = 0;
         foreach (var (p, held) in enemyHeld) if (held) facing += Province.Divisions(p);
         var holding = 0;
@@ -517,12 +518,12 @@ public unsafe partial class AiAssist
         foreach (var unit in Province.Units(p))
             if (unit != 0 && Division.Commander(unit) == tag) holding++;
         var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, Math.Min(facing, MaxPerLineProvince * contact.Count));
-        if (helping) // a stronger ally's line: help it with up to AllyHelpPercent of our divisions, not the whole enemy count
-        {
-            var ours = 0;
-            foreach (var u in Game.Units(Game.Country(tag))) if (u != 0 && Division.IsLand(u)) ours++;
-            need = Math.Min(need, Math.Max(1, ours * AllyHelpPercent / 100));
-        }
+        var ours = 0;
+        foreach (var u in Game.Units(Game.Country(tag))) if (u != 0 && Division.IsLand(u)) ours++;
+        // A stronger ally's stretch of the line gets up to AllyHelpPercent of our divisions, our own stretch its full share,
+        // and never more than we have: a 17-division minor on a 55-province line it held two provinces of was asked for 106.
+        if (helping) need = Math.Min(need, Math.Max(1, MaxPerLineProvince * own + ours * AllyHelpPercent / 100));
+        need = Math.Min(need, Math.Max(1, ours));
         if (Needs.TryGetValue(section, out var kept) && hour - kept.Hour is >= 0 and < NeedHours && kept.Need >= need) need = kept.Need;
         else Needs[section] = (hour, need);
         if (*(int*)(front + MinWanted) >= need) return;
