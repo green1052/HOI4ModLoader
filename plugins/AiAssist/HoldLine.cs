@@ -381,20 +381,20 @@ public unsafe partial class AiAssist
     private const int AreaDefenceOrder = 5; // COrder type of an area defence (port and home garrison) battle plan
 
     /// <summary>
-    /// Against enemies that hold no port (<see cref="CantBeInvaded"/>), the AI's area defence orders left over are deleted
+    /// Against enemies that hold no port (<see cref="NoLandings"/>), the AI's area defence orders left over are deleted
     /// (UpdateAreaDefense makes no new ones then): their armies walk divisions to ports far away (Italy's East African ones to
     /// Kismayo, Libya, the Dodecanese), and divisions on an order are never collected for other fronts. Main thread.
     /// </summary>
     private static void DropAreaDefence(nint country, int tag)
     {
-        if (!CantBeInvaded(country, tag)) return;
+        if (!NoLandings(country, tag)) return; // landings possible: the garrisons are only cut back (UnguardAreaDefence)
         foreach (var group in OrdersGroup.OfCountry(country))
         foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray())
         {
             if (order == 0 || Order.Type(order) != AreaDefenceOrder) continue;
             var divisions = Order.Members(order).Length;
             if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;
-            _log?.Info($"#{tag}: deleted an area defence order of {divisions} division(s): its garrisons go to the land fronts");
+            _log?.Info($"#{tag}: deleted an area defence order of {divisions} division(s): its enemies hold no port");
         }
     }
 

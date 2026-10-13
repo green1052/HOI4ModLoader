@@ -40,7 +40,7 @@ public unsafe partial class AiAssist
         {
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
             var tag = country == 0 ? 0 : Game.Tag(country);
-            if (tag > 0) return tag != Game.ControlledTag && CantBeInvaded(country, tag);
+            if (tag > 0) return tag != Game.ControlledTag && NoLandings(country, tag);
         }
         return false;
     }
@@ -167,15 +167,20 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// At war on a land line, and no enemy at war holds a port (from the last controller scan), or its line went unmanned in
-    /// the last GarrisonHours: then the coast and city garrisons are wanted on the line more (Germany's West Wall held eleven
-    /// divisions while its ports were guarded); landings are left to the beach defence. A month, not the two days a line
-    /// counts as short: the garrisons manned it, two days later they went back to the coast and it was short again (France's
-    /// Maginot Line thin while most of its army guarded the coast).
+    /// At war on a land line, and no enemy at war holds a port (from the last controller scan): nobody can land, so the coast
+    /// and city garrisons all go to the line (Germany's West Wall held eleven divisions while its ports were guarded).
     /// </summary>
-    private static bool CantBeInvaded(nint country, int tag) =>
-        _portHolders is { } ports && (HasLine(tag) && (!ports.Any(holder => Game.AtWar(country, holder))
-            || ShortOfMen.TryGetValue(tag, out var short_) && Game.Hour - short_ is >= 0 and < GarrisonHours) || LandWarAtHome(country, tag));
+    private static bool NoLandings(nint country, int tag) =>
+        _portHolders is { } ports && HasLine(tag) && !ports.Any(holder => Game.AtWar(country, holder));
+
+    /// <summary>
+    /// Its line was short in the last GarrisonHours, or a war on its home land border is on or coming: its garrisons keep only
+    /// a floor and the rest go to the line. A month, not the two days a line counts as short: the garrisons manned it, two
+    /// days later they went back to the coast and it was short again (France's Maginot Line thin while its army guarded the coast).
+    /// </summary>
+    private static bool GarrisonsToLine(nint country, int tag) =>
+        _portHolders != null && (HasLine(tag) && ShortOfMen.TryGetValue(tag, out var short_) && Game.Hour - short_ is >= 0 and < GarrisonHours
+                                 || LandWarAtHome(country, tag));
 
     private const int GarrisonHours = 30 * 24, CoresOfState = 0xB0;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Day, bool On)> LandWars = new();
@@ -404,7 +409,7 @@ public unsafe partial class AiAssist
         PruneFronts(hour);
     }
 
-    private const int AreaSharePercent = 33;
+    private const int AreaSharePercent = 33, AreaFloorPercent = 10;
 
     /// <summary>
     /// Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't land:
@@ -415,23 +420,29 @@ public unsafe partial class AiAssist
     private void UnguardAreaDefence(nint front, nint country, int tag, int hour, int areaFronts)
     {
         if (*(int*)(front + MaxWanted) <= 0) return;
-        if (!CantBeInvaded(country, tag))
+        if (!NoLandings(country, tag))
         {
-            if (!HasLine(tag)) return;
+            // Landings stay possible: a floor of AreaFloorPercent always guards the coast (none left, Britain and France
+            // stood open to any landing); to the line (a war at home, a short line) only that floor, else up to AreaSharePercent.
+            var toLine = GarrisonsToLine(country, tag);
+            if (!toLine && !HasLine(tag)) return;
             var divisions = 0;
             foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) divisions++;
-            var cap = Math.Max(1, divisions * AreaSharePercent / 100 / Math.Max(1, areaFronts));
+            var cap = Math.Max(1, divisions * (toLine ? AreaFloorPercent : AreaSharePercent) / 100 / Math.Max(1, areaFronts));
             if (*(int*)(front + MaxWanted) <= cap) return;
             *(int*)(front + MaxWanted) = cap;
             *(int*)(front + DesiredWanted) = Math.Min(*(int*)(front + DesiredWanted), cap);
             *(int*)(front + MinWanted) = Math.Min(*(int*)(front + MinWanted), cap);
+            if (!toLine || UnguardedAt.TryGetValue(tag, out var seen) && hour - seen is >= 0 and < 24) return; // once a day per country in the log
+            UnguardedAt[tag] = hour;
+            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a tenth of its divisions");
             return;
         }
         *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
         Interlocked.Increment(ref _unguarded);
         if (UnguardedAt.TryGetValue(tag, out var at) && hour - at is >= 0 and < 24) return; // once a day per country in the log
         UnguardedAt[tag] = hour;
-        _log?.Info($"#{tag}: its enemies hold no port, its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) go to the land fronts");
+        _log?.Info($"#{tag}: its enemies hold no port, so its port and home garrisons (area defence) go to the land fronts");
     }
 
     /// <summary>A front that wants no divisions and has no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered).</summary>
