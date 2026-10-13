@@ -595,6 +595,9 @@ public unsafe partial class FrontLine : Plugin
         {
             var resting = _held.TryGetValue(unit, out var held);
             if (resting && held.Job != Job.Rest || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
+            // An AI division between armies (the army balancing regroups them): the AI walks it to its new army, so taken it
+            // went back and forth between our post and that army, every few days.
+            if (_force && Division.Group(unit) == 0) continue;
             var location = Division.Location(unit);
             if (location == 0) continue;
             if (_orders.TryGetValue(unit + MemberOfUnit, out var order))
@@ -700,6 +703,18 @@ public unsafe partial class FrontLine : Plugin
         if (held.Order == 0 || Division.Group(unit) != held.Group) return true; // in another army now: the player's
         if (Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs; // its order gone: it stays in the army's reserve
         return true;
+    }
+
+    /// <summary>
+    /// An AI division the AI's own orders walked off our post: left to them (not put back on its old order, which would be one
+    /// more walk) and not taken again for RepeatHours. Moved back each time, it went to and fro between the post and wherever
+    /// the AI wanted it.
+    /// </summary>
+    private void GiveUp(nint unit, string job)
+    {
+        if (!_held.Remove(unit)) return;
+        _recent[unit] = Game.Hour;
+        Log.Info($"{job}: the AI moved a division off its post; left to the AI");
     }
 
     private static bool IsFront(nint order) => Order.Type(order) == Order.Front;

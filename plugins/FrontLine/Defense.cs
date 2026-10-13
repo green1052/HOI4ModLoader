@@ -237,6 +237,11 @@ public unsafe partial class FrontLine
                 continue;
             }
             var location = Division.Location(unit);
+            if (location != post && _force && held.Job == Job.Reserve)
+            {
+                GiveUp(unit, "fire brigade");
+                continue;
+            }
             if (location != post)
             {
                 Commands.Move(unit, held.Post, _force); // back from a counterattack, or pushed off its post
@@ -347,6 +352,7 @@ public unsafe partial class FrontLine
             {
                 if (Release(unit, tag)) Log.Info("cordon: the breach is closed, a wall division goes back to its front");
             }
+            else if (Division.Location(unit) != post && _force) GiveUp(unit, held.Job.ToString());
             else if (Division.Location(unit) != post)
             {
                 Commands.Move(unit, held.Post, _force);
@@ -405,23 +411,27 @@ public unsafe partial class FrontLine
     private const int MinKey = 25, MaxDepthPerTurn = 2, DepthRadius = 4;
 
     /// <summary>
-    /// Second-line divisions stay while their key province is ours and on the line and their post behind it is safe, else
-    /// go back to their front. Key line provinces without one get the nearest spare fresh division (not mobile ones while the
-    /// fire brigade wants them), most important first.
+    /// Second-line divisions stay while their key province is ours and on the line (Survey's: before a war, the border the
+    /// AI drew a front on) and their post behind it is safe, else go back to their front. Key line provinces without one get
+    /// the nearest spare fresh division (not mobile ones while the fire brigade wants them), most important first.
     /// </summary>
     private void DepthDefense(nint country, int tag, IEnumerable<Front> all)
     {
         var fronts = all.ToList();
+        var lines = fronts.SelectMany(f => f.Line).ToHashSet();
         foreach (var (unit, held) in _held.ToArray())
         {
             if (held.Job != Job.Depth || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
             var key = Game.Province(held.Target);
             var post = Game.Province(held.Post);
-            if (key == 0 || post == 0 || Province.Controller(key) != tag || !NextToEnemy(country, tag, key)
-                || Province.Controller(post) != tag || NextToEnemy(country, tag, post))
+            // On the line as Survey drew it, not only next to enemy ground: before a war no border is, and every post was
+            // given up the turn after it was taken, then taken again three days later (back and forth along the border).
+            if (key == 0 || post == 0 || Province.Controller(key) != tag || !(lines.Contains(key) || NextToEnemy(country, tag, key))
+                || Province.Controller(post) != tag || NextToEnemy(country, tag, post) || lines.Contains(post))
             {
                 if (Release(unit, tag)) Log.Info("depth defence: the line moved, a second-line division goes back to its front");
             }
+            else if (Division.Location(unit) != post && _force) GiveUp(unit, held.Job.ToString());
             else if (Division.Location(unit) != post)
             {
                 Commands.Move(unit, held.Post, _force);
@@ -431,6 +441,7 @@ public unsafe partial class FrontLine
 
         var backed = _held.Values.Where(h => h.Job == Job.Depth).Select(h => h.Target).ToHashSet();
         var posts = Posts();
+        posts.UnionWith(lines.Select(Game.Id)); // a post on the line itself would be given up the next turn
         Dictionary<nint, List<nint>>? pool = null;
         var posted = 0;
         foreach (var (province, _) in fronts.SelectMany(f => f.Line).Distinct().Where(p => !backed.Contains(Game.Id(p)))

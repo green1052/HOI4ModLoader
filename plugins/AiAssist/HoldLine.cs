@@ -111,7 +111,9 @@ public unsafe partial class AiAssist
         foreach (var reference in units)
         {
             var unit = byRef.GetValueOrDefault(reference);
-            if (unit == 0 || !Division.IsHeadquarters(unit) && (!Pinned(unit) || NextToPocket(unit))) units[kept++] = reference;
+            // A division in no army (the army balancing's new armies are filled through here) always gets its assignment:
+            // kept out, it stayed between armies and the AI walked it back and forth.
+            if (unit == 0 || !Division.IsHeadquarters(unit) && (!Pinned(unit) || NextToPocket(unit) || Division.Group(unit) == 0)) units[kept++] = reference;
             else Interlocked.Increment(ref _keptOnLine);
         }
         if (kept == units.Length) return true;
