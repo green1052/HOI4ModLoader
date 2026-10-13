@@ -6,7 +6,7 @@ namespace HOI4ModLoader.Bootstrap;
 /// <summary>
 /// Profiler. HOI4ModLoader\profile-startup present: the first 150 s from the exe's entry point go to startup-profile.txt;
 /// afterwards, creating HOI4ModLoader\profile-now profiles the next 60 s (in game, at the speed to look at) into
-/// profile-&lt;tick&gt;.txt. profiler.c samples every game thread once a millisecond; the report lists, per thread, how much of
+/// profile-&lt;tick&gt;.txt. profiler.c samples every game thread in turn, a pass about every millisecond; the report lists, per thread, how much of
 /// the time it ran and what it waited in, the hoi4.exe functions on the stacks of running samples (inclusive: a function
 /// and what it calls), and, for the main thread, the hoi4.exe function each wait is called from (what the frame or the load
 /// waits for).
@@ -66,7 +66,9 @@ internal static unsafe class Profiler
         int count;
         ulong samples;
         var threads = new ReadOnlySpan<ThreadStats>(hm_profile_threads(&count, &samples), count).ToArray();
-        var text = new StringBuilder($"samples {samples} over {ms} ms, about 1 per thread per ms\r\n== threads (id: running / sampled)\r\n");
+        var most = threads.Length == 0 ? 0 : threads.Max(t => t.Samples); // a thread there the whole time: one per pass
+        var text = new StringBuilder($"samples {samples} over {ms} ms; a thread alive throughout was sampled {most} times (every {(most == 0 ? 0 : (double)ms / most):0.0} ms)\r\n");
+        text.Append("== threads (id: running / sampled)\r\n");
         foreach (var t in threads.OrderByDescending(t => t.Samples - t.Waiting))
             text.Append($"{t.Id}{(t.Id == _main ? " (main)" : "")}: {t.Samples - t.Waiting} / {t.Samples}\r\n");
         Section(text, "hoi4.exe functions on running stacks (inclusive)", 1, 400);

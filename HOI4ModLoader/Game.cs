@@ -13,7 +13,7 @@ public static unsafe class Game
     {
         try
         {
-            using var settings = JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "launcher-settings.json")));
+            using var settings = JsonDocument.Parse(File.ReadAllText(Path.Combine(Loader.GameDir, "launcher-settings.json")));
             return settings.RootElement.GetProperty("rawVersion").GetString() ?? "unknown";
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
@@ -312,22 +312,15 @@ public static unsafe class Native
     /// Calls <paramref name="use"/> with a CPdxArray header viewing <paramref name="items"/> (data +0, capacity +8, size +0xC),
     /// for game functions that only read the array passed to them.
     /// </summary>
-    public static T WithPdxArray<T>(nint[] items, Func<nint, T> use)
-    {
-        var header = stackalloc nint[3];
-        fixed (nint* data = items)
-        {
-            header[0] = (nint)data;
-            ((int*)header)[2] = ((int*)header)[3] = items.Length;
-            return use((nint)header);
-        }
-    }
+    public static T WithPdxArray<T>(nint[] items, Func<nint, T> use) => WithArray(items, use);
 
     /// <summary>The same for a CPdxArray&lt;int&gt; (province ids, ...).</summary>
-    public static T WithPdxArray<T>(int[] items, Func<nint, T> use)
+    public static T WithPdxArray<T>(int[] items, Func<nint, T> use) => WithArray(items, use);
+
+    private static TResult WithArray<TItem, TResult>(TItem[] items, Func<nint, TResult> use) where TItem : unmanaged
     {
         var header = stackalloc nint[3];
-        fixed (int* data = items)
+        fixed (TItem* data = items)
         {
             header[0] = (nint)data;
             ((int*)header)[2] = ((int*)header)[3] = items.Length;
@@ -363,6 +356,7 @@ public static unsafe class Native
         *(long*)(at + 0x18) = Math.Max(15, bytes.Length);
     }
 
+    /// <summary>The game's text bytes (a name, a token's string) as a string.</summary>
     public static string Utf8(ReadOnlySpan<byte> bytes) => Encoding.UTF8.GetString(bytes);
 
     private const int BigBuffer = 0x1000; // MSVC allocates std::string buffers this big 32-byte aligned, the real block's pointer just before
@@ -437,6 +431,7 @@ public sealed class PerGame(Action reset)
 {
     private int _generation = -1;
 
+    /// <summary>Runs the reset if the game or the controlled country changed since the last call.</summary>
     public void Check()
     {
         if (Game.Generation == _generation) return;

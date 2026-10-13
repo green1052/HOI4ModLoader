@@ -5,10 +5,14 @@ using System.Runtime.Loader;
 
 namespace HOI4ModLoader;
 
+/// <summary>Loads the plugins and runs the loader's own parts; its folders for plugins to use.</summary>
 public static class Loader
 {
     /// <summary>&lt;game&gt;\HOI4ModLoader (HOI4ModLoader.dll lives in HOI4ModLoader\core).</summary>
     public static readonly string ModsDir = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(typeof(Loader).Assembly.Location)!, ".."));
+
+    /// <summary>The game's folder (hoi4.exe, version.dll and the vanilla files).</summary>
+    public static readonly string GameDir = Path.GetDirectoryName(ModsDir)!;
 
     private static readonly string PluginsDir = Path.Combine(ModsDir, "plugins");
     private static readonly Logger Log = new("Loader");
@@ -30,7 +34,6 @@ public static class Loader
     private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
     private static string _loadedFiles = "", _changedFiles = "";
     private static int _generation;
-    private static bool _started; // the first load (at startup) ran
 
     /// <summary>Plugins are loading for the first time, before the game reads its files; false on later (hot) reloads.</summary>
     public static bool AtStartup { get; private set; } = true;
@@ -268,9 +271,8 @@ public static class Loader
 
         Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
         Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins' names too
-        if (!_started)
+        if (AtStartup) // once: the game reads its interface files at startup, after this and before its main menu
         {
-            _started = true; // once: the game reads its interface files at startup, after this and before its main menu
             GameFiles.Build([typeof(Loader).Assembly, .. found.Values.Where(f => IsEnabled(f.Info.Id)).Select(f => f.Type.Assembly).Distinct()]);
             if (allRead) RemoveOrphanConfigs(found.Keys); // at startup only: a hot reload may catch a DLL mid-copy
         }

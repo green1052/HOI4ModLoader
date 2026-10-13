@@ -4,9 +4,12 @@ namespace HOI4ModLoader;
 [AttributeUsage(AttributeTargets.Class)]
 public sealed class PluginAttribute(string id, string name, string version) : Attribute
 {
+    /// <summary>Unique id, e.g. "com.example.myplugin": its config is config\&lt;Id&gt;.cfg and its patches are reverted by it.</summary>
     public string Id { get; } = id;
     /// <summary>English name; other languages from "&lt;id&gt;.name" in the plugin's localisation, its description from "&lt;id&gt;.desc".</summary>
     public string Name { get; } = name;
+
+    /// <summary>The plugin's version, shown in the log, the Mods tab and the main menu tooltip.</summary>
     public string Version { get; } = version;
 
     /// <summary>
@@ -29,17 +32,20 @@ public sealed class PluginAttribute(string id, string name, string version) : At
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public sealed class DependencyAttribute(string id) : Attribute
 {
+    /// <summary>The <see cref="PluginAttribute.Id"/> of the plugin depended on.</summary>
     public string Id { get; } = id;
 }
 
 /// <summary>Base class for plugins. Every subclass in HOI4ModLoader\plugins\*.dll is loaded before the game's entry point, and anew on hot reload.</summary>
 public abstract class Plugin
 {
+    /// <summary>This plugin's [Plugin] attribute.</summary>
     public PluginAttribute Info { get; internal set; } = null!;
 
     /// <summary>HOI4ModLoader\config\&lt;Id&gt;.cfg</summary>
     public ConfigFile Config { get; internal set; } = null!;
 
+    /// <summary>Writes to LogOutput.log under the plugin's name.</summary>
     public Logger Log { get; internal set; } = null!;
 
     /// <summary>

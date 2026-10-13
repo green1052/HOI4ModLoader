@@ -4,8 +4,10 @@ using System.Text;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Reading and writing the game's GUI widgets (elements defined in interface\*.gui). Widget text is the game's byte
-/// encoding (Windows-1252 plus § color codes, or whatever a language mod maps in), so it is handled as bytes.
+/// Reading and writing the game's GUI widgets (elements defined in interface\*.gui). Widget text is handled as the bytes
+/// the game holds: the string overloads write UTF-8 (Korean text shows as such), while the game's own markup is single
+/// bytes that aren't valid UTF-8, £ (0xA3) before an inline icon and § (0xA7) before a colour code. Decoding text read
+/// from a widget and encoding it again would turn those into two bytes and break the markup, so it is edited as bytes.
 /// </summary>
 public static unsafe partial class Gui
 {
@@ -55,8 +57,10 @@ public static unsafe partial class Gui
     /// <summary>The text box's current text (the game's bytes; valid until its text changes).</summary>
     public static ReadOnlySpan<byte> Text(nint textBox) => Native.MsvcString(textBox + TextOffset);
 
+    /// <summary>Sets the text box's text (UTF-8); nothing for box 0.</summary>
     public static void SetText(nint textBox, string text) => SetText(textBox, Encoding.UTF8.GetBytes(text));
 
+    /// <summary>Sets the text box's text to these bytes (see the class summary); nothing for box 0.</summary>
     public static void SetText(nint textBox, ReadOnlySpan<byte> text)
     {
         if (textBox == 0) return; // FindTextBox found none
@@ -67,6 +71,7 @@ public static unsafe partial class Gui
         finally { Allocator.Free(str); } // SetText already took (and freed) any heap buffer
     }
 
+    /// <summary>Whether the widget is hidden (its hidden flag).</summary>
     public static bool IsHidden(nint widget) => (*(byte*)(widget + Flags) & HiddenFlag) != 0;
 
     /// <summary>Shows a widget the code hid (what the game does: clear the hidden flag, then Show()).</summary>
@@ -223,8 +228,13 @@ public static unsafe partial class Gui
     [UnmanagedCallersOnly]
     private static void DestroyTooltip(nint handler, int flags) { }
 
+    /// <summary>Shift is down (anywhere: check <see cref="GameFocused"/> for a hotkey).</summary>
     public static bool ShiftHeld => KeyHeld(0x10); // VK_SHIFT
+
+    /// <summary>Ctrl is down.</summary>
     public static bool CtrlHeld => KeyHeld(0x11);  // VK_CONTROL
+
+    /// <summary>Alt is down.</summary>
     public static bool AltHeld => KeyHeld(0x12);   // VK_MENU
 
     /// <summary>Whether the key (a virtual-key code, e.g. 'S') is down right now, wherever the focus is.</summary>

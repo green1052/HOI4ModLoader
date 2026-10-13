@@ -14,6 +14,7 @@ public sealed class ConfigFile
     // Settings with a list of values, by file: the settings menu reads its own ConfigFile of the same file.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, string Section, string Key), Func<IReadOnlyList<string>>> ChoiceLists = new();
 
+    /// <summary>The settings file at <paramref name="path"/>, read now (created on the first <see cref="Bind{T}"/> that writes).</summary>
     public ConfigFile(string path)
     {
         _path = path;
@@ -25,13 +26,18 @@ public sealed class ConfigFile
 
     internal IReadOnlyList<string>? ChoicesOf(string section, string key) => ChoiceLists.TryGetValue((_path, section, key), out var choices) ? choices() : null;
 
+    /// <summary>
+    /// The setting's stored value (read with the invariant culture), or <paramref name="defaultValue"/> when it is missing (then
+    /// written with <paramref name="description"/> as its comment) or unreadable. Every setting a plugin has must be bound
+    /// on each load: the ones not bound are deleted.
+    /// </summary>
     public T Bind<T>(string section, string key, T defaultValue, string description) where T : IConvertible
     {
         _bound.Add((section, key));
         var (sectionAt, keyAt) = Find(section, key);
         if (keyAt >= 0)
         {
-            var raw = _lines[keyAt][(_lines[keyAt].IndexOf('=') + 1)..].Trim();
+            var raw = ValueOf(_lines[keyAt]);
             try { return (T)Convert.ChangeType(raw, typeof(T), CultureInfo.InvariantCulture); }
             catch (Exception e) when (e is FormatException or OverflowException or InvalidCastException) { return defaultValue; }
         }
@@ -49,7 +55,7 @@ public sealed class ConfigFile
         else
         {
             var end = sectionAt + 1; // after the section's last entry: the file lists settings in the order they're bound
-            while (end < _lines.Count && !_lines[end].TrimStart().StartsWith('[')) end++;
+            while (end < _lines.Count && !IsHeader(_lines[end].Trim())) end++;
             _lines.InsertRange(end, entry);
         }
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
@@ -67,10 +73,10 @@ public sealed class ConfigFile
         {
             var line = raw.Trim();
             if (line.StartsWith('#')) comment.Add(line.TrimStart('#').Trim());
-            else if (line.StartsWith('[') && line.EndsWith(']')) (section, comment) = (line[1..^1], []);
-            else if (line.Split('=', 2) is [var key, var value])
+            else if (IsHeader(line)) (section, comment) = (line[1..^1], []);
+            else if (IsEntry(line, out var key))
             {
-                entries.Add((section, key.Trim(), value.Trim(), string.Join(" ", comment)));
+                entries.Add((section, key, ValueOf(line), string.Join(" ", comment)));
                 comment.Clear();
             }
             else comment.Clear();
@@ -136,7 +142,11 @@ public sealed class ConfigFile
         return removed;
     }
 
+    // One reading of the file for every path (Bind, Entries, Set, RemoveUnbound): a trimmed line is a [section] header, a
+    // # comment or a `key = value` entry; anything else is ignored.
     private static bool IsHeader(string line) => line.StartsWith('[') && line.EndsWith(']');
+
+    private static string ValueOf(string line) => line[(line.IndexOf('=') + 1)..].Trim();
 
     /// <summary>A `key = value` line (trimmed), as <see cref="Entries"/> reads them.</summary>
     private static bool IsEntry(string line, out string key)
@@ -157,12 +167,12 @@ public sealed class ConfigFile
         for (var i = 0; i < _lines.Count; i++)
         {
             var line = _lines[i].Trim();
-            if (line.StartsWith('['))
+            if (IsHeader(line))
             {
                 if (sectionAt >= 0) break;
-                if (line == $"[{section}]") sectionAt = i;
+                if (line[1..^1] == section) sectionAt = i;
             }
-            else if (sectionAt >= 0 && line.Split('=', 2) is [var k, _] && k.Trim() == key)
+            else if (sectionAt >= 0 && IsEntry(line, out var k) && k == key)
             {
                 return (sectionAt, i);
             }

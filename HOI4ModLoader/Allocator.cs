@@ -78,7 +78,7 @@ public static unsafe class Allocator
         NativeMemory.Free(probe);
         if (redirected) Log.Error("mimalloc also took over the process's other (ucrtbase) allocations");
 
-        var version = NativeLibrary.Load(Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "version.dll"));
+        var version = NativeLibrary.Load(Path.Combine(Loader.GameDir, "version.dll"));
         nint Shim(string name) => NativeLibrary.GetExport(version, name);
 
         var free = Sig.Find(FreeSig);

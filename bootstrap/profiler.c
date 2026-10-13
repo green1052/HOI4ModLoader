@@ -1,5 +1,6 @@
-// The profiler's sampling (Profiler.cs starts it and writes the report). Every thread but the caller is sampled once a
-// millisecond: its instruction pointer, and its call stack unwound through hoi4.exe and the system modules. Native, and
+// The profiler's sampling (Profiler.cs starts it and writes the report). Every thread but the caller is sampled in turn,
+// a pass about every millisecond (slower with many threads: the report says how often): its instruction pointer, and its
+// call stack unwound through hoi4.exe and the system modules. Native, and
 // called through a normal P/Invoke: while a thread is suspended nothing here allocates, takes a lock (the thread may hold
 // the heap's) or runs C# (the C# runtime could wait for a thread this has suspended). The unwind lookup only runs on
 // addresses inside hoi4.exe and the system modules, whose static tables need no lock (for JIT code ntdll would search the
@@ -124,7 +125,12 @@ void hm_profile(DWORD ms, DWORD mainThread) {
             CloseHandle(snap);
         }
         for (int i = 0; i < count; i++) {
-            if (SuspendThread(threads[i]) == (DWORD)-1) continue; // exited
+            if (SuspendThread(threads[i]) == (DWORD)-1) { // exited: its slot goes, so a new thread that reuses the id is opened
+                CloseHandle(threads[i]);
+                threads[i] = threads[--count], ids[i] = ids[count];
+                i--;
+                continue;
+            }
             context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
             if (GetThreadContext(threads[i], &context)) SafeRecord(ids[i], &context);
             ResumeThread(threads[i]);

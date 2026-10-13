@@ -74,7 +74,6 @@ public unsafe partial class AutoConstruction : Plugin
     private readonly Dictionary<(int Tag, nint Type), int> _targets = [];
     private readonly Dictionary<nint, (int Count, long Until)> _sent = [];   // by type: count expected once the sent commands land
     private readonly HashSet<nint> _failed = [];                             // types whose last try found nowhere to build (logged once)
-    private nint _infrastructure;                                               // its CBuildingType*, once seen on a button
     private PerGame _game = null!;
     private bool _reportedBox;
 
@@ -148,7 +147,6 @@ public unsafe partial class AutoConstruction : Plugin
     {
         var type = *(nint*)(item + TypeOfItem);
         if (type == 0) return;
-        if (_infrastructure == 0 && Name(type) == "infrastructure") _infrastructure = type;
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), TargetBox);
         if (!_reportedBox)
         {
@@ -227,13 +225,14 @@ public unsafe partial class AutoConstruction : Plugin
         // Containers with a construction line of this type.
         var building = ConstructionLines(country, type).Select(line => *(nint*)(line.Building + ContainerOfBuilding)).ToHashSet();
 
+        var infrastructureType = Buildings.Type(Buildings.InfrastructureSlot); // 0 before the game made its building database
         var places = new List<(nint Container, int Id, int Free, (int, int, int, int) Rank)>();
         foreach (var state in Native.PdxArray(country + StatesOfCountry))
         {
             if (_canBuildInState(country, state, type, 1) == 0) continue;
-            var infrastructure = _infrastructure == 0 ? 0 : Buildings.Level(State.Buildings(state), _infrastructure);
+            var infrastructure = infrastructureType == 0 ? 0 : Buildings.Level(State.Buildings(state), infrastructureType);
             var rank = (Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0,
-                type == _infrastructure ? -infrastructure : infrastructure, // faster construction; infrastructure itself where it's lacking
+                type == infrastructureType ? -infrastructure : infrastructure, // faster construction; infrastructure itself where it's lacking
                 _freeSharedSlots(state), -State.Id(state));
             if (!perProvince) places.Add((State.Buildings(state), State.Id(state), _freeLevels(State.Buildings(state), type), rank));
             else

@@ -70,7 +70,6 @@ public unsafe partial class AutoConstruction
         var supply = Game.Supply;
         if (country == 0 || supply == 0 || Buildings.Db == 0) return;
         _supplyNode = Buildings.Type(Buildings.SupplyNodeSlot);
-        if (_infrastructure == 0) _infrastructure = Buildings.Type(Buildings.InfrastructureSlot);
         var countries = *(nint*)(supply + CountriesOfSupply);
         var countrySupply = countries == 0 ? 0 : *(nint*)(countries + 8 * Game.TagIndex(tag));
         var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);

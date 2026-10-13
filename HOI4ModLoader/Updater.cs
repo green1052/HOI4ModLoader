@@ -13,7 +13,6 @@ internal static class Updater
 {
     private const string LatestRelease = "https://api.github.com/repos/green1052/HOI4ModLoader/releases/latest";
     private const string PluginsPrefix = "HOI4ModLoader/plugins/";
-    private static readonly string GameDir = Path.GetFullPath(Path.Combine(Loader.ModsDir, ".."));
     private static readonly string Staged = Path.Combine(Loader.ModsDir, "update", "plugins");
     private static readonly string Shipped = Path.Combine(Loader.ModsDir, "update", "plugins.txt"); // plugins the last update installed
     private static readonly Logger Log = new("Updater");
@@ -44,7 +43,7 @@ internal static class Updater
 
         var leftovers = Directory.EnumerateFiles(Loader.ModsDir, "*.old", SearchOption.AllDirectories)
             .Concat(Directory.EnumerateFiles(Loader.ModsDir, "*.new", SearchOption.AllDirectories))
-            .Concat(Directory.EnumerateFiles(GameDir, "version.dll.*"));
+            .Concat(Directory.EnumerateFiles(Loader.GameDir, "version.dll.*"));
         foreach (var file in leftovers.Where(f => !f.EndsWith("version.dll", StringComparison.OrdinalIgnoreCase)).ToList())
         {
             try { File.Delete(file); }
@@ -112,8 +111,8 @@ internal static class Updater
         {
             var target = Path.GetFullPath(path.StartsWith(PluginsPrefix, StringComparison.OrdinalIgnoreCase)
                 ? Path.Combine(Staged, path[PluginsPrefix.Length..])
-                : Path.Combine(GameDir, path));
-            if (!target.StartsWith(GameDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                : Path.Combine(Loader.GameDir, path));
+            if (!target.StartsWith(Loader.GameDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException($"path outside the game folder: {entry.FullName}");
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             entry.ExtractToFile(target + ".new", true);

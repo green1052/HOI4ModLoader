@@ -10,7 +10,10 @@ namespace HOI4ModLoader;
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class SignatureAttribute(int count = 1) : Attribute
 {
+    /// <summary>How many matches the pattern must have.</summary>
     public int Count { get; } = count;
+
+    /// <summary>A second pattern the match must be near (see <see cref="Image.FindAll"/>), for one too short to be unique alone.</summary>
     public string? Anchor { get; init; }
 }
 
@@ -34,6 +37,7 @@ public static class Sig
 /// <summary>A PE image mapped in memory: the running game, or hoi4.exe mapped as data (tests).</summary>
 public sealed unsafe partial class Image
 {
+    /// <summary>The running hoi4.exe.</summary>
     public static readonly Image Game = new(NativeLibrary.GetMainProgramHandle());
 
     /// <summary>

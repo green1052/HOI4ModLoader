@@ -39,8 +39,7 @@ public sealed class Fonts : Plugin
         if (font == "" || !Loader.AtStartup) return; // a reload (a setting changed in the menu): the game read its fonts already
         if (header == "") header = font;
 
-        var gameDir = Path.GetDirectoryName(Loader.ModsDir)!;
-        var fnts = Directory.GetFiles(Path.Combine(gameDir, dir), "*.fnt")
+        var fnts = Directory.GetFiles(Path.Combine(Loader.GameDir, dir), "*.fnt")
             .Where(f => typewriter || !Path.GetFileName(f).Contains("typewriter", StringComparison.OrdinalIgnoreCase)).Order().ToList();
         var faces = new[] { font, header }.Distinct().ToDictionary(spec => spec, Face);
         foreach (var (spec, face) in faces)
@@ -62,7 +61,7 @@ public sealed class Fonts : Plugin
                 foreach (var old in Directory.GetDirectories(root)) Directory.Delete(old, true);
             var building = cache + ".tmp";
             Directory.CreateDirectory(building);
-            var drawn = 0;
+            int drawn = 0, failed = 0;
             Parallel.ForEach(fnts, fnt =>
             {
                 var name = Path.GetFileNameWithoutExtension(fnt);
@@ -71,11 +70,25 @@ public sealed class Fonts : Plugin
                     if (Draw(fnt, faces[name.Contains("header", StringComparison.OrdinalIgnoreCase) ? header : font], size, building)) Interlocked.Increment(ref drawn);
                     else Log.Info($"{name}: its texture isn't one this can read, left as it is");
                 }
-                catch (Exception e) { Log.Error($"{name}: {e.Message}"); }
+                catch (Exception e)
+                {
+                    Interlocked.Increment(ref failed);
+                    Log.Error($"{name}: {e.Message}");
+                }
             });
             Gdi.ForgetShapes();
-            Directory.Move(building, cache);
-            Log.Info($"drew {drawn} of {fnts.Count} fonts in {clock.ElapsedMilliseconds} ms (cached until the settings or the game's fonts change)");
+            if (failed == 0)
+            {
+                Directory.Move(building, cache);
+                Log.Info($"drew {drawn} of {fnts.Count} fonts in {clock.ElapsedMilliseconds} ms (cached until the settings or the game's fonts change)");
+            }
+            else
+            {
+                // Not cached: a failure (a full disk, a locked file) would otherwise leave those fonts vanilla for good. This
+                // start uses what was drawn; the next one draws again (and deletes this folder first).
+                cache = building;
+                Log.Error($"drew {drawn} of {fnts.Count} fonts, {failed} failed: not cached, drawn again at the next start");
+            }
         }
         foreach (var file in Directory.GetFiles(cache)) GameFiles.Add($"{dir}/{Path.GetFileName(file)}", file);
     }

@@ -60,7 +60,6 @@ public static class GameFiles
 
     private static readonly Logger Log = new("GameFiles");
     private static readonly string Dir = Path.Combine(Loader.ModsDir, "ui");
-    private static readonly string GameDir = Path.GetDirectoryName(Loader.ModsDir)!;
     private static IHook<MountFn>? _mount;
     private static UnmountFn? _unmount;
     private static nint _dir; // Dir in UTF-8, for PhysFS; never freed
@@ -124,7 +123,7 @@ public static class GameFiles
         {
             try
             {
-                var text = built.TryGetValue(patch.File, out var earlier) ? earlier : File.ReadAllText(Path.Combine(GameDir, patch.File));
+                var text = built.TryGetValue(patch.File, out var earlier) ? earlier : File.ReadAllText(Path.Combine(Loader.GameDir, patch.File));
                 var patched = patch.Apply(text, patch.ReadSnippet(assembly));
                 if (patched == null)
                 {

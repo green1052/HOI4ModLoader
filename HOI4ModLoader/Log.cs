@@ -11,7 +11,10 @@ public sealed class Logger(string source)
 
     private readonly HashSet<string> _failed = [];
 
+    /// <summary>Writes an INFO line: what happened, for reading back what a plugin did.</summary>
     public void Info(string message) => Write("INFO ", message);
+
+    /// <summary>Writes an ERROR line: something failed or is missing (a signature, a file, a setting).</summary>
     public void Error(string message) => Write("ERROR", message);
 
     /// <summary>
@@ -86,6 +89,6 @@ public static unsafe class Breadcrumb
     }
 
     private static nint Export(string name) =>
-        NativeLibrary.TryLoad(Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "version.dll"), out var version)
+        NativeLibrary.TryLoad(Path.Combine(Loader.GameDir, "version.dll"), out var version)
         && NativeLibrary.TryGetExport(version, name, out var function) ? function : 0; // an older version.dll: no breadcrumbs
 }
