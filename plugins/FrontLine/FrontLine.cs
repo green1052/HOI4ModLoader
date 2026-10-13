@@ -710,16 +710,16 @@ public unsafe partial class FrontLine : Plugin
     }
 
     /// <summary>
-    /// An AI division the AI's own orders walked off our post: left to them (not put back on its old order, which would be one
-    /// more walk) and not taken again for RepeatHours. Moved back each time, it went to and fro between the post and wherever
-    /// the AI wanted it.
+    /// An AI division the AI walked off our post: back onto the order it came from, once, and not taken again for RepeatHours.
+    /// Moved back to the post each time it went to and fro; left off every order, the AI walked it about as a reserve.
     /// </summary>
     private void GiveUp(nint unit, string job)
     {
         if (!_held.Remove(unit, out var held)) return;
         _recent[unit] = Game.Hour;
         Vacate(held);
-        Log.Info($"{job}: the AI moved a division off its post; left to the AI");
+        if (held.Order != 0 && Division.Group(unit) == held.Group && Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs;
+        Log.Info($"{job}: the AI moved a division off its post; it goes back onto its battle plan");
     }
 
     /// <summary>

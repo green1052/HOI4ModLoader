@@ -441,8 +441,10 @@ public unsafe partial class AiAssist
                 *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), *(int*)(front + MinWanted));
             }
             var toLine = GarrisonsToLine(country, tag);
-            if (!toLine && !HasLine(tag)) return;
-            var cap = toLine ? (main ? floor : Math.Max(1, floor / Math.Max(1, areaFronts)))
+            // Before a land war too (in peace, or at war with no land line yet) only the floor: the rest stand ready on the
+            // fronts the AI draws for the war it expects, not along every coast.
+            var minimal = toLine || !HasLine(tag);
+            var cap = minimal ? (main ? floor : Math.Max(1, floor / Math.Max(1, areaFronts)))
                 : Math.Max(main ? floor : 1, divisions * AreaSharePercent / 100 / Math.Max(1, areaFronts));
             if (*(int*)(front + MaxWanted) <= cap) return;
             *(int*)(front + MaxWanted) = cap;
