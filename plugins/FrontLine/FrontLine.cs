@@ -177,6 +177,9 @@ public unsafe partial class FrontLine : Plugin
             _orgSeen.Clear();
             _orders.Clear();
             _operations.Clear();
+            foreach (var arrow in _blitzArrows.Concat(_pincerArrows)) MapArrows.Hide(arrow); // a no-op for an old map's
+            _blitzArrows.Clear();
+            _pincerArrows.Clear();
             _opOrdered.Clear();
             _opLastHour = -1;
             _restore = true; // a save loaded (or the plugin reloaded): put back what the last game had taken off its plans
@@ -453,7 +456,7 @@ public unsafe partial class FrontLine : Plugin
             if (!overdue && Game.Hour - held.Since < MinRestHours) continue; // back sooner, the next squeeze of the neck (or drop) sent it off again
             if (!overdue && post != 0 && Province.Controller(post) == tag && Neck(country, tag, post) >= 0) continue; // escaped: its salient still closing
             if (!overdue && (Org(unit) < _returnOrg || Str(unit) < _returnStrength)) continue;
-            if (Release(unit, tag)) Log.Info($"a division ({Org(unit):0}% organisation, {Str(unit):0}% strength) is back on its front after {Game.Hour - held.Since} hours off it");
+            if (Release(unit, tag)) Log.Debug($"a division ({Org(unit):0}% organisation, {Str(unit):0}% strength) is back on its front after {Game.Hour - held.Since} hours off it");
         }
     }
 
@@ -479,7 +482,7 @@ public unsafe partial class FrontLine : Plugin
             if (rest < 0) continue; // nowhere safe to rest: it stays
             Send(unit, rest, Job.Rest);
             swaps++;
-            Log.Info($"rotation: a division at {Org(unit):0}% organisation, {Str(unit):0}% strength goes to rest");
+            Log.Debug($"rotation: a division at {Org(unit):0}% organisation, {Str(unit):0}% strength goes to rest");
         }
     }
 
@@ -510,7 +513,7 @@ public unsafe partial class FrontLine : Plugin
             if (sent.Count == 0) continue;
             _sent[id] = ([.. sent], false);
             plugs += sent.Count;
-            Log.Info($"plugging: {sent.Count} fresh division(s) sent into a defence being lost ({progress:0}% for the attacker, its organisation gone in {(double.IsInfinity(eta) ? "-" : $"{eta:0}h")})");
+            Log.Debug($"plugging: {sent.Count} fresh division(s) sent into a defence being lost ({progress:0}% for the attacker, its organisation gone in {(double.IsInfinity(eta) ? "-" : $"{eta:0}h")})");
         }
         Thicken(country, tag, units, helpers);
     }
@@ -546,7 +549,7 @@ public unsafe partial class FrontLine : Plugin
             if (!Send(helper, id, Job.Guard, id)) continue;
             _sent[id] = ([helper], false);
             thickened++;
-            Log.Info($"plugging: a fresh division thickens a thin spot ({ours} of ours against {enemy} enemy division(s) next to it)");
+            Log.Debug($"plugging: a fresh division thickens a thin spot ({ours} of ours against {enemy} enemy division(s) next to it)");
         }
     }
 
@@ -582,7 +585,7 @@ public unsafe partial class FrontLine : Plugin
         if (!_lured.TryGetValue(id, out var at))
         {
             _lured[id] = Game.Hour;
-            Log.Info($"  #{tag} lure: lets {attackers} enemy division(s) into province {id} (both shoulders held, {reserves} mobile division(s) within {LureRadius})");
+            Log.Debug($"  #{tag} lure: lets {attackers} enemy division(s) into province {id} (both shoulders held, {reserves} mobile division(s) within {LureRadius})");
         }
         return true;
     }
@@ -677,7 +680,7 @@ public unsafe partial class FrontLine : Plugin
     {
         var from = Division.Location(unit);
         var owner = Division.Owner(unit);
-        Log.Info($"  {(owner == Game.PlayerTag ? "player" : $"#{owner}")} {what}: province {(from != 0 ? Game.Id(from) : 0)} -> {to}");
+        Log.Debug($"  {(owner == Game.PlayerTag ? "player" : $"#{owner}")} {what}: province {(from != 0 ? Game.Id(from) : 0)} -> {to}");
         if (from != 0) MapArrows.Flash(Game.Id(from), to, colour.R, colour.G, colour.B);
     }
 
@@ -724,7 +727,7 @@ public unsafe partial class FrontLine : Plugin
         _recent[unit] = Game.Hour;
         Vacate(held);
         if (held.Order != 0 && Division.Group(unit) == held.Group && Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs;
-        Log.Info($"{job}: the AI moved a division off its post; it goes back onto its battle plan");
+        Log.Debug($"{job}: the AI moved a division off its post; it goes back onto its battle plan");
     }
 
     /// <summary>

@@ -45,6 +45,7 @@ public unsafe partial class FrontLine
         public readonly List<int> Corridor = corridor;   // enemy provinces, breakthrough sector first, the objective last
         public readonly List<nint> Spearhead = spearhead;
         public int Head = -1;                            // last corridor province taken (in a row from the sector)
+        public int From;                                 // where its spearhead stood at the start: the map arrow's tail
     }
 
     /// <summary>A running operation. Its divisions are in _held (Job.Operation): Post = the corridor province a holder holds, Target = the enemy province a pin attacks.</summary>
@@ -63,6 +64,7 @@ public unsafe partial class FrontLine
     private readonly bool[] _opDown = new bool[Op.Keys.Length];
     private delegate* unmanaged<nint, nint, byte, nint> _cancelMovement;
     private int _opDepth, _opLastHour = -1;
+    private readonly List<nint> _blitzArrows = [], _pincerArrows = []; // map arrows, reused while the map lives
     private double _stopOrg;
 
     /// <summary>The operations' settings; true when their keys are on.</summary>
@@ -99,6 +101,7 @@ public unsafe partial class FrontLine
         if (running.Count > 0)
         {
             foreach (var op in running) End(op, tag, "cancelled");
+            DrawOperations();
             return;
         }
         if (selected.Count == 0)
@@ -114,6 +117,37 @@ public unsafe partial class FrontLine
         }
         var started = pincer ? StartPincer(country, tag, selected) : StartBlitz(country, tag, selected);
         if (started != null) _operations.Add(started);
+        DrawOperations();
+    }
+
+    /// <summary>
+    /// Each running operation on the map: an arrow per arm from its spearhead's latest gain (its start before any) through
+    /// the corridor to the objective, red for a blitz, orange for a pincer, gone when it ends. Needs the game's arrow manager,
+    /// caught once the game draws an arrow itself (a selected unit's move); before that only the log shows it.
+    /// </summary>
+    private void DrawOperations()
+    {
+        var used = (Blitz: 0, Pincer: 0);
+        if (MapArrows.Ready)
+            foreach (var op in _operations)
+            foreach (var arm in op.Arms)
+            {
+                if (arm.From == 0 && arm.Spearhead.Select(Division.Location).FirstOrDefault(l => l != 0) is var at && at != 0) arm.From = Game.Id(at);
+                var path = arm.Corridor.Skip(arm.Head + 1).Prepend(arm.Head >= 0 ? arm.Corridor[arm.Head] : arm.From)
+                    .Select(Game.Province).Where(p => p != 0).Select(MapArrows.Position).ToList();
+                if (path.Count < 2) continue;
+                var pool = op.Pincer ? _pincerArrows : _blitzArrows;
+                var i = op.Pincer ? used.Pincer++ : used.Blitz++;
+                if (i == pool.Count)
+                {
+                    var made = op.Pincer ? MapArrows.Make(255, 140, 0) : MapArrows.Make(230, 30, 30);
+                    if (made == 0) break;
+                    pool.Add(made);
+                }
+                MapArrows.Draw(pool[i], path);
+            }
+        foreach (var spare in _blitzArrows.Skip(used.Blitz)) MapArrows.Hide(spare);
+        foreach (var spare in _pincerArrows.Skip(used.Pincer)) MapArrows.Hide(spare);
     }
 
     /// <summary>Our land divisions in the player's selection (checked against the country's own list before anything else is read).</summary>
@@ -237,9 +271,23 @@ public unsafe partial class FrontLine
     {
         var best = new Dictionary<int, (int Cost, int Prev, int Depth)>();
         var queue = new PriorityQueue<(int Id, int Prev, int Depth), int>();
+        // The line may lie ahead of them (divisions in reserve behind it): over friendly ground first, a province a step, up to
+        // Op.Radius; the corridor starts at the first enemy province. Only those right next to the enemy found nothing from the rear.
+        var walked = new Dictionary<nint, int>();
+        var steps = new Queue<nint>();
         foreach (var location in from.Select(Division.Location).Distinct())
-        foreach (var id in Game.Neighbours(location))
-            if (Game.Province(id) is var p && p != 0 && Enemy(country, tag, p) && Enterable(location, p)) queue.Enqueue((id, -1, 0), 1 + Province.AttackWeight(p, location));
+            if (location != 0 && walked.TryAdd(location, 0)) steps.Enqueue(location);
+        while (steps.TryDequeue(out var here))
+        {
+            var walk = walked[here];
+            foreach (var id in Game.Neighbours(here))
+            {
+                var p = Game.Province(id);
+                if (p == 0 || !Enterable(here, p)) continue;
+                if (Enemy(country, tag, p)) queue.Enqueue((id, -1, 0), walk + 1 + Province.AttackWeight(p, here));
+                else if (walk + 1 < Op.Radius && Friendly(country, tag, p) && walked.TryAdd(p, walk + 1)) steps.Enqueue(p);
+            }
+        }
         while (queue.TryDequeue(out var at, out var cost))
         {
             if (!best.TryAdd(at.Id, (cost, at.Prev, at.Depth)) || at.Depth >= _opDepth - 1) continue;
@@ -293,6 +341,7 @@ public unsafe partial class FrontLine
         foreach (var unit in _opOrdered.Keys.Where(u => !Ordered(u)).ToList()) _opOrdered.Remove(unit);
         foreach (var op in _operations.ToList())
             if (Step(op, country, tag) is { } end) End(op, tag, end);
+        DrawOperations();
     }
 
     /// <summary>One hour of an operation; why it ends, or null.</summary>
