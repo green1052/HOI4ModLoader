@@ -43,3 +43,5 @@
     com.green1052.frontline.SpearheadOrganisation.desc:0 "선봉 사단은 조직력이 이 값보다 낮아지면 진격을 멈춥니다.\n- 한쪽 날개의 선봉이 모두 멈추면 작전이 끝납니다"
     com.green1052.frontline.ApplyToAI:0 "AI에도 적용"
     com.green1052.frontline.ApplyToAI.desc:0 "싱글플레이에서 AI 국가에도 이 전선 보조를 위 설정 그대로 적용합니다.\n- 대상: 구멍 메우기, 탈출, 공격, 소방수, 종심 방어, 전선 간 병력 이동, 유인\n- 교대 휴식은 제외: AI 전선 명령이 쉬는 사단을 바로 되가져감\n- 그동안 AI Assist의 같은 기능(교대 휴식, 탈출, 예비대, 2선, 국지 공격)은 물러나고, 이 사단들을 재편성하지 않습니다\nAI Assist가 없으면 AI의 재편성이 사단을 도로 데려갈 수 있습니다"
+    com.green1052.frontline.PlayerRepositions:0 "내 사단을 다른 자리로 이동"
+    com.green1052.frontline.PlayerRepositions.desc:0 "내 사단을 작전계획에서 빼서 다른 자리에 세웁니다: 종심 방어 자리, 소방대 예비 자리, 다른 전선 지원, 차단벽.\n끄면(기본): 그 자리에서 하는 것(교대, 구멍 메우기, 탈출, 포위 돌파, 공격)과 작전 단축키만 하고, 이미 다른 자리에 있던 사단은 작전계획으로 돌아갑니다.\nAI 국가에는 영향 없음."

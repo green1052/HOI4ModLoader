@@ -150,6 +150,9 @@ public unsafe partial class FrontLine : Plugin
             "When a front is losing (its line provinces lost in two days and defences being lost three or more together, or facing twice its divisions), spare fresh divisions of quiet fronts reinforce its most pressed provinces and go back to their own front a day after the crisis. "
             + "Meanwhile fresh divisions next to the crisis attack idle enemy stacks of one or two divisions (one attacker each, while its organisation holds) so they are locked in combat and can't be moved in. "
             + "A front that only faces an encircled pocket keeps twice the pocket's divisions (two at least); the rest go onto their army's biggest other front.");
+        _playerRepositions = Config.Bind("Player", "PlayerRepositions", false,
+            "Your divisions are taken off your battle plans to stand elsewhere: depth defence posts, fire brigade posts, shuffles to other fronts and cordons. "
+            + "Off: only what acts where they stand (rotation, plugging, escape, breakouts, attacks) and the operation keys; ones already posted go back onto their battle plan.");
         if (Config.Bind("Keys", "BattlePlanKeys", true, "Ctrl+Alt+E activates every battle plan at once, Ctrl+Alt+H halts them."))
             MainThread.Every(TimeSpan.FromMilliseconds(30), PollKeys);
         _ai = Config.Bind("AI", "ApplyToAI", false,
@@ -330,19 +333,21 @@ public unsafe partial class FrontLine : Plugin
         if (_rotation && !_force) foreach (var group in groups) RotateArmy(country, tag, group);
         if (_plugging) Plug(country, tag, units);
         if (_fireBrigade) Counterattack(country, tag, fronts.Values);
-        if (_plugging) Cordon(country, tag, units);
+        var reposition = _force || _playerRepositions; // the player's divisions stay where the player put them unless asked
+        if (!reposition) ReleasePosts(tag);
+        if (_plugging && reposition) Cordon(country, tag, units);
         if (_escape)
         {
             Escape(country, tag, units);
             Breakout(country, tag, units);
         }
-        if (_shuffle)
+        if (_shuffle && reposition)
         {
             Shuffle(country, tag, fronts.Values);
             TrimPocketFronts(country, tag, fronts.Values);
         }
-        if (_depth) DepthDefense(country, tag, fronts.Values);
-        if (_fireBrigade) PostReserves(country, tag, fronts.Values);
+        if (_depth && reposition) DepthDefense(country, tag, fronts.Values);
+        if (_fireBrigade && reposition) PostReserves(country, tag, fronts.Values);
         if (_attack) Attack(country, tag);
     }
 
@@ -736,6 +741,15 @@ public unsafe partial class FrontLine : Plugin
     private readonly Dictionary<int, int> _vacated = []; // province id -> hour a post (or key) there was left
 
     private bool Vacated(int id) => _vacated.TryGetValue(id, out var at) && Game.Hour - at is >= 0 and < RepeatHours;
+
+    private bool _playerRepositions;
+
+    /// <summary>The player's divisions on posts elsewhere (reserve, second line, cordon, shuffle) go back onto their battle plan.</summary>
+    private void ReleasePosts(int tag)
+    {
+        foreach (var (unit, held) in _held.ToArray())
+            if (held.Job is Job.Reserve or Job.Counter or Job.Depth or Job.Cordon or Job.Shuffle && !Division.Fighting(unit)) Release(unit, tag);
+    }
 
     private static bool IsFront(nint order) => Order.Type(order) == Order.Front;
 
