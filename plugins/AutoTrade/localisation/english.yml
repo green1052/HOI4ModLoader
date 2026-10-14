@@ -1,6 +1,10 @@
 l_english:
     com.green1052.autotrade.auto:0 "Auto"
-    com.green1052.autotrade.desc:0 "Shift+click a resource in the trade view to turn auto trade on or off for it.\n- Shortages are imported from your subjects, then your faction, then the biggest seller\n- Imports no longer needed are cut, in reverse order\n- Ctrl+Alt+C: your trade routes on any map mode\nWorks in multiplayer."
+    com.green1052.autotrade.desc:0 "Shift+click a resource in the trade view to turn auto trade on or off for it.\n- Shortages are imported from your subjects, then your faction, then the biggest seller\n- Imports no longer needed are cut, in reverse order\n- Oil follows the fuel stockpile: imported while fuel is low, cut back once it is nearly full\n- Ctrl+Alt+C: your trade routes on any map mode\nWorks in multiplayer."
     com.green1052.autotrade.Surplus:0 "Surplus to keep"
     com.green1052.autotrade.Surplus.desc:0 "Import until the balance is this much, not just 0 (a buffer for new factories and lost deals).\nImports are cut once the balance is a whole import step above it."
     com.green1052.autotrade.AlliesFirst:0 "Allies first"
+    com.green1052.autotrade.FuelLowPercent:0 "Oil: fuel low at (%)"
+    com.green1052.autotrade.FuelLowPercent.desc:0 "With auto trade on oil: one more step of oil is imported a day while the fuel stockpile is under this share of its maximum."
+    com.green1052.autotrade.FuelHighPercent:0 "Oil: fuel full at (%)"
+    com.green1052.autotrade.FuelHighPercent.desc:0 "With auto trade on oil: oil imports are cut by a step a day while the fuel stockpile is at or over this share of its maximum."

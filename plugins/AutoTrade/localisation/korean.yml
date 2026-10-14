@@ -1,8 +1,12 @@
 ﻿l_korean:
     com.green1052.autotrade.auto:0 "자동"
     com.green1052.autotrade.name:0 "자동 무역"
-    com.green1052.autotrade.desc:0 "무역 화면에서 자원을 Shift+클릭해 자동 무역을 켜고 끕니다.\n- 부족분은 괴뢰국, 세력, 가장 많이 파는 나라 순으로 수입\n- 필요 없어진 수입은 반대 순서로 줄임\n- Ctrl+Alt+C: 어느 지도 모드에서든 우리 무역 경로 표시\n멀티에서도 동작."
+    com.green1052.autotrade.desc:0 "무역 화면에서 자원을 Shift+클릭해 자동 무역을 켜고 끕니다.\n- 석유는 연료 비축량 기준: 연료가 부족하면 수입하고, 거의 차면 줄임\n- 부족분은 괴뢰국, 세력, 가장 많이 파는 나라 순으로 수입\n- 필요 없어진 수입은 반대 순서로 줄임\n- Ctrl+Alt+C: 어느 지도 모드에서든 우리 무역 경로 표시\n멀티에서도 동작."
     com.green1052.autotrade.Surplus:0 "유지할 여유분"
     com.green1052.autotrade.Surplus.desc:0 "수지가 0이 아니라 이만큼 남을 때까지 수입합니다(새 공장·끊긴 거래 대비).\n수지가 이 값보다 수입 단위 하나 이상 많아지면 수입을 줄입니다."
     com.green1052.autotrade.AlliesFirst:0 "동맹 우선"
     com.green1052.autotrade.AlliesFirst.desc:0 "괴뢰국, 같은 세력, 가장 많이 팔 수 있는 나라 순으로 삽니다.\n같으면 무역 영향력이 높은 나라가 먼저입니다."
+    com.green1052.autotrade.FuelLowPercent:0 "석유: 연료 부족 기준(%)"
+    com.green1052.autotrade.FuelLowPercent.desc:0 "석유 자동 무역이 켜져 있으면, 연료 비축량이 최대치의 이 비율 미만인 동안 하루에 한 단계씩 석유 수입을 늘립니다."
+    com.green1052.autotrade.FuelHighPercent:0 "석유: 연료 충분 기준(%)"
+    com.green1052.autotrade.FuelHighPercent.desc:0 "석유 자동 무역이 켜져 있으면, 연료 비축량이 최대치의 이 비율 이상인 동안 하루에 한 단계씩 석유 수입을 줄입니다."

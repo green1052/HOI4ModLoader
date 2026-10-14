@@ -27,13 +27,20 @@ public static class Signatures
     [Signature] public const string AmountForFactories = "40 53 56 57 41 55 41 56 48 83 EC 20 48 89 6C 24 ? 4C 8B F1 4C 89 64 24 ? 49 8B C9";
 
     [VTable] public const string TradeCommand = "CCreateTradeCommand";
+
+    /// <summary>
+    /// AddFuelEffect::Execute: `mov rsi,[rax+1580h]` at +0x2B loads the country's CCountryFuelStatus (+0x08 fuel, +0x10 max
+    /// fuel, int64 2^15 fixed point; the save writes them as fuel and max_fuel). The offset is read from here, its disp32 at +0x2E.
+    /// </summary>
+    [Signature] public const string FuelOfCountry = "40 53 56 57 48 83 EC 40 48 8B D9 48 8B FA 48 8D 4A 08 E8 ? ? ? ? 48 8D 4B 58 C6 44 24 20 00 45 33 C9 48 8D 54 24 60 4C 8B C7 48 8B B0 80 15 00 00";
 }
 
 /// <summary>
 /// Shift+click a resource's icon in the trade view to switch auto trade on or off for it ("Auto" shows under it). While on,
 /// a shortage of that resource is imported, and a surplus of at least one import step cut back, with the trade view's own
 /// command (so multiplayer stays in sync): bought from our subjects first, then our faction, then the country that can sell
-/// the most; cut from the other end. Ctrl+Alt+C draws our trade routes (TradeOverlay.cs).
+/// the most; cut from the other end. Oil follows the fuel stockpile instead (only oil the factories don't use becomes fuel,
+/// so its balance never shows a shortage). Ctrl+Alt+C draws our trade routes (TradeOverlay.cs).
 /// </summary>
 [Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class AutoTrade : Plugin
@@ -60,13 +67,22 @@ public unsafe partial class AutoTrade : Plugin
     private readonly HashSet<(int Tag, nint Resource)> _auto = [];
     private readonly Dictionary<nint, (int Balance, bool Up, long Until)> _sent = []; // by resource: balance when a deal was changed
     private PerGame _game = null!;
-    private int _surplus;
+    private int _surplus, _fuelLow, _fuelHigh, _fuelOfCountry, _oilDay = -1;
     private bool _alliesFirst;
+    private nint _oil;
+    private const int FuelOfStatus = 0x08, MaxFuelOfStatus = 0x10;
+    private const int ItemDatabaseRva = 0x332F088, OilOfDatabase = 0x68; // the strategic resources' database global (HOI4 1.19.3): its oil
 
     public override void Load()
     {
         _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals. Imports are cut once the balance is a whole import step above it."));
         _alliesFirst = Config.Bind("Sellers", "AlliesFirst", true, "Buy from your subjects first, then your faction, then whoever can sell the most (trade influence breaks ties).");
+        _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "Auto trade on oil: import one more step of oil a day while the fuel stockpile is under this share of its maximum."), 0, 100);
+        _fuelHigh = Math.Clamp(Config.Bind("Fuel", "FuelHighPercent", 90, "Auto trade on oil: cut oil imports by a step a day while the fuel stockpile is at or over this share of its maximum."), _fuelLow, 100);
+        _fuelOfCountry = *(int*)(Sig.Find(Signatures.FuelOfCountry) + 0x2E);
+        var database = *(nint*)(System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress + ItemDatabaseRva);
+        _oil = database == 0 ? 0 : *(nint*)(database + OilOfDatabase);
+        if (_oil == 0) Log.Info("oil: the resource database wasn't found, so oil trades by its balance like the rest");
         var iconClick = Sig.Find(Signatures.ResourceIconClick);
         var update = Sig.Find(Signatures.ResourceItemUpdate);
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
@@ -119,11 +135,34 @@ public unsafe partial class AutoTrade : Plugin
         {
             if (owner != tag) continue;
             var balance = _balance(resources, resource);
+            if (resource == _oil && _oil != 0)
+            {
+                Oil(country, tag, balance, now);
+                continue;
+            }
             if (_sent.TryGetValue(resource, out var sent) && now < sent.Until && (sent.Up ? balance <= sent.Balance : balance >= sent.Balance)) continue; // not in yet
             _sent.Remove(resource);
             if (balance < _surplus) Import(tag, resource, _surplus - balance, balance, now);
             else Reduce(tag, resource, balance - _surplus, balance, now);
         }
+    }
+
+    /// <summary>
+    /// Oil by the fuel stockpile: a step more a game day while it is under FuelLowPercent of its maximum, a step less while at
+    /// or over FuelHighPercent. Once a day: fuel follows imports slowly, and the balance (which never runs short) says nothing.
+    /// </summary>
+    private void Oil(nint country, int tag, int balance, long now)
+    {
+        var status = *(nint*)(country + _fuelOfCountry);
+        if (status == 0) return;
+        long fuel = *(long*)(status + FuelOfStatus), max = *(long*)(status + MaxFuelOfStatus);
+        var day = Game.Hour / 24;
+        if (max <= 0 || day == _oilDay) return;
+        var percent = fuel * 100 / max;
+        if (percent < _fuelLow) Import(tag, _oil, 1, balance, now); // one seller step
+        else if (percent >= _fuelHigh) Reduce(tag, _oil, int.MaxValue / 2, balance, now, oneStep: true);
+        else return;
+        _oilDay = day;
     }
 
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>
@@ -139,11 +178,11 @@ public unsafe partial class AutoTrade : Plugin
     /// Cuts our imports of <paramref name="resource"/> by whole steps, at most <paramref name="excess"/> units, from the least
     /// preferred seller (the import order reversed): the same command with a smaller total; 0 cancels the deal.
     /// </summary>
-    private void Reduce(int tag, nint resource, int excess, int balance, long now)
+    private void Reduce(int tag, nint resource, int excess, int balance, long now, bool oneStep = false)
     {
         var deal = Sellers(tag, resource).Where(s => s.Existing > 0 && s.Step <= excess).OrderBy(s => (s.Relation, s.Influence)).FirstOrDefault();
         if (deal.Tag == 0) return;
-        var cut = Math.Min(deal.Existing, excess / deal.Step * deal.Step);
+        var cut = Math.Min(deal.Existing, oneStep ? deal.Step : excess / deal.Step * deal.Step);
         if (Post(tag, resource, deal.Tag, deal.Existing - cut, balance, false, now)) Log.Info($"importing {cut} less of a resource ({excess} over)");
     }
 
