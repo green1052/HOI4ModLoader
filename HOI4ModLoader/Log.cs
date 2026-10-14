@@ -65,7 +65,7 @@ public sealed class Logger(string source)
                 _writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {level} [{source}] {message}");
             }
         }
-        catch (IOException) { } // a locked or read-only log must not take the game down
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // a locked or read-only log must not take the game down
     }
 
     internal static void Reset()
@@ -80,7 +80,7 @@ public sealed class Logger(string source)
                 File.Delete(OldPath); // the last launch's
             }
         }
-        catch (IOException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 }
 
