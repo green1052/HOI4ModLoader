@@ -94,6 +94,7 @@ public unsafe partial class AutoConstruction : Plugin
         _canBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInProvince);
         _freeSharedSlots = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FreeSharedSlots);
         _tokenToString = (delegate* unmanaged<int, nint>)Sig.Find(Signatures.TokenToString);
+        RestoreTargets();
         _game = new PerGame(() =>
         {
             _sent.Clear();
@@ -118,6 +119,7 @@ public unsafe partial class AutoConstruction : Plugin
             var target = Math.Max(0, from + (!Gui.ShiftHeld ? -1 : Gui.CtrlHeld ? BigStep : 1));
             if (target <= count && !Gui.ShiftHeld) _targets.Remove(key); // lowered to what's there: off
             else _targets[key] = target;
+            SaveTargets();
             _failed.Remove(type);
             Log.Info($"{Name(type)}: target {target}, now {count} (built and queued)");
             ShowTarget(item);
@@ -135,6 +137,35 @@ public unsafe partial class AutoConstruction : Plugin
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);
         if (supply) LoadSupply();
         if (production) LoadProduction();
+    }
+
+    // The targets, kept across a reload of the plugin (a new build, a setting changed in the menu) in the same game process:
+    // building types are database objects made at startup, so their pointers hold until it exits.
+    private static readonly string TargetsFile = Path.Combine(Loader.ModsDir, "cache", "autoconstruction_targets.txt");
+
+    private void SaveTargets()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(TargetsFile)!);
+            File.WriteAllLines(TargetsFile, [Environment.ProcessId.ToString(), .. _targets.Select(t => $"{t.Key.Tag} {t.Key.Type:X} {t.Value}")]);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"targets not saved: {e.Message}"); }
+    }
+
+    private void RestoreTargets()
+    {
+        try
+        {
+            if (!File.Exists(TargetsFile)) return;
+            var lines = File.ReadAllLines(TargetsFile);
+            if (lines.Length == 0 || lines[0] != Environment.ProcessId.ToString()) return; // an earlier game run's pointers
+            foreach (var line in lines.Skip(1))
+                if (line.Split(' ') is [var tag, var type, var target] && int.TryParse(tag, out var t) && int.TryParse(target, out var n)
+                    && long.TryParse(type, System.Globalization.NumberStyles.HexNumber, null, out var p)) _targets[(t, (nint)p)] = n;
+            if (_targets.Count > 0) Log.Info($"kept {_targets.Count} construction target(s) across the reload");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));

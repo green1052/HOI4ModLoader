@@ -7,6 +7,6 @@
     com.green1052.autotrade.AlliesFirst:0 "동맹 우선"
     com.green1052.autotrade.AlliesFirst.desc:0 "괴뢰국, 같은 세력, 가장 많이 팔 수 있는 나라 순으로 삽니다.\n같으면 무역 영향력이 높은 나라가 먼저입니다."
     com.green1052.autotrade.FuelLowPercent:0 "석유: 연료 부족 기준(%)"
-    com.green1052.autotrade.FuelLowPercent.desc:0 "석유 자동 무역이 켜져 있으면, 게임 시간 1주일마다 연료 비축량이 최대치의 이 비율 미만이고 계속 줄고 있을 때 석유 수입을 한 단계 늘립니다."
+    com.green1052.autotrade.FuelLowPercent.desc:0 "석유 자동 무역이 켜져 있으면, 게임 시간 1주일마다 연료 비축량이 최대치의 이 비율 미만이고 스스로 잘 차오르지 않을 때(주당 최대치의 2% 미만 증가) 석유 수입을 한 단계 늘립니다."
     com.green1052.autotrade.FuelHighPercent:0 "석유: 연료 충분 기준(%)"
     com.green1052.autotrade.FuelHighPercent.desc:0 "석유 자동 무역이 켜져 있으면, 게임 시간 1주일마다 연료 비축량이 최대치의 이 비율 이상이고 줄고 있지 않을 때 석유 수입을 한 단계 줄입니다."

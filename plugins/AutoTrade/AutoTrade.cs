@@ -79,7 +79,7 @@ public unsafe partial class AutoTrade : Plugin
     {
         _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals. Imports are cut once the balance is a whole import step above it."));
         _alliesFirst = Config.Bind("Sellers", "AlliesFirst", true, "Buy from your subjects first, then your faction, then whoever can sell the most (trade influence breaks ties).");
-        _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "Auto trade on oil: once a game week, import one more step of oil while the fuel stockpile is under this share of its maximum and still falling."), 0, 100);
+        _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "Auto trade on oil: once a game week, import one more step of oil while the fuel stockpile is under this share of its maximum and not filling up on its own."), 0, 100);
         _fuelHigh = Math.Clamp(Config.Bind("Fuel", "FuelHighPercent", 90, "Auto trade on oil: once a game week, cut oil imports by a step while the fuel stockpile is at or over this share of its maximum and not falling."), _fuelLow, 100);
         _fuelOfCountry = *(int*)(Sig.Find(Signatures.FuelOfCountry) + 0x2E);
         var database = *(nint*)(System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress + ItemDatabaseRva);
@@ -90,6 +90,7 @@ public unsafe partial class AutoTrade : Plugin
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
         _maxExport = (delegate* unmanaged<nint, long*, nint, long*, long*, nint, void>)Sig.Find(Signatures.MaxExport);
         _amountForFactories = (delegate* unmanaged<long*, nint, long*, long*, int, void>)Sig.Find(Signatures.AmountForFactories);
+        RestoreAuto();
         _game = new PerGame(() =>
         {
             _sent.Clear();
@@ -105,6 +106,7 @@ public unsafe partial class AutoTrade : Plugin
             }
             var key = (Tag: Game.ControlledTag, Resource: *(nint*)(item + ResourceOfItem));
             var on = _auto.Add(key) || !_auto.Remove(key);
+            SaveAuto();
             Log.Info($"auto trade {(on ? "on" : "off")} for a resource, {_auto.Count(a => a.Tag == key.Tag)} on");
             _update!.OriginalFunction(item, 0); // redraw now
             Labels(item);
@@ -117,6 +119,35 @@ public unsafe partial class AutoTrade : Plugin
 
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);
         LoadOverlay();
+    }
+
+    // The resources auto trade is on for, kept across a reload of the plugin (a new build, a setting changed in the menu) in
+    // the same game process: the resources are database objects made at startup, so their pointers hold until it exits.
+    private static readonly string AutoFile = Path.Combine(Loader.ModsDir, "cache", "autotrade_auto.txt");
+
+    private void SaveAuto()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(AutoFile)!);
+            File.WriteAllLines(AutoFile, [Environment.ProcessId.ToString(), .. _auto.Select(a => $"{a.Tag} {a.Resource:X}")]);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"auto trade list not saved: {e.Message}"); }
+    }
+
+    private void RestoreAuto()
+    {
+        try
+        {
+            if (!File.Exists(AutoFile)) return;
+            var lines = File.ReadAllLines(AutoFile);
+            if (lines.Length == 0 || lines[0] != Environment.ProcessId.ToString()) return; // an earlier game run's pointers
+            foreach (var line in lines.Skip(1))
+                if (line.Split(' ') is [var tag, var resource] && int.TryParse(tag, out var t)
+                    && long.TryParse(resource, System.Globalization.NumberStyles.HexNumber, null, out var r)) _auto.Add((t, (nint)r));
+            if (_auto.Count > 0) Log.Info($"auto trade kept on for {_auto.Count} resource(s) across the reload");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>"Auto " in front of the column's neededType text (empty but for oil) while auto trade is on; idempotent.</summary>
@@ -153,10 +184,13 @@ public unsafe partial class AutoTrade : Plugin
         }
     }
 
+    private const int RecoveringPercent = 2; // a week's fuel gain (% of the maximum) that counts as filling up on its own
+
     /// <summary>
     /// Oil by the fuel stockpile, once a game week and by its trend: a step more while fuel is under FuelLowPercent of its
-    /// maximum and still falling, a step less while at or over FuelHighPercent and not falling. The stockpile is large and fills
-    /// slowly: a step a day while it was low piled imports up long before it filled (and at speed 5 a day is a second).
+    /// maximum and not filling up on its own (gaining under RecoveringPercent of it a week), a step less while at or over
+    /// FuelHighPercent and not falling. The stockpile is large and fills slowly: a step a day while it was low piled imports
+    /// up long before it filled (and at speed 5 a day is a second). The first week, before there is a trend, by level only.
     /// </summary>
     private void Oil(nint country, int tag, int balance, int now)
     {
@@ -166,12 +200,14 @@ public unsafe partial class AutoTrade : Plugin
         if (max <= 0) return;
         if (now - _oilAt is >= 0 and < OilEveryHours) return;
         var first = _oilAt == int.MinValue || now < _oilAt;
-        var falling = !first && fuel < _oilFuel;
+        var weekly = first ? 0 : (fuel - _oilFuel) * 100 / max; // % of the maximum gained (or lost) in the week
         (_oilAt, _oilFuel) = (now, fuel);
-        if (first) return; // the trend needs a week
         var percent = fuel * 100 / max;
-        if (percent < _fuelLow && falling) Import(tag, _oil, 1, balance, now); // one seller step
-        else if (percent >= _fuelHigh && !falling) Reduce(tag, _oil, int.MaxValue / 2, balance, now, oneStep: true);
+        var action = percent < _fuelLow && weekly < RecoveringPercent ? "importing a step more"
+            : percent >= _fuelHigh && weekly >= 0 ? "importing a step less" : "holding";
+        Log.Info($"oil: fuel at {percent}% of its maximum, {weekly:+0;-0;0}% in the last week: {action}");
+        if (action == "importing a step more") Import(tag, _oil, 1, balance, now); // one seller step
+        else if (action == "importing a step less") Reduce(tag, _oil, int.MaxValue / 2, balance, now, oneStep: true);
     }
 
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>

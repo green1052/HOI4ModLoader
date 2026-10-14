@@ -63,7 +63,7 @@ In the construction tab, **Shift+click** a building to raise its auto constructi
 ### AutoTrade
 In the trade view, **Shift+click** a resource icon to turn auto trade on or off for it (`Auto` shows; kept per country for the session). A shortage is imported automatically (each change waits for the balance to show it, two game days at most), and an import that is no longer needed is cut back by whole steps (cancelled at 0), so the balance stays at the surplus you set.
 - Seller priority: your subjects, your faction, then whoever can sell the most; trade influence breaks ties. Cuts go the other way round.
-- **Oil** follows the fuel stockpile instead of its balance (only oil the factories don't use becomes fuel, so the balance never shows a shortage): once a game week, a step more while fuel is under `FuelLowPercent` (50) of its maximum and still falling, a step less while at or over `FuelHighPercent` (90) and not falling (the stockpile fills slowly: daily steps piled imports up).
+- **Oil** follows the fuel stockpile instead of its balance (only oil the factories don't use becomes fuel, so the balance never shows a shortage): once a game week, a step more while fuel is under `FuelLowPercent` (50) of its maximum and not filling up on its own (under 2 % of it a week), a step less while at or over `FuelHighPercent` (90) and not falling (the stockpile fills slowly: daily steps piled imports up).
 - Settings: allies first, a surplus to keep (imports until the balance is at least that, not just 0), and the two fuel thresholds.
 - **Trade routes:** **Ctrl+Alt+C** draws your country's trade routes in gold, in any map mode: an arrow over the states a land route crosses and the strategic regions a sea route sails, for your imports and your exports alike.
 
