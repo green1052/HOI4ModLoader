@@ -18,7 +18,7 @@ public unsafe partial class AiAssist
     private IHook<GeneralRetFn>? _unitRequests, _areaDefense;
     private IHook<BalanceFn>? _armyBalancing;
     private int _raised, _unguarded;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> RaisedAt = new(); // front line section -> hour last logged
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Need)> RaisedAt = new(); // front line section -> last logged
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Need)> Needs = new(); // section -> the week's highest minimum
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> UnguardedAt = new(); // tag -> hour last logged
 
@@ -589,8 +589,9 @@ public unsafe partial class AiAssist
         *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
         *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
         Interlocked.Increment(ref _raised);
-        if (RaisedAt.TryGetValue(section, out var last) && hour - last is >= 0 and < 24) return; // once a day per front in the log
-        RaisedAt[section] = hour;
+        // In the log when the minimum changes, else once a week per front: daily it was most of a 40 MB log.
+        if (RaisedAt.TryGetValue(section, out var last) && last.Need == need && hour - last.Hour is >= 0 and < NeedHours) return;
+        RaisedAt[section] = (hour, need);
         _log?.Info($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
     }
 
@@ -600,7 +601,7 @@ public unsafe partial class AiAssist
         foreach (var (g, kept) in Axes) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) Axes.TryRemove(g, out _);
         foreach (var (g, kept) in SecondArms) if (hour - kept.Hour is < 0 or >= 2 * AxisHours) SecondArms.TryRemove(g, out _);
         foreach (var (g, kept) in Feints) if (hour - kept.Until is < -FeintHours or >= 2 * AxisHours) Feints.TryRemove(g, out _);
-        foreach (var (s, at) in RaisedAt) if (hour - at is < 0 or >= 48) RaisedAt.TryRemove(s, out _); // fronts are rebuilt: their sections go
+        foreach (var (s, at) in RaisedAt) if (hour - at.Hour is < 0 or >= 2 * NeedHours) RaisedAt.TryRemove(s, out _); // fronts are rebuilt: their sections go
         foreach (var (s, need) in Needs) if (hour - need.Hour is < 0 or >= NeedHours) Needs.TryRemove(s, out _);
         foreach (var entry in Line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) Line.TryRemove(entry); // matched by value: one refreshed meanwhile stays
     }
