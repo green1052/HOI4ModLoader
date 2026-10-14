@@ -207,11 +207,20 @@ public unsafe partial class AiAssist
         return Buildings.WorkingLevel(Province.Buildings(province), type);
     }
 
-    /// <summary>The group's invasion order that hasn't sailed yet, or 0.</summary>
+    /// <summary>
+    /// The group's invasion order that hasn't sailed yet, or 0; an army group's armies' too (a launch for the army group
+    /// covers them: seen as a plain offensive, it was held by the line's gates and the landing never sailed).
+    /// </summary>
     private static nint Unlaunched(nint group)
     {
         foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset))
-            if (order != 0 && Order.Type(order) == Order.Invasion && !Order.Executing(order)) return order; // paradrops: never AI-launched with id 0
+            if (order != 0 && Order.Type(order) == Order.Invasion && !Order.Executing(order)) return order;
+        var g = new OrdersGroup(group);
+        if (!g.IsArmyGroup) return 0;
+        foreach (var army in g.Armies)
+            if (army != 0)
+                foreach (var order in Native.PdxArray(army + OrdersGroup.RootOrdersOffset))
+                    if (order != 0 && Order.Type(order) == Order.Invasion && !Order.Executing(order)) return order;
         return 0;
     }
 

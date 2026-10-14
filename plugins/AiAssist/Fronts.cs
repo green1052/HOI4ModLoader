@@ -410,7 +410,7 @@ public unsafe partial class AiAssist
         PruneFronts(hour);
     }
 
-    private const int AreaSharePercent = 33, AreaFloorPercent = 10, AreaLateSharePercent = 45, AreaLateFloorPercent = 25, LateFrom = 1939, LateBy = 1943;
+    private const int AreaSharePercent = 33, AreaFloorPercent = 10, AreaLateSharePercent = 50, AreaLateFloorPercent = 35, LateFrom = 1939, LateBy = 1942;
 
     /// <summary>
     /// Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't land:
@@ -434,7 +434,8 @@ public unsafe partial class AiAssist
             // fronts the AI draws for the war it expects, not along every coast. That floor is a division per home port then
             // (its own naval bases on core ground: where a landing would come), else AreaFloorPercent.
             var minimal = toLine || !HasLine(tag);
-            // Later in the war landings grow (fleets and landing craft): from 1939 to 1943 the floor and the cap rise.
+            // Later in the war landings grow (fleets and landing craft): from 1939 to 1942 the floor and the cap rise (by 1943
+            // was too slow: Britain's island held fifteen divisions in 1942).
             var late = Game.Year is var year and > 1900 ? Math.Clamp((year - LateFrom) / (double)(LateBy - LateFrom), 0, 1) : 0;
             var floorPercent = AreaFloorPercent + (int)(late * (AreaLateFloorPercent - AreaFloorPercent));
             var sharePercent = AreaSharePercent + (int)(late * (AreaLateSharePercent - AreaSharePercent));
