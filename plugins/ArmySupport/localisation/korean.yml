@@ -13,5 +13,7 @@
     com.green1052.armysupport.AutoGroundCrews.desc:0 "항공단이 싸우는 지역에 더 많은 지상 근무단(지휘력 소모, 항공 효율 +10%)을 자동으로 켭니다.\n- 최근 이틀간 가장 치열한 곳(손실+격추 10대 이상)부터 최대 2곳\n- 사흘간 전투가 없거나 지휘력이 예비분 아래로 떨어지면 끔\n직접 켜거나 끈 지역은 건드리지 않습니다. 멀티에서도 동작."
     com.green1052.armysupport.GroundCrewsReserve:0 "자동 지상 근무단: 지휘력 예비분"
     com.green1052.armysupport.GroundCrewsReserve.desc:0 "자동 지상 근무단은 지휘력을 이 값 아래로 쓰지 않고, 이 아래로 떨어지면 끕니다."
+    com.green1052.armysupport.AutoAces:0 "자동 에이스 배치"
+    com.green1052.armysupport.AutoAces.desc:0 "놀고 있는 에이스를 살아 있는 에이스가 없는 항공단에 하루 한 번 배치합니다.\n- 임무 중인 항공단 우선, 그다음 큰 항공단\n- 전사한 에이스는 항공단에서 뺍니다 (바닐라는 그대로 두어 자리를 막음, 싱글에서는 모든 국가)\n멀티에서도 동작."
     com.green1052.armysupport.Organize:0 "야전군 편성(Ctrl+Alt+G)"
     com.green1052.armysupport.Organize.desc:0 "사단을 선택하고 Ctrl+Alt+G를 누르면 가까운 사단끼리 야전군 정원대로 나눠 편성합니다.\n- 야전군마다 보직 없는 장군 중 가장 뛰어난 사람을 지휘관으로\n- 사단 대부분이 있던 집단군에 넣고, 없으면 새 집단군을 만들어 보직 없는 원수 중 가장 뛰어난 사람에게"

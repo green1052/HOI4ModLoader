@@ -4,7 +4,7 @@ namespace ArmySupport;
 
 /// <summary>
 /// Support for the army: air wings and railway guns for field marshals (FieldMarshal.cs), railway gun positioning
-/// (RailwayGuns.cs), airbase send capacity (Airbases.cs), auto rebase (Rebase.cs), auto ground crews (GroundCrews.cs) and the Ctrl+Alt+G
+/// (RailwayGuns.cs), airbase send capacity (Airbases.cs), auto rebase (Rebase.cs), auto ground crews (GroundCrews.cs), auto aces (Aces.cs) and the Ctrl+Alt+G
 /// army organizer (Organize.cs).
 /// </summary>
 [Plugin("com.green1052.armysupport", "Army Support", "1.0.0", GameVersion = "1.19.3")]
@@ -25,6 +25,8 @@ public partial class ArmySupport : Plugin
             + "Only regions it turned on are turned off; one you turn off yourself is left alone.");
         var crewsReserve = Math.Clamp(Config.Bind("Air", "GroundCrewsReserve", 50,
             "Command power auto ground crews never spends below."), 0, 1000);
+        var aces = Config.Bind("Air", "AutoAces", true,
+            "Assign your idle aces to air wings without a living ace (wings on a mission first, then the biggest), and take aces killed in action off their wings (every country's in single player: vanilla leaves them there, blocking the slot).");
         var organize = Config.Bind("Organize", "Organize", true,
             "Ctrl+Alt+G with divisions selected: split them into armies of the game's army size (neighbours together), each under the best idle general, in the army group most of them came from or a new one under the best idle field marshal.");
 
@@ -33,6 +35,7 @@ public partial class ArmySupport : Plugin
         if (fieldMarshal) LoadFieldMarshal();
         if (organize) LoadOrganize();
         if (groundCrews) LoadGroundCrews(crewsReserve);
+        if (aces) LoadAces();
         if (!Multiplayer) LoadRailwayGuns(frontPenalty, noSea); // changes the game
     }
 }

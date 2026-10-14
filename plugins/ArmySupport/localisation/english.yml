@@ -12,5 +12,7 @@ l_english:
     com.green1052.armysupport.AutoGroundCrews.desc:0 "Turns More Ground Crews (+10% air efficiency for command power) on where your air wings fight.\n- Up to 2 regions, hardest fights of the last two days first (10+ planes lost and shot down)\n- Off after three quiet days or when command power drops under the reserve\nRegions you toggled yourself are left alone. Works in multiplayer."
     com.green1052.armysupport.GroundCrewsReserve:0 "Auto ground crews: command power reserve"
     com.green1052.armysupport.GroundCrewsReserve.desc:0 "Auto ground crews never spends command power below this, and turns them off when it drops under it."
+    com.green1052.armysupport.AutoAces:0 "Auto aces"
+    com.green1052.armysupport.AutoAces.desc:0 "Puts your idle aces on air wings without a living ace, once a day.\n- Wings on a mission first, then the biggest\n- Aces killed in action are taken off their wings (vanilla leaves them there, blocking the slot; every country's in single player)\nWorks in multiplayer."
     com.green1052.armysupport.Organize:0 "Organize armies (Ctrl+Alt+G)"
     com.green1052.armysupport.Organize.desc:0 "Ctrl+Alt+G with divisions selected splits them into armies of the game's army size, neighbours together.\n- Each army gets the best unassigned general\n- They join the army group most divisions came from, or a new one under the best unassigned field marshal"
