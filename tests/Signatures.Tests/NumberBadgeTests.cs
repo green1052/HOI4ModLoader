@@ -20,16 +20,19 @@ public class NumberBadgeTests
         Assert.Equal("[Draft] law", Show(Gui.Numbered("[Draft] law"u8, 0, false))); // not a badge
     }
 
-    /// <summary>In UTF-8 text (a Korean focus name) the £ is UTF-8 too: a lone 0xA3 failed the game's conversion and blanked the name.</summary>
+    /// <summary>
+    /// UTF-8 text (a Korean focus name) gets "[N] ": a lone 0xA3 failed the game's conversion and blanked the name, and a UTF-8 £
+    /// showed as text. An older version's UTF-8 icon is taken off.
+    /// </summary>
     [Fact]
-    public void Utf8TextGetsAUtf8Badge()
+    public void Utf8TextGetsABracketBadge()
     {
         var name = Encoding.UTF8.GetBytes("지도자원리");
         var once = Gui.Numbered(name, 1);
-        Assert.Equal("£hoimod_numbers|1 지도자원리", Encoding.UTF8.GetString(once));
+        Assert.Equal("[1] 지도자원리", Encoding.UTF8.GetString(once));
         Assert.True(System.Text.Unicode.Utf8.IsValid(once));
         Assert.Equal("지도자원리", Encoding.UTF8.GetString(Gui.Numbered(once, 0)));
-        Assert.Equal("£hoimod_numbers|2 지도자원리", Encoding.UTF8.GetString(Gui.Numbered(once, 2)));
+        Assert.Equal("[2] 지도자원리", Encoding.UTF8.GetString(Gui.Numbered(Encoding.UTF8.GetBytes("£hoimod_numbers|1 지도자원리"), 2)));
     }
 
     /// <summary>The icon strip: a TGA of 30 frames, opaque in the middle of each disc, clear in its corners.</summary>

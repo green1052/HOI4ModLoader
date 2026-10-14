@@ -91,7 +91,7 @@ public static unsafe partial class Gui
 
     /// <summary>
     /// Puts <paramref name="position"/> in front of the text box's text as a numbered badge (an inline text icon, see
-    /// <see cref="WriteNumberIcons"/>; "[N] " past the last one), replacing an earlier one, or takes it off for position 0.
+    /// <see cref="WriteNumberIcons"/>; "[N] " past the last one and in UTF-8 text), replacing an earlier one, or takes it off for position 0.
     /// Idempotent; sets the text only when it changes.
     /// </summary>
     public static void Number(nint box, int position)
@@ -108,7 +108,7 @@ public static unsafe partial class Gui
     internal static byte[] Numbered(ReadOnlySpan<byte> text, int position, bool? utf8 = null)
     {
         var rest = text;
-        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith(NumberIconUtf8) ? NumberIconUtf8.Length : text.StartsWith("["u8) ? 1 : 0;
+        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith(NumberIconUtf8) ? NumberIconUtf8.Length : text.StartsWith("["u8) ? 1 : 0; // the UTF-8 icon: badges of an older version
         if (open > 0)
         {
             var end = open;
@@ -117,13 +117,13 @@ public static unsafe partial class Gui
             if (end > open && text[end..].StartsWith(close)) rest = text[(end + close.Length)..];
         }
         return position <= 0 ? [.. rest]
-            : position <= NumberIcons ? [.. utf8 ?? Utf8Text(rest) ? NumberIconUtf8 : NumberIcon, .. Encoding.ASCII.GetBytes($"{position} "), .. rest]
+            : position <= NumberIcons && !(utf8 ?? Utf8Text(rest)) ? [.. NumberIcon, .. Encoding.ASCII.GetBytes($"{position} "), .. rest]
             : [.. Encoding.ASCII.GetBytes($"[{position}] "), .. rest];
     }
 
-    // "£hoimod_numbers|": the game's inline sprite syntax (£name|frame, as in vanilla's £resources_strip|3), £ in the text's
-    // encoding: one byte in the game's own, two in UTF-8. A lone 0xA3 in UTF-8 text failed its conversion and the whole name
-    // went blank (Korean focus names).
+    // "£hoimod_numbers|": the game's inline sprite syntax (£name|frame, as in vanilla's £resources_strip|3), £ in the game's own
+    // encoding. UTF-8 text (Korean focus names) gets "[N] " instead: a lone 0xA3 failed its conversion and blanked the whole
+    // name, and a UTF-8 £ isn't read as markup there (it showed as "£hoimod_numbers|3").
     private static readonly byte[] NumberIcon = [0xA3, .. "hoimod_numbers|"u8], NumberIconUtf8 = [0xC2, 0xA3, .. "hoimod_numbers|"u8];
 
     /// <summary>The game holds this text as UTF-8: it is valid UTF-8 with characters past ASCII, or the game runs in a CJK language.</summary>
