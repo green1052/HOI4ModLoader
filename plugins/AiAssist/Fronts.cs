@@ -320,6 +320,9 @@ public unsafe partial class AiAssist
                 areaFronts++;
                 if (mainArea == 0 || *(int*)(f + MaxWanted) > *(int*)(mainArea + MaxWanted)) mainArea = f;
             }
+        var othersDesired = 0; // what vanilla wants on the other area fronts: their share of the floor
+        foreach (var f in Native.PdxArray(general + FrontsOfGeneral))
+            if (f != 0 && f != mainArea && *(int*)(f + AreaDefense) != 0 && *(int*)(f + MaxWanted) > 0) othersDesired += *(int*)(f + DesiredWanted);
         foreach (var front in Native.PdxArray(general + FrontsOfGeneral))
         {
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
@@ -330,7 +333,7 @@ public unsafe partial class AiAssist
             // its Somali line divisions to Kismayo, and its Eritrean ones to ports in Libya and Italy, against Ethiopia.
             if (*(int*)(front + AreaDefense) != 0)
             {
-                if (_holdLine) UnguardAreaDefence(front, country, tag, hour, areaFronts, front == mainArea);
+                if (_holdLine) UnguardAreaDefence(front, country, tag, hour, areaFronts, front == mainArea, othersDesired);
                 continue;
             }
             var frontLine = Game.Resolve(*(long*)(front + FrontOfAiFront));
@@ -418,7 +421,7 @@ public unsafe partial class AiAssist
     /// an ally's), its area defence fronts together want at most AreaSharePercent of its land divisions: the British guarded
     /// France's coast with 36 of their 97 and their Dominions with all of theirs while the line in Belgium was short.
     /// </summary>
-    private void UnguardAreaDefence(nint front, nint country, int tag, int hour, int areaFronts, bool main)
+    private void UnguardAreaDefence(nint front, nint country, int tag, int hour, int areaFronts, bool main, int othersDesired)
     {
         if (*(int*)(front + MaxWanted) <= 0) return;
         if (!NoLandings(country, tag))
@@ -441,13 +444,16 @@ public unsafe partial class AiAssist
             var sharePercent = AreaSharePercent + (int)(late * (AreaLateSharePercent - AreaSharePercent));
             var floor = minimal ? Math.Max(1, Math.Min(Math.Max(_homePorts.GetValueOrDefault(tag), (int)(divisions * late * AreaLateFloorPercent / 100)), divisions / 2))
                 : Math.Max(1, divisions * floorPercent / 100);
+            // The floor is shared: the other area fronts keep what vanilla wants there (a coast it marks threatened), the
+            // capital's the rest. All of it on the capital's front left the United States' west coast a division against Japan
+            // (the others were cut to the floor over eighteen fronts, one each).
             if (main)
-            {
-                *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(floor, *(int*)(front + MaxWanted)));
-                *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), *(int*)(front + MinWanted));
-            }
-            var cap = minimal ? (main ? floor : Math.Max(1, floor / Math.Max(1, areaFronts)))
-                : Math.Max(main ? floor : 1, divisions * sharePercent / 100 / Math.Max(1, areaFronts));
+                *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(Math.Max(1, floor - othersDesired), *(int*)(front + MaxWanted)));
+            else
+                *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), *(int*)(front + DesiredWanted));
+            *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), *(int*)(front + MinWanted));
+            var share = main ? floor : Math.Max(1, *(int*)(front + DesiredWanted));
+            var cap = minimal ? share : Math.Max(share, divisions * sharePercent / 100 / Math.Max(1, areaFronts));
             if (*(int*)(front + MaxWanted) <= cap) return;
             *(int*)(front + MaxWanted) = cap;
             *(int*)(front + DesiredWanted) = Math.Min(*(int*)(front + DesiredWanted), cap);
