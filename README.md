@@ -85,7 +85,7 @@ Front line micro a player does by hand, with the battle plan UI's own commands (
 - Settings: every threshold, each feature on/off.
 
 ### ArmySupport
-- **Field marshals:** right-click a marshal's card with air wings or railway guns selected. In single player they are attached to the marshal (army group): his card gets air wing slots, his air wings support his armies' battles, and his railway guns take positions along all of his armies' divisions. In multiplayer they are spread over the marshal's armies instead. Setting: on/off.
+- **Field marshals:** right-click a marshal's card with air wings or railway guns selected. In single player they are attached to the marshal (army group): his card gets air wing slots, his air wings support his armies' battles, and his railway guns take positions along all of his armies' divisions. In multiplayer they are spread over the marshal's armies instead. Army and marshal cards keep the **+** (attach) slot once fighters, CAS and tactical bombers are all attached, for more wings of a type. Setting: on/off.
 - **Railway gun positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. The penalty and sea transfer are settings.
 - **Airbase capacity:** with air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
 - **Auto rebase:** a wing whose airbase reaches less than a share of its mission region (setting, 100% by default; 0 turns it off) flies to a usable airbase with room that reaches more, keeping its mission. Wings attached to an army are left to the game, which already does this.

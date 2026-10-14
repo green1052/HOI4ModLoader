@@ -23,6 +23,12 @@ public static partial class Signatures
     /// <summary>COrdersGroup daily update of attached wings' missions (reads ATTACHED_WINGS_ORDER_UPDATE_DAYS).</summary>
     [Signature] public const string UpdateAttachedWings = "48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? B8 28 12 00 00 E8 ? ? ? ? 48 2B E0 0F 29 B4 24 ? ? ? ? 4C 8B F9";
 
+    /// <summary>
+    /// Army card wing slot refresh: `cmp esi,3; jnb` adds the "+" (attach) slot only while fewer than three wing types
+    /// (fighter, CAS, tactical bomber) are shown.
+    /// </summary>
+    [Signature] public const string WingAddSlotCap = "83 FE 03 0F 83 ? ? ? ? 48 8B 9F";
+
     /// <summary>Army card: creates the attached-wing slots ("attached_units" gridbox).</summary>
     [Signature] public const string CreateWingSlots = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 40 48 8B D9 33 ED";
 
@@ -86,6 +92,7 @@ public unsafe partial class ArmySupport
         var at = Sig.Find(Signatures.CardAssign);
         var gunsSelected = (delegate* unmanaged<nint, byte>)(at + 9 + *(int*)(at + 5));
         var postAssign = at + 57 + *(int*)(at + 53);
+        var addSlotCap = Sig.Find(Signatures.WingAddSlotCap);
         var unassign = Sig.Find(Signatures.BoxUnassign);
         _postUnassign = (delegate* unmanaged<nint, nint, nint, byte>)(unassign + 20 + *(int*)(unassign + 16));
 
@@ -96,6 +103,10 @@ public unsafe partial class ArmySupport
                 group != 0 && new OrdersGroup(group).IsArmyGroup ? SpreadWings(wings, group) : _postAttach!.OriginalFunction(wings, group));
         }
         else LetArmyGroupsHold();
+
+        // The "+" slot stays once all three wing types are attached: more wings of a type are attached through it too
+        // (cmp esi,4: at most three type slots, so the add slot always follows).
+        Patches.Bytes(addSlotCap + 2, "03", "04");
 
         // A marshal's card ignores a right-click with air wings or railway guns selected; as an army card's it gets to the attach/assign.
         _cardRightClick = Patches.Hook<CardFn>(rightClick, card =>
