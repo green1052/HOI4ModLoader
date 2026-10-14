@@ -140,8 +140,9 @@ public unsafe partial class AutoConstruction : Plugin
     private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));
 
     /// <summary>
-    /// Writes how many more the target wants ("+N", "+0" once reached) into the button's target box, a small number in its
-    /// bottom right corner; nothing without a target.
+    /// Writes how many more the target wants built ("+N", "+0" once reached) into the button's target box, a small number in
+    /// its bottom right corner; nothing without a target. Queued ones still count until finished: the click queues at once,
+    /// and "+0" right away read as nothing to do.
     /// </summary>
     private void ShowTarget(nint item)
     {
@@ -155,7 +156,7 @@ public unsafe partial class AutoConstruction : Plugin
         }
         if (box == 0) return;
         var country = Game.Country(Game.ControlledTag);
-        var text = _targets.TryGetValue((Game.ControlledTag, type), out var target) && country != 0 ? $"+{Math.Max(0, target - Count(country, type))}" : "";
+        var text = _targets.TryGetValue((Game.ControlledTag, type), out var target) && country != 0 ? $"+{Math.Max(0, target - Count(country, type, queued: false))}" : "";
         if (Native.Utf8(Gui.Text(box)) != text) Gui.SetText(box, text);
     }
 
@@ -185,7 +186,7 @@ public unsafe partial class AutoConstruction : Plugin
     }
 
     /// <summary>Levels of <paramref name="type"/> built in the country's states plus levels queued.</summary>
-    private int Count(nint country, nint type)
+    private int Count(nint country, nint type, bool queued = true)
     {
         var count = 0;
         var perProvince = *(int*)(type + ProvinceLevel) > 0;
@@ -194,6 +195,7 @@ public unsafe partial class AutoConstruction : Plugin
             if (!perProvince) count += Buildings.Level(State.Buildings(state), type);
             else foreach (var province in State.Provinces(state)) count += Buildings.Level(Province.Buildings(province), type);
         }
+        if (!queued) return count;
         foreach (var (line, _) in ConstructionLines(country, type))
             if (*(byte*)(line + RepairLine) == 0) count += *(int*)(line + LevelsOfLine);
         return count;

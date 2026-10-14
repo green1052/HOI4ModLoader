@@ -11,13 +11,25 @@ public class NumberBadgeTests
     [Fact]
     public void BadgesReplaceEachOther()
     {
-        var once = Gui.Numbered("Industry"u8, 3);
+        var once = Gui.Numbered("Industry"u8, 3, false);
         Assert.Equal("£hoimod_numbers|3 Industry", Show(once));
-        var twice = Gui.Numbered(once, 31);
+        var twice = Gui.Numbered(once, 31, false);
         Assert.Equal("[31] Industry", Show(twice));
-        Assert.Equal("£hoimod_numbers|12 Industry", Show(Gui.Numbered(twice, 12)));
-        Assert.Equal("Industry", Show(Gui.Numbered(once, 0)));
-        Assert.Equal("[Draft] law", Show(Gui.Numbered("[Draft] law"u8, 0))); // not a badge
+        Assert.Equal("£hoimod_numbers|12 Industry", Show(Gui.Numbered(twice, 12, false)));
+        Assert.Equal("Industry", Show(Gui.Numbered(once, 0, false)));
+        Assert.Equal("[Draft] law", Show(Gui.Numbered("[Draft] law"u8, 0, false))); // not a badge
+    }
+
+    /// <summary>In UTF-8 text (a Korean focus name) the £ is UTF-8 too: a lone 0xA3 failed the game's conversion and blanked the name.</summary>
+    [Fact]
+    public void Utf8TextGetsAUtf8Badge()
+    {
+        var name = Encoding.UTF8.GetBytes("지도자원리");
+        var once = Gui.Numbered(name, 1);
+        Assert.Equal("£hoimod_numbers|1 지도자원리", Encoding.UTF8.GetString(once));
+        Assert.True(System.Text.Unicode.Utf8.IsValid(once));
+        Assert.Equal("지도자원리", Encoding.UTF8.GetString(Gui.Numbered(once, 0)));
+        Assert.Equal("£hoimod_numbers|2 지도자원리", Encoding.UTF8.GetString(Gui.Numbered(once, 2)));
     }
 
     /// <summary>The icon strip: a TGA of 30 frames, opaque in the middle of each disc, clear in its corners.</summary>

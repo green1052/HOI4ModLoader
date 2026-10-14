@@ -5,9 +5,10 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// Reading and writing the game's GUI widgets (elements defined in interface\*.gui). Widget text is handled as the bytes
-/// the game holds: the string overloads write UTF-8 (Korean text shows as such), while the game's own markup is single
-/// bytes that aren't valid UTF-8, £ (0xA3) before an inline icon and § (0xA7) before a colour code. Decoding text read
-/// from a widget and encoding it again would turn those into two bytes and break the markup, so it is edited as bytes.
+/// the game holds: the string overloads write UTF-8 (Korean text shows as such), while in text held in the game's own
+/// encoding the markup is single bytes that aren't valid UTF-8, £ (0xA3) before an inline icon and § (0xA7) before a
+/// colour code; in UTF-8 text (a CJK game's) they are UTF-8 too. Decoding text read from a widget and encoding it again
+/// would change one form into the other and break it, so it is edited as bytes.
 /// </summary>
 public static unsafe partial class Gui
 {
@@ -100,11 +101,14 @@ public static unsafe partial class Gui
         if (!text.SequenceEqual(shown)) SetText(box, shown);
     }
 
-    /// <summary><paramref name="text"/> with its badge (if any) replaced by <paramref name="position"/>'s (none for 0).</summary>
-    internal static byte[] Numbered(ReadOnlySpan<byte> text, int position)
+    /// <summary>
+    /// <paramref name="text"/> with its badge (if any) replaced by <paramref name="position"/>'s (none for 0); <paramref name="utf8"/>:
+    /// the text is UTF-8 (null: judged from the text and the game's language, see <see cref="Utf8Text"/>).
+    /// </summary>
+    internal static byte[] Numbered(ReadOnlySpan<byte> text, int position, bool? utf8 = null)
     {
         var rest = text;
-        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith("["u8) ? 1 : 0;
+        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith(NumberIconUtf8) ? NumberIconUtf8.Length : text.StartsWith("["u8) ? 1 : 0;
         if (open > 0)
         {
             var end = open;
@@ -113,12 +117,19 @@ public static unsafe partial class Gui
             if (end > open && text[end..].StartsWith(close)) rest = text[(end + close.Length)..];
         }
         return position <= 0 ? [.. rest]
-            : position <= NumberIcons ? [.. NumberIcon, .. Encoding.ASCII.GetBytes($"{position} "), .. rest]
+            : position <= NumberIcons ? [.. utf8 ?? Utf8Text(rest) ? NumberIconUtf8 : NumberIcon, .. Encoding.ASCII.GetBytes($"{position} "), .. rest]
             : [.. Encoding.ASCII.GetBytes($"[{position}] "), .. rest];
     }
 
-    // "£hoimod_numbers|": the game's inline sprite syntax (£name|frame, as in vanilla's £resources_strip|3), £ in its encoding.
-    private static readonly byte[] NumberIcon = [0xA3, .. "hoimod_numbers|"u8];
+    // "£hoimod_numbers|": the game's inline sprite syntax (£name|frame, as in vanilla's £resources_strip|3), £ in the text's
+    // encoding: one byte in the game's own, two in UTF-8. A lone 0xA3 in UTF-8 text failed its conversion and the whole name
+    // went blank (Korean focus names).
+    private static readonly byte[] NumberIcon = [0xA3, .. "hoimod_numbers|"u8], NumberIconUtf8 = [0xC2, 0xA3, .. "hoimod_numbers|"u8];
+
+    /// <summary>The game holds this text as UTF-8: it is valid UTF-8 with characters past ASCII, or the game runs in a CJK language.</summary>
+    private static bool Utf8Text(ReadOnlySpan<byte> text) =>
+        System.Text.Unicode.Utf8.IsValid(text) && (text.IndexOfAnyInRange((byte)0x80, (byte)0xFF) >= 0 || Loc.Language.Contains("korean")
+                                                   || Loc.Language.Contains("chinese") || Loc.Language.Contains("japanese"));
     private const int NumberIcons = 30, NumberIconSize = 18, NumberIconWidth = 24; // 24 wide: two digits get a pill
 
     /// <summary>

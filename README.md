@@ -54,7 +54,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 - Settings: the political power queue on/off.
 
 ### AutoConstruction
-In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are left as `+N`. Targets are kept per country for the whole session, across loads.
+In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are still to be built as `+N` (queued ones count until they are finished). Targets are kept per country for the whole session, across loads.
 - What's missing is added to the end of the construction queue, one level per state (or province) so they are built at the same time.
 - Location priority: core states, then higher infrastructure (lower infrastructure first when the building is infrastructure itself), then free building slots.
 - **Auto supply:** where your divisions are low on supply, the right fix is queued: a saturated hub gets its railway to the capital upgraded (a naval base if the bottleneck is at sea), a cut-off hub a railway to the nearest connected one, and an area with no hub near a new supply hub (railway-connected provinces first). Setting: on/off.
