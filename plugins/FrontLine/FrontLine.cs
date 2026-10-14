@@ -408,7 +408,7 @@ public unsafe partial class FrontLine : Plugin
         var at = Search(tag, target, radius, (p, depth) =>
         {
             if (!pool.TryGetValue(p, out var here)) return false;
-            chosen = here.Where(u => depth * (Division.Motorized(u) ? MotorizedHoursPerProvince : InfantryHoursPerProvince) <= hours).MaxBy(Org);
+            chosen = Freshest(here.Where(u => depth * (Division.Motorized(u) ? MotorizedHoursPerProvince : InfantryHoursPerProvince) <= hours));
             return chosen != 0;
         });
         if (at == 0) return 0;
