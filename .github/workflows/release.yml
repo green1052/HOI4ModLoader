@@ -59,4 +59,11 @@ jobs:
                     GH_TOKEN: ${{ github.token }}
                 run: |
                     $tag = "${{ steps.version.outputs.tag }}"
-                    gh release create $tag "HOI4ModLoader-$tag.zip" --target "${{ github.sha }}" --title "HOI4ModLoader $tag" --generate-notes
+                    # Retried: once the API answered 403 "Resource not accessible by integration" with the same token and
+                    # permissions that worked a minute later (v1.2.1). A tag the failed try left is reused by the next.
+                    for ($try = 1; $try -le 3; $try++) {
+                        gh release create $tag "HOI4ModLoader-$tag.zip" --target "${{ github.sha }}" --title "HOI4ModLoader $tag" --generate-notes
+                        if ($LASTEXITCODE -eq 0) { exit 0 }
+                        if ($try -lt 3) { "release create failed (try $try), retrying in 30 s"; Start-Sleep 30 }
+                    }
+                    exit 1
