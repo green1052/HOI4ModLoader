@@ -203,32 +203,38 @@ public unsafe partial class AutoTrade : Plugin
         var weekly = first ? 0 : (fuel - _oilFuel) * 100 / max; // % of the maximum gained (or lost) in the week
         (_oilAt, _oilFuel) = (now, fuel);
         var percent = fuel * 100 / max;
-        var action = percent < _fuelLow && weekly < RecoveringPercent ? "importing a step more"
-            : percent >= _fuelHigh && weekly >= 0 ? "importing a step less" : "holding";
+        // The log says what was done: "a step less" was logged weekly with no oil imports to cut.
+        var action = percent < _fuelLow && weekly < RecoveringPercent
+                ? Import(tag, _oil, 1, balance, now) ? "importing a step more" : "no seller with room for more" // one seller step
+            : percent >= _fuelHigh && weekly >= 0
+                ? Reduce(tag, _oil, int.MaxValue / 2, balance, now, oneStep: true) ? "importing a step less" : "no imports to cut"
+            : "holding";
         Log.Info($"oil: fuel at {percent}% of its maximum, {weekly:+0;-0;0}% in the last week: {action}");
-        if (action == "importing a step more") Import(tag, _oil, 1, balance, now); // one seller step
-        else if (action == "importing a step less") Reduce(tag, _oil, int.MaxValue / 2, balance, now, oneStep: true);
     }
 
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>
-    private void Import(int tag, nint resource, int needed, int balance, int now)
+    private bool Import(int tag, nint resource, int needed, int balance, int now)
     {
         var best = Sellers(tag, resource).Where(s => s.Room >= s.Step).OrderByDescending(s => (s.Relation, s.Room, s.Influence)).FirstOrDefault();
-        if (best.Tag == 0) return; // nobody can sell (or no free civilian factories)
+        if (best.Tag == 0) return false; // nobody can sell (or no free civilian factories)
         var add = Math.Min((needed + best.Step - 1) / best.Step * best.Step, best.Room / best.Step * best.Step);
-        if (Post(tag, resource, best.Tag, best.Existing + add, balance, true, now)) Log.Info($"importing {add} more of a resource (short by {needed})");
+        if (!Post(tag, resource, best.Tag, best.Existing + add, balance, true, now)) return false;
+        Log.Info($"importing {add} more of a resource (short by {needed})");
+        return true;
     }
 
     /// <summary>
     /// Cuts our imports of <paramref name="resource"/> by whole steps, at most <paramref name="excess"/> units, from the least
     /// preferred seller (the import order reversed): the same command with a smaller total; 0 cancels the deal.
     /// </summary>
-    private void Reduce(int tag, nint resource, int excess, int balance, int now, bool oneStep = false)
+    private bool Reduce(int tag, nint resource, int excess, int balance, int now, bool oneStep = false)
     {
         var deal = Sellers(tag, resource).Where(s => s.Existing > 0 && s.Step <= excess).OrderBy(s => (s.Relation, s.Influence)).FirstOrDefault();
-        if (deal.Tag == 0) return;
+        if (deal.Tag == 0) return false;
         var cut = Math.Min(deal.Existing, oneStep ? deal.Step : excess / deal.Step * deal.Step);
-        if (Post(tag, resource, deal.Tag, deal.Existing - cut, balance, false, now)) Log.Info($"importing {cut} less of a resource ({excess} over)");
+        if (!Post(tag, resource, deal.Tag, deal.Existing - cut, balance, false, now)) return false;
+        Log.Info($"importing {cut} less of a resource ({excess} over)");
+        return true;
     }
 
     /// <summary>
