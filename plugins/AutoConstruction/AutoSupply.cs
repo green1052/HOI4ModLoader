@@ -55,6 +55,7 @@ public unsafe partial class AutoConstruction
     private delegate* unmanaged<nint, int*, int, byte, byte, void> _queueRailway;
     private nint _supplyNode;
     private readonly Dictionary<int, int> _supplySent = []; // province id -> game hour until which it is left alone
+    private readonly Dictionary<int, int> _hubUpgraded = []; // hub province id -> game hour until which its link is left alone
 
     private void LoadSupply()
     {
@@ -119,7 +120,14 @@ public unsafe partial class AutoConstruction
             if (*(long*)(node + Connected) <= 0 && *(byte*)(node + Capital) == 0) return ConnectRailway(network, tag, nodeProvince);
             var supplied = *(long*)(node + SupplyIn);
             if (supplied > 0 && (supplied - *(long*)(node + SupplyLeft)) * 100 / supplied >= SaturationPercent)
-                return UpgradeRail(tag, Game.Province(nodeProvince), *(int*)(node + KindOfNode) == NavalNode, nodeProvince);
+            {
+                // A hub feeds many provinces: each starving one upgraded the same link again (three times in ten seconds).
+                var now = Game.Hour;
+                if (_hubUpgraded.TryGetValue(nodeProvince, out var until) && now < until) return false;
+                if (!UpgradeRail(tag, Game.Province(nodeProvince), *(int*)(node + KindOfNode) == NavalNode, nodeProvince)) return false;
+                _hubUpgraded[nodeProvince] = now + SupplyCooldownHours;
+                return true;
+            }
             if (Nearest(province, HubDistance, id => id == nodeProvince) >= 0) return false; // near and not saturated: building won't help (disruption)
         }
         return BuildHub(country, tag, network, province);

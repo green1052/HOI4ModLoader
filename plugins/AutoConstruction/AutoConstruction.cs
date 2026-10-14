@@ -101,6 +101,7 @@ public unsafe partial class AutoConstruction : Plugin
             _failed.Clear();
             _supplySent.Clear();
             _starvingSince.Clear();
+            _hubUpgraded.Clear();
             (_supplyDay, _lastHub) = (-1, int.MinValue);
             _pending.Clear();
             _day = -1;
