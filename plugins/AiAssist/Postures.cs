@@ -58,7 +58,7 @@ public unsafe partial class AiAssist
             {
                 Unpin(country, tag); // strong enough again: its divisions go back on their orders
                 foreach (var (unit, owner) in Attackers.ToArray()) if (owner == tag) Attackers.Remove(unit);
-                _log?.Info($"country #{tag} leaves its grad: the enemy is at {stance.Ratio} % of its power on the line");
+                _log?.Debug($"country #{tag} leaves its grad: the enemy is at {stance.Ratio} % of its power on the line");
             }
             return null;
         }
@@ -69,7 +69,7 @@ public unsafe partial class AiAssist
             if (grad == null)
             {
                 Interlocked.Increment(ref _fellBack);
-                _log?.Info($"country #{tag} falls back to a grad of {next.Want.Count} province(s): the enemy is at {stance.Ratio} % of its power on the line");
+                _log?.Debug($"country #{tag} falls back to a grad of {next.Want.Count} province(s): the enemy is at {stance.Ratio} % of its power on the line");
             }
             Grads[tag] = grad = next;
         }

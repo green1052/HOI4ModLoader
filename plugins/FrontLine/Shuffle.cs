@@ -94,7 +94,7 @@ public partial class FrontLine
                 _pending[unit] = _now + PendingMs;
                 moved++;
             }
-            if (moved > 0) Log.Info($"pocket front: {moved} division(s) beyond what a pocket of {enemies} enemy division(s) needs go to {(main != null ? "their army's main front" : "the AI's regrouping")}");
+            if (moved > 0) Log.Debug($"pocket front: {moved} division(s) beyond what a pocket of {enemies} enemy division(s) needs go to {(main != null ? "their army's main front" : "the AI's regrouping")}");
         }
     }
 
@@ -112,7 +112,7 @@ public partial class FrontLine
         Unpin();
         foreach (var (unit, held) in _held.ToArray())
             if (held.Job == Job.Shuffle && !Crisis(held.Front) && Release(unit, tag))
-                Log.Info("shuffle: the crisis is over, a division goes back to its own front");
+                Log.Debug("shuffle: the crisis is over, a division goes back to its own front");
 
         var fronts = all.ToList();
         var crises = fronts.Where(f => f.Line.Count > 0 && _crisis.GetValueOrDefault(f.Key, int.MinValue) == Game.Hour).ToList();
@@ -150,7 +150,7 @@ public partial class FrontLine
                 Send(unit, id, Job.Shuffle, id, 0, crisis.Key);
                 extra[target] = extra.GetValueOrDefault(target) + 1;
                 sent++;
-                Log.Info($"shuffle: a spare division from a quiet front reinforces a losing one ({crisis.Threat} enemy division(s) against {crisis.Units.Count})");
+                Log.Debug($"shuffle: a spare division from a quiet front reinforces a losing one ({crisis.Threat} enemy division(s) against {crisis.Units.Count})");
             }
             Pin(country, tag, crisis);
         }
@@ -202,7 +202,7 @@ public partial class FrontLine
                 _sent[id] = ([unit], true);
                 pins++;
                 pinned++;
-                Log.Info($"shuffle: a fresh division pins {defenders.Length} enemy division(s) next to a losing front");
+                Log.Debug($"shuffle: a fresh division pins {defenders.Length} enemy division(s) next to a losing front");
                 break;
             }
         }
@@ -223,7 +223,7 @@ public partial class FrontLine
             Commands.Move(unit, held.Post, _force); // an attacker may break off
             _pending[unit] = _now + PendingMs;
             _held.Remove(unit);
-            Log.Info($"shuffle: a pinning attack breaks off at {Org(unit):0}% organisation");
+            Log.Debug($"shuffle: a pinning attack breaks off at {Org(unit):0}% organisation");
         }
     }
 }

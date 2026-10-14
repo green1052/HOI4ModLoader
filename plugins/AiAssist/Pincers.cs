@@ -66,7 +66,7 @@ public partial class AiAssist
         var feint = held.MaxBy(Province.Divisions);
         Feints[general] = (tag, hour + FeintHours, Rings(Game.Id(feint)), Game.Id(feint));
         Interlocked.Increment(ref _feinted);
-        _log?.Info($"#{tag}: feints at {Game.Id(feint)} ({Province.Divisions(feint)} enemy division(s)) for {FeintHours} hours before its push at {anchor}");
+        _log?.Debug($"#{tag}: feints at {Game.Id(feint)} ({Province.Divisions(feint)} enemy division(s)) for {FeintHours} hours before its push at {anchor}");
     }
 
     /// <summary>The general's feint running now, or null.</summary>

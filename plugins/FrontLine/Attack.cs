@@ -54,7 +54,7 @@ public partial class FrontLine
             ready.RemoveRange(0, t.Need);
             Strike(sent, t.To, t.Pocket > 0);
             attacks++;
-            Log.Info(t.Defenders == 0 ? $"opportunity: a fresh division takes an empty enemy province (value {t.Value:0}, cuts off {t.Pocket} enemy division(s))"
+            Log.Debug(t.Defenders == 0 ? $"opportunity: a fresh division takes an empty enemy province (value {t.Value:0}, cuts off {t.Pocket} enemy division(s))"
                 : $"mop-up: {t.Need} fresh division(s) attack {t.Defenders} surrounded enemy division(s)");
         }
         if (_odds > 0 && attacks < MaxAttacksPerTurn) Assault(country, tag, MaxAttacksPerTurn - attacks);
@@ -90,7 +90,7 @@ public partial class FrontLine
             used.UnionWith(plan.Units);
             Strike(plan.Units, plan.To, plan.Pocket > 0);
             max--;
-            Log.Info($"assault: {plan.Units.Count} fresh division(s) attack a province they outgun {plan.Odds:0.0} to 1 (cuts off {plan.Pocket} enemy division(s))");
+            Log.Debug($"assault: {plan.Units.Count} fresh division(s) attack a province they outgun {plan.Odds:0.0} to 1 (cuts off {plan.Pocket} enemy division(s))");
         }
     }
 

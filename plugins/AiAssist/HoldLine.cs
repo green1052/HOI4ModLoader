@@ -394,7 +394,7 @@ public unsafe partial class AiAssist
             if (order == 0 || Order.Type(order) != AreaDefenceOrder) continue;
             var divisions = Order.Members(order).Length;
             if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;
-            _log?.Info($"#{tag}: deleted an area defence order of {divisions} division(s): its enemies hold no port");
+            _log?.Debug($"#{tag}: deleted an area defence order of {divisions} division(s): its enemies hold no port");
         }
     }
 
@@ -430,7 +430,7 @@ public unsafe partial class AiAssist
                 var divisions = members.Length;
                 if (!PostOrderCommand(Signatures.DeleteOrderCommand, new OrdersGroup(group).Ref, Order.Id(order), 0)) continue;
                 Interlocked.Increment(ref overseas ? ref _overseas : ref _bystanders);
-                _log?.Info($"#{tag}: deleted a front order of {divisions} division(s) {(overseas ? "on an ally's front overseas" : "on a neutral border")}: they go where they are needed");
+                _log?.Debug($"#{tag}: deleted a front order of {divisions} division(s) {(overseas ? "on an ally's front overseas" : "on a neutral border")}: they go where they are needed");
             }
         }
     }

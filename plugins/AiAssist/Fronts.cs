@@ -460,14 +460,14 @@ public unsafe partial class AiAssist
             *(int*)(front + MinWanted) = Math.Min(*(int*)(front + MinWanted), cap);
             if (!toLine || UnguardedAt.TryGetValue(tag, out var seen) && hour - seen is >= 0 and < 24) return; // once a day per country in the log
             UnguardedAt[tag] = hour;
-            _log?.Info($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a division per home port");
+            _log?.Debug($"#{tag}: its line was short or a war on its home border is on or coming, so its port and home garrisons (area defence) keep only a division per home port");
             return;
         }
         *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
         Interlocked.Increment(ref _unguarded);
         if (UnguardedAt.TryGetValue(tag, out var at) && hour - at is >= 0 and < 24) return; // once a day per country in the log
         UnguardedAt[tag] = hour;
-        _log?.Info($"#{tag}: its enemies hold no port, so its port and home garrisons (area defence) go to the land fronts");
+        _log?.Debug($"#{tag}: its enemies hold no port, so its port and home garrisons (area defence) go to the land fronts");
     }
 
     /// <summary>A front that wants no divisions and has no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered).</summary>
@@ -598,7 +598,7 @@ public unsafe partial class AiAssist
         // In the log when the minimum changes, else once a week per front: daily it was most of a 40 MB log.
         if (RaisedAt.TryGetValue(section, out var last) && last.Need == need && hour - last.Hour is >= 0 and < NeedHours) return;
         RaisedAt[section] = (hour, need);
-        _log?.Info($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
+        _log?.Debug($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
     }
 
     /// <summary>Generals and fronts come and go all game: the axes, arms, feints and lines not refreshed lately are dropped.</summary>
@@ -656,7 +656,7 @@ public unsafe partial class AiAssist
                 Axes[general] = (hour, tag, PincerHead, Rings(pin.A), line, hour, pin.A);
                 SecondArms[general] = (hour, tag, Rings(pin.B), pin.B);
                 Interlocked.Increment(ref _pincered);
-                _log?.Info($"#{tag}: pincer around {pin.Enemies} enemy division(s) at {pin.Mass}: arms at {pin.A} and {pin.B}");
+                _log?.Debug($"#{tag}: pincer around {pin.Enemies} enemy division(s) at {pin.Mass}: arms at {pin.A} and {pin.B}");
                 StartFeint(general, tag, pin.A, enemyLine, hour);
                 return;
             }

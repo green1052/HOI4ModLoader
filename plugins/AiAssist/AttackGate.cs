@@ -57,7 +57,7 @@ public unsafe partial class AiAssist
                 if (trapped && Commands.TryPost(Commands.NewOrderCommand(Commands.ExecuteOrder, new OrdersGroup(group).Ref, Order.Id(order), 0), true))
                 {
                     Interlocked.Increment(ref _trappedStops);
-                    _log?.Info($"#{tag}: calls off an offensive: a division of it stands in a salient whose way back is closing");
+                    _log?.Debug($"#{tag}: calls off an offensive: a division of it stands in a salient whose way back is closing");
                 }
             }
         }
@@ -121,7 +121,7 @@ public unsafe partial class AiAssist
                 if (!Commands.TryPost(Commands.NewOrderCommand(Commands.ExecuteOrder, new OrdersGroup(group).Ref, Order.Id(order), 0), true)) continue;
                 Beaten[group] = hour;
                 Interlocked.Increment(ref _beatenStops);
-                _log?.Info($"#{tag}: calls off an offensive losing {lost.Count} of its {lost.Count + won.Count} attack(s)");
+                _log?.Debug($"#{tag}: calls off an offensive losing {lost.Count} of its {lost.Count + won.Count} attack(s)");
             }
         }
     }
@@ -216,7 +216,7 @@ public unsafe partial class AiAssist
         var onLine = Province.NextToEnemy(country, tag, location)
                      || Game.Neighbours(location).Any(id => Game.Province(id) is var p && p != 0 && Province.Controller(p) == tag && Province.NextToEnemy(country, tag, p));
         if (!onLine || !EnemyDivisionsNear(country, tag, location, RedeployEnemyRadius)) return false;
-        _log?.Info($"#{tag}: kept a division in province {Game.Id(location)} on a live line from a strategic redeployment");
+        _log?.Debug($"#{tag}: kept a division in province {Game.Id(location)} on a live line from a strategic redeployment");
         return true;
     }
 
@@ -375,7 +375,7 @@ public unsafe partial class AiAssist
         {
             foreach (var (o, at) in WaitedAt) if (hour - at is < 0 or >= 48) WaitedAt.TryRemove(o, out _); // orders come and go
             WaitedAt[order] = hour;
-            _log?.Info($"#{tag}: holds an offensive of {members.Length} division(s): {why}");
+            _log?.Debug($"#{tag}: holds an offensive of {members.Length} division(s): {why}");
         }
         return false;
     }

@@ -50,6 +50,8 @@ public static class Loader
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
                 "Reload all plugins when a DLL in HOI4ModLoader\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
+            Logger.Verbose = config.Bind("Debug", "VerboseLog", false,
+                "Also write DEBUG lines to LogOutput.log: every division FrontLine moves and every front AI Assist adjusts (tens of thousands in a long game). Off: what was done for you, summaries and errors.");
             MapArrows.Enabled = config.Bind("Debug", "AiActionArrows", false,
                 "Flash an arrow on the map for each front line action the AI plugins take (encirclements, breakouts, assaults, holes filled), to see what they do.");
             if (config.Bind("Performance", "Mimalloc", true,

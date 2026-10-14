@@ -2,10 +2,18 @@ using System.Runtime.InteropServices;
 
 namespace HOI4ModLoader;
 
-/// <summary>Writes to HOI4ModLoader\LogOutput.log (truncated every launch).</summary>
+/// <summary>
+/// Writes to HOI4ModLoader\LogOutput.log (truncated every launch). Past MaxBytes it rolls over to LogOutput.old.log: a long
+/// game wrote 40 MB, most of it the AI plugins' per-division moves (now DEBUG lines).
+/// </summary>
 public sealed class Logger(string source)
 {
     private static readonly string Path = System.IO.Path.Combine(Loader.ModsDir, "LogOutput.log");
+    private static readonly string OldPath = System.IO.Path.Combine(Loader.ModsDir, "LogOutput.old.log");
+    private const long MaxBytes = 20L << 20;
+
+    /// <summary>[Debug] VerboseLog: <see cref="Debug"/> lines are written too.</summary>
+    public static bool Verbose { get; internal set; }
     private static readonly Lock Gate = new();
     private static StreamWriter? _writer; // kept open: opening the file per line cost every logged AI move a file open and close
 
@@ -13,6 +21,15 @@ public sealed class Logger(string source)
 
     /// <summary>Writes an INFO line: what happened, for reading back what a plugin did.</summary>
     public void Info(string message) => Write("INFO ", message);
+
+    /// <summary>
+    /// Writes a DEBUG line, only with [Debug] VerboseLog on: what a plugin does many times a game day (each division moved,
+    /// each front's numbers), for tracing its decisions rather than reading back what it did.
+    /// </summary>
+    public void Debug(string message)
+    {
+        if (Verbose) Write("DEBUG", message);
+    }
 
     /// <summary>Writes an ERROR line: something failed or is missing (a signature, a file, a setting).</summary>
     public void Error(string message) => Write("ERROR", message);
@@ -38,6 +55,12 @@ public sealed class Logger(string source)
         {
             lock (Gate)
             {
+                if (_writer != null && _writer.BaseStream.Position > MaxBytes)
+                {
+                    _writer.Dispose();
+                    _writer = null;
+                    File.Move(Path, OldPath, true); // a viewer holding it open without sharing: the next line tries again
+                }
                 _writer ??= new StreamWriter(new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { AutoFlush = true };
                 _writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {level} [{source}] {message}");
             }
@@ -54,6 +77,7 @@ public sealed class Logger(string source)
                 _writer?.Dispose();
                 _writer = null;
                 File.WriteAllText(Path, "");
+                File.Delete(OldPath); // the last launch's
             }
         }
         catch (IOException) { }

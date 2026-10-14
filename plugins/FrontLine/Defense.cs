@@ -46,7 +46,7 @@ public unsafe partial class FrontLine
                 _pending[breaker] = _now + PendingMs;
             }
             _breakouts[key] = hour;
-            Log.Info($"breakout: {breakers.Count} division(s) cut off in {region.Count} province(s) attack toward friendly lines");
+            Log.Debug($"breakout: {breakers.Count} division(s) cut off in {region.Count} province(s) attack toward friendly lines");
         }
     }
 
@@ -112,7 +112,7 @@ public unsafe partial class FrontLine
             if (!Send(unit, to, Job.Rest, Game.Id(location))) continue; // post: where it escaped from, held off its order while that salient closes
             escaped[Game.Id(location)] = Game.Hour;
             escapes++;
-            Log.Info("escape: a division pulls back from a salient about to be cut off");
+            Log.Debug("escape: a division pulls back from a salient about to be cut off");
         }
     }
 
@@ -215,7 +215,7 @@ public unsafe partial class FrontLine
             }
             _sent[target] = ([.. team], true);
             counters++;
-            Log.Info($"fire brigade: {team.Count} reserve(s) counterattack a break-in ({defenders} enemy division(s))");
+            Log.Debug($"fire brigade: {team.Count} reserve(s) counterattack a break-in ({defenders} enemy division(s))");
         }
     }
 
@@ -234,7 +234,7 @@ public unsafe partial class FrontLine
             var overrun = post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post);
             if (overrun || (front == null || !Near(post, front.Line)) && Settled(held))
             {
-                if (Release(unit, tag)) Log.Info("fire brigade: the line moved, a reserve goes back to its front");
+                if (Release(unit, tag)) Log.Debug("fire brigade: the line moved, a reserve goes back to its front");
                 continue;
             }
             if (front == null) continue; // its front redrawn this turn: kept until the post settles
@@ -327,7 +327,7 @@ public unsafe partial class FrontLine
             Send(unit, id, Job.Reserve, id, 0, front.Key);
             posts.Add(id);
             posted++;
-            Log.Info($"fire brigade: a {(Division.Motorized(unit) ? "mobile" : "infantry")} division takes up a reserve post behind the line");
+            Log.Debug($"fire brigade: a {(Division.Motorized(unit) ? "mobile" : "infantry")} division takes up a reserve post behind the line");
         }
     }
 
@@ -372,7 +372,7 @@ public unsafe partial class FrontLine
             var post = Game.Province(held.Post);
             if (breach == 0 || post == 0 || Province.Controller(post) != tag || !Enemy(country, tag, breach) || Game.Hour - held.Since >= CordonKeepHours)
             {
-                if (Release(unit, tag)) Log.Info("cordon: the breach is closed, a wall division goes back to its front");
+                if (Release(unit, tag)) Log.Debug("cordon: the breach is closed, a wall division goes back to its front");
             }
             else if (Division.Location(unit) != post && _force) GiveUp(unit, held.Job.ToString());
             else if (Division.Location(unit) != post)
@@ -405,7 +405,7 @@ public unsafe partial class FrontLine
             if (unit == 0) continue;
             Send(unit, Game.Id(wall), Job.Cordon, Game.Id(wall), Game.Id(breach));
             posted++;
-            Log.Info("cordon: a division walls in an enemy breach");
+            Log.Debug("cordon: a division walls in an enemy breach");
         }
     }
 
@@ -451,7 +451,7 @@ public unsafe partial class FrontLine
             var overrun = post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post);
             if (overrun || (key == 0 || Province.Controller(key) != tag || !(lines.Contains(key) || NextToEnemy(country, tag, key))) && Settled(held))
             {
-                if (Release(unit, tag)) Log.Info("depth defence: the line moved, a second-line division goes back to its front");
+                if (Release(unit, tag)) Log.Debug("depth defence: the line moved, a second-line division goes back to its front");
             }
             else if (Division.Location(unit) != post && _force) GiveUp(unit, held.Job.ToString());
             else if (Division.Location(unit) != post)
@@ -480,7 +480,7 @@ public unsafe partial class FrontLine
             Send(unit, id, Job.Depth, id, Game.Id(province));
             posts.Add(id);
             posted++;
-            Log.Info("depth defence: a spare division takes up a second-line post behind a key province");
+            Log.Debug("depth defence: a spare division takes up a second-line post behind a key province");
         }
     }
 
