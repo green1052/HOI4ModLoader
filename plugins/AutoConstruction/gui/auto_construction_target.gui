@@ -1,12 +1,13 @@
 
 
-        # AutoConstruction: the auto construction target of this building (set by code, empty when none).
+        # AutoConstruction: the auto construction target of this building (set by code, empty when none). Right-aligned and
+        # wider than the button to its left: "+313" in a wider font lost its "+" in 42 px.
         instantTextboxType = {
             name = "hoimod_auto"
-            position = { x = 1 y = 31 }
+            position = { x = -15 y = 31 }
             font = "hoi_16mbs"
             text = ""
-            maxWidth = 42
+            maxWidth = 58
             maxHeight = 14
             format = right
             vertical_alignment = center

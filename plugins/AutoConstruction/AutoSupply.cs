@@ -39,7 +39,12 @@ public unsafe partial class AutoConstruction
     private const int FlowEntrySize = 16, CountryOfEntry = 2, AmountOfEntry = 8;                         // Game.EntriesOfFlow: {u16 node, u16 country, pad, i64 amount}
     private const int RailwayPairs = 0x38;                                                                // railway info: {int neighbour, int level}
     private const int IsLowSupplySlot = 43;                                                               // CArmy vtable
-    private const long SupplyCooldownMs = 60_000;  // supply only changes once something is built
+    // In game time: 60 s real at speed 5 was two months, so a fix still being built was queued again (47 hubs, 180 railway
+    // upgrades in one game). A shortage counts once it lasts a week (an advance outruns its supply for a few days), an area
+    // fixed waits a month, and a new hub (20000) comes once a month at most.
+    private const int SupplyCooldownHours = 30 * 24, StarvingHours = 7 * 24, HubEveryHours = 30 * 24;
+    private readonly Dictionary<int, int> _starvingSince = []; // province id -> game hour its divisions first ran short
+    private int _supplyDay = -1, _lastHub = int.MinValue;
     private const int MaxSupplyActions = 2, MaxRailSearch = 15;
     private const int SaturationPercent = 80; // a hub using this much of the supply it gets is upgraded (railway to the capital)
     private const int HubDistance = 3;        // starving divisions with no hub this close (provinces) get a new one
@@ -49,7 +54,7 @@ public unsafe partial class AutoConstruction
     private delegate* unmanaged<nint, nint, int, int, byte, nint> _findRailPath;
     private delegate* unmanaged<nint, int*, int, byte, byte, void> _queueRailway;
     private nint _supplyNode;
-    private readonly Dictionary<int, long> _supplySent = []; // province id -> until
+    private readonly Dictionary<int, int> _supplySent = []; // province id -> game hour until which it is left alone
 
     private void LoadSupply()
     {
@@ -83,19 +88,25 @@ public unsafe partial class AutoConstruction
             if (province != 0) starving[province] = starving.GetValueOrDefault(province) + 1;
         }
 
-        var now = Environment.TickCount64;
+        var now = Game.Hour;
+        if (now / 24 == _supplyDay) return; // once a game day
+        _supplyDay = now / 24;
+        var ids = starving.Keys.Select(Game.Id).ToHashSet();
+        foreach (var id in _starvingSince.Keys.Where(id => !ids.Contains(id)).ToList()) _starvingSince.Remove(id); // supplied again
         var actions = 0;
         foreach (var (province, _) in starving.OrderByDescending(s => s.Value))
         {
             if (actions == MaxSupplyActions) break;
             var id = Game.Id(province);
+            if (!_starvingSince.TryGetValue(id, out var since) || since > now) _starvingSince[id] = since = now;
+            if (now - since < StarvingHours) continue; // not short long enough to build for
             if (_supplySent.TryGetValue(id, out var until) && now < until) continue;
             var acted = FixSupply(country, tag, network, province);
             // Whether or not there was something to do, give it time: what was queued or is missing changes slowly.
-            _supplySent[id] = now + SupplyCooldownMs;
+            _supplySent[id] = now + SupplyCooldownHours;
             if (!acted) continue;
             actions++;
-            foreach (var n in Game.Neighbours(province)) _supplySent[n] = now + SupplyCooldownMs; // one fix covers the area
+            foreach (var n in Game.Neighbours(province)) _supplySent[n] = now + SupplyCooldownHours; // one fix covers the area
         }
     }
 
@@ -173,7 +184,7 @@ public unsafe partial class AutoConstruction
     private bool BuildHub(nint country, int tag, nint network, nint province)
     {
         var state = Province.State(province);
-        if (state == 0 || QueuedHubIn(country, state)) return false;
+        if (state == 0 || QueuedHubIn(country, state) || Game.Hour - _lastHub is >= 0 and < HubEveryHours) return false;
         var candidates = new List<nint>();
         foreach (var p in State.Provinces(state)) candidates.Add(p);
         foreach (var id in Game.Neighbours(province))
@@ -185,6 +196,7 @@ public unsafe partial class AutoConstruction
         if (best == 0) return false;
         var hub = Game.Id(best);
         if (!PostConstruction(tag, hub, _supplyNode)) return false;
+        _lastHub = Game.Hour;
         Log.Info($"supply: no hub near province {Game.Id(province)}, building one in {hub}");
         if (!HasRailway(best)) ConnectRailway(network, tag, hub);
         return true;
