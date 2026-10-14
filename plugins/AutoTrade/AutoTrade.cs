@@ -29,6 +29,12 @@ public static class Signatures
     [VTable] public const string TradeCommand = "CCreateTradeCommand";
 
     /// <summary>
+    /// Lexer::TokenToString(int token) -> std::string*: a script token's text, under the token table's lock (any thread).
+    /// A CStrategicResource's key ("oil", "steel") is the token at its +0x08.
+    /// </summary>
+    [Signature] public const string TokenToString = "40 53 48 83 EC 30 48 63 D9 80 3D ? ? ? ? 00 75 05 E8 ? ? ? ? 3B 1D ? ? ? ? 7E";
+
+    /// <summary>
     /// AddFuelEffect::Execute: `mov rsi,[rax+1580h]` at +0x2B loads the country's CCountryFuelStatus (+0x08 fuel, +0x10 max
     /// fuel, int64 2^15 fixed point; the save writes them as fuel and max_fuel). The offset is read from here, its disp32 at +0x2E.
     /// </summary>
@@ -61,6 +67,8 @@ public unsafe partial class AutoTrade : Plugin
     private delegate* unmanaged<nint, nint, int> _balance;
     private delegate* unmanaged<nint, long*, nint, long*, long*, nint, void> _maxExport;
     private delegate* unmanaged<long*, nint, long*, long*, int, void> _amountForFactories;
+    private delegate* unmanaged<int, nint> _tokenToString;
+    private const int KeyOfResource = 0x08;
 
     // Kept for the session, by country tag. CStrategicResources are database objects made once at startup (the database
     // init sets the global holding them, nothing else does), so a pointer names the same resource in every game loaded.
@@ -90,6 +98,7 @@ public unsafe partial class AutoTrade : Plugin
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
         _maxExport = (delegate* unmanaged<nint, long*, nint, long*, long*, nint, void>)Sig.Find(Signatures.MaxExport);
         _amountForFactories = (delegate* unmanaged<long*, nint, long*, long*, int, void>)Sig.Find(Signatures.AmountForFactories);
+        _tokenToString = (delegate* unmanaged<int, nint>)Sig.Find(Signatures.TokenToString);
         RestoreAuto();
         _game = new PerGame(() =>
         {
@@ -107,7 +116,7 @@ public unsafe partial class AutoTrade : Plugin
             var key = (Tag: Game.ControlledTag, Resource: *(nint*)(item + ResourceOfItem));
             var on = _auto.Add(key) || !_auto.Remove(key);
             SaveAuto();
-            Log.Info($"auto trade {(on ? "on" : "off")} for a resource, {_auto.Count(a => a.Tag == key.Tag)} on");
+            Log.Info($"auto trade {(on ? "on" : "off")} for {Name(key.Resource)}, {_auto.Count(a => a.Tag == key.Tag)} on");
             _update!.OriginalFunction(item, 0); // redraw now
             Labels(item);
         });
@@ -148,6 +157,13 @@ public unsafe partial class AutoTrade : Plugin
             if (_auto.Count > 0) Log.Info($"auto trade kept on for {_auto.Count} resource(s) across the reload");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>The resource's script key ("oil", "steel"), for the log.</summary>
+    private string Name(nint resource)
+    {
+        var text = Native.MsvcString(_tokenToString(*(int*)(resource + KeyOfResource)));
+        return text.IsEmpty ? "a resource" : Encoding.ASCII.GetString(text);
     }
 
     /// <summary>"Auto " in front of the column's neededType text (empty but for oil) while auto trade is on; idempotent.</summary>
@@ -219,7 +235,7 @@ public unsafe partial class AutoTrade : Plugin
         if (best.Tag == 0) return false; // nobody can sell (or no free civilian factories)
         var add = Math.Min((needed + best.Step - 1) / best.Step * best.Step, best.Room / best.Step * best.Step);
         if (!Post(tag, resource, best.Tag, best.Existing + add, balance, true, now)) return false;
-        Log.Info($"importing {add} more of a resource (short by {needed})");
+        Log.Info($"importing {add} more {Name(resource)} (short by {needed})");
         return true;
     }
 
@@ -233,7 +249,7 @@ public unsafe partial class AutoTrade : Plugin
         if (deal.Tag == 0) return false;
         var cut = Math.Min(deal.Existing, oneStep ? deal.Step : excess / deal.Step * deal.Step);
         if (!Post(tag, resource, deal.Tag, deal.Existing - cut, balance, false, now)) return false;
-        Log.Info($"importing {cut} less of a resource ({excess} over)");
+        Log.Info($"importing {cut} less {Name(resource)} ({excess} over)");
         return true;
     }
 
