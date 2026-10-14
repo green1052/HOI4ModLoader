@@ -5,6 +5,6 @@ l_english:
     com.green1052.autotrade.Surplus.desc:0 "Import until the balance is this much, not just 0 (a buffer for new factories and lost deals).\nImports are cut once the balance is a whole import step above it."
     com.green1052.autotrade.AlliesFirst:0 "Allies first"
     com.green1052.autotrade.FuelLowPercent:0 "Oil: fuel low at (%)"
-    com.green1052.autotrade.FuelLowPercent.desc:0 "With auto trade on oil: one more step of oil is imported a day while the fuel stockpile is under this share of its maximum."
+    com.green1052.autotrade.FuelLowPercent.desc:0 "With auto trade on oil: once a game week, one more step of oil is imported while the fuel stockpile is under this share of its maximum and still falling."
     com.green1052.autotrade.FuelHighPercent:0 "Oil: fuel full at (%)"
-    com.green1052.autotrade.FuelHighPercent.desc:0 "With auto trade on oil: oil imports are cut by a step a day while the fuel stockpile is at or over this share of its maximum."
+    com.green1052.autotrade.FuelHighPercent.desc:0 "With auto trade on oil: once a game week, oil imports are cut by a step while the fuel stockpile is at or over this share of its maximum and not falling."

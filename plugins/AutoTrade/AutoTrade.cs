@@ -51,7 +51,7 @@ public unsafe partial class AutoTrade : Plugin
     private const int DiplomacyOfCountry = 0xF88, Overlord = 0x188, Faction = 0x290; // diplomacy block: overlord tag (0 = none), faction*
     private const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem
     private const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
-    private const long PendingMs = 10_000;                      // a sent deal shows in the balance at once in single player, a round trip later in multiplayer
+    private const int PendingHours = 48;                        // a changed deal is waited for until the balance moves, two game days at most (10 s real at speed 5 cut twice)
 
     [Function(CallingConventions.Microsoft)] public delegate void ItemFn(nint item);
     [Function(CallingConventions.Microsoft)] public delegate void UpdateFn(nint item, nint unused);
@@ -65,9 +65,11 @@ public unsafe partial class AutoTrade : Plugin
     // Kept for the session, by country tag. CStrategicResources are database objects made once at startup (the database
     // init sets the global holding them, nothing else does), so a pointer names the same resource in every game loaded.
     private readonly HashSet<(int Tag, nint Resource)> _auto = [];
-    private readonly Dictionary<nint, (int Balance, bool Up, long Until)> _sent = []; // by resource: balance when a deal was changed
+    private readonly Dictionary<nint, (int Balance, bool Up, int Until)> _sent = []; // by resource: balance when a deal was changed, game hour
     private PerGame _game = null!;
-    private int _surplus, _fuelLow, _fuelHigh, _fuelOfCountry, _oilDay = -1;
+    private int _surplus, _fuelLow, _fuelHigh, _fuelOfCountry, _oilAt = int.MinValue;
+    private long _oilFuel; // the fuel at the last oil decision, for its trend
+    private const int OilEveryHours = 7 * 24;
     private bool _alliesFirst;
     private nint _oil;
     private const int FuelOfStatus = 0x08, MaxFuelOfStatus = 0x10;
@@ -77,8 +79,8 @@ public unsafe partial class AutoTrade : Plugin
     {
         _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals. Imports are cut once the balance is a whole import step above it."));
         _alliesFirst = Config.Bind("Sellers", "AlliesFirst", true, "Buy from your subjects first, then your faction, then whoever can sell the most (trade influence breaks ties).");
-        _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "Auto trade on oil: import one more step of oil a day while the fuel stockpile is under this share of its maximum."), 0, 100);
-        _fuelHigh = Math.Clamp(Config.Bind("Fuel", "FuelHighPercent", 90, "Auto trade on oil: cut oil imports by a step a day while the fuel stockpile is at or over this share of its maximum."), _fuelLow, 100);
+        _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "Auto trade on oil: once a game week, import one more step of oil while the fuel stockpile is under this share of its maximum and still falling."), 0, 100);
+        _fuelHigh = Math.Clamp(Config.Bind("Fuel", "FuelHighPercent", 90, "Auto trade on oil: once a game week, cut oil imports by a step while the fuel stockpile is at or over this share of its maximum and not falling."), _fuelLow, 100);
         _fuelOfCountry = *(int*)(Sig.Find(Signatures.FuelOfCountry) + 0x2E);
         var database = *(nint*)(System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress + ItemDatabaseRva);
         _oil = database == 0 ? 0 : *(nint*)(database + OilOfDatabase);
@@ -88,7 +90,11 @@ public unsafe partial class AutoTrade : Plugin
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
         _maxExport = (delegate* unmanaged<nint, long*, nint, long*, long*, nint, void>)Sig.Find(Signatures.MaxExport);
         _amountForFactories = (delegate* unmanaged<long*, nint, long*, long*, int, void>)Sig.Find(Signatures.AmountForFactories);
-        _game = new PerGame(_sent.Clear);
+        _game = new PerGame(() =>
+        {
+            _sent.Clear();
+            _oilAt = int.MinValue;
+        });
 
         _iconClick = Patches.Hook<ItemFn>(iconClick, item =>
         {
@@ -130,7 +136,7 @@ public unsafe partial class AutoTrade : Plugin
         if (country == 0) return;
         var resources = *(nint*)(country + ResourcesOfCountry);
         if (resources == 0) return;
-        var now = Environment.TickCount64;
+        var now = Game.Hour;
         foreach (var (owner, resource) in _auto)
         {
             if (owner != tag) continue;
@@ -148,25 +154,28 @@ public unsafe partial class AutoTrade : Plugin
     }
 
     /// <summary>
-    /// Oil by the fuel stockpile: a step more a game day while it is under FuelLowPercent of its maximum, a step less while at
-    /// or over FuelHighPercent. Once a day: fuel follows imports slowly, and the balance (which never runs short) says nothing.
+    /// Oil by the fuel stockpile, once a game week and by its trend: a step more while fuel is under FuelLowPercent of its
+    /// maximum and still falling, a step less while at or over FuelHighPercent and not falling. The stockpile is large and fills
+    /// slowly: a step a day while it was low piled imports up long before it filled (and at speed 5 a day is a second).
     /// </summary>
-    private void Oil(nint country, int tag, int balance, long now)
+    private void Oil(nint country, int tag, int balance, int now)
     {
         var status = *(nint*)(country + _fuelOfCountry);
         if (status == 0) return;
         long fuel = *(long*)(status + FuelOfStatus), max = *(long*)(status + MaxFuelOfStatus);
-        var day = Game.Hour / 24;
-        if (max <= 0 || day == _oilDay) return;
+        if (max <= 0) return;
+        if (now - _oilAt is >= 0 and < OilEveryHours) return;
+        var first = _oilAt == int.MinValue || now < _oilAt;
+        var falling = !first && fuel < _oilFuel;
+        (_oilAt, _oilFuel) = (now, fuel);
+        if (first) return; // the trend needs a week
         var percent = fuel * 100 / max;
-        if (percent < _fuelLow) Import(tag, _oil, 1, balance, now); // one seller step
-        else if (percent >= _fuelHigh) Reduce(tag, _oil, int.MaxValue / 2, balance, now, oneStep: true);
-        else return;
-        _oilDay = day;
+        if (percent < _fuelLow && falling) Import(tag, _oil, 1, balance, now); // one seller step
+        else if (percent >= _fuelHigh && !falling) Reduce(tag, _oil, int.MaxValue / 2, balance, now, oneStep: true);
     }
 
     /// <summary>Buys <paramref name="needed"/> units more of <paramref name="resource"/> from the best seller that has room.</summary>
-    private void Import(int tag, nint resource, int needed, int balance, long now)
+    private void Import(int tag, nint resource, int needed, int balance, int now)
     {
         var best = Sellers(tag, resource).Where(s => s.Room >= s.Step).OrderByDescending(s => (s.Relation, s.Room, s.Influence)).FirstOrDefault();
         if (best.Tag == 0) return; // nobody can sell (or no free civilian factories)
@@ -178,7 +187,7 @@ public unsafe partial class AutoTrade : Plugin
     /// Cuts our imports of <paramref name="resource"/> by whole steps, at most <paramref name="excess"/> units, from the least
     /// preferred seller (the import order reversed): the same command with a smaller total; 0 cancels the deal.
     /// </summary>
-    private void Reduce(int tag, nint resource, int excess, int balance, long now, bool oneStep = false)
+    private void Reduce(int tag, nint resource, int excess, int balance, int now, bool oneStep = false)
     {
         var deal = Sellers(tag, resource).Where(s => s.Existing > 0 && s.Step <= excess).OrderBy(s => (s.Relation, s.Influence)).FirstOrDefault();
         if (deal.Tag == 0) return;
@@ -221,13 +230,13 @@ public unsafe partial class AutoTrade : Plugin
     }
 
     /// <summary>Sets our deal with <paramref name="exporter"/> to <paramref name="total"/> units, as the trade view's slider does.</summary>
-    private bool Post(int tag, nint resource, int exporter, long total, int balance, bool up, long now)
+    private bool Post(int tag, nint resource, int exporter, long total, int balance, bool up, int now)
     {
         var cmd = Commands.New(Signatures.TradeCommand, 0x40, tag, resource);
         *(int*)(cmd + Exporter) = exporter;
         *(int*)(cmd + Amount) = (int)total;
         if (!Commands.TryPost(cmd)) return false;
-        _sent[resource] = (balance, up, now + PendingMs);
+        _sent[resource] = (balance, up, now + PendingHours);
         return true;
     }
 }
