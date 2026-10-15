@@ -153,6 +153,9 @@ Single player only (it changes when the game state updates).
 - **Signature cache:** the loader's code lookups are saved per game exe (`HOI4ModLoader\cache\signatures-*.txt`): its own start went from about 3 s to 0.3 s.
 - **Profiler:** an empty `HOI4ModLoader\profile-startup` file makes the next start write `HOI4ModLoader\startup-profile.txt` (150 s from the entry point); creating `HOI4ModLoader\profile-now` while the game runs profiles the next 60 s into `profile-<tick>.txt`. Every game thread is sampled with its call stack: per thread how much it ran, the hoi4.exe functions on running stacks (inclusive), and what the main thread waits in.
 
+## Loader: game fixes
+- **Intelligence agency:** an operative the game took off the wrong country's agency (game error.log: `RemoveOperative: ... not found in agency=---`) and freed stayed on its real agency's list, and loading a save then crashed. It now comes off the agency that holds it.
+
 ## Loader: mimalloc
 On by default: the game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap. `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` turns it off (takes effect at the next start). The game sometimes reads memory it just freed, which the Windows heap tolerates; so small blocks (up to 4 KB) are freed a little late (after the same thread's next 16384 small frees), and the known case, targeted decisions, waits until the decision is done.
 

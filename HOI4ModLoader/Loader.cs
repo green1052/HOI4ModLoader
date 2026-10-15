@@ -104,6 +104,8 @@ public static class Loader
             catch (Exception e) { Log.Error($"version label: {e.Message}"); }
             try { MapArrows.Install(); }
             catch (Exception e) { Log.Error($"map arrows: {e.Message}"); }
+            try { GameFixes.Install(); }
+            catch (Exception e) { Log.Error($"game fixes: {e.Message}"); }
             Patches.Owner = null;
 
             LoadPlugins();
