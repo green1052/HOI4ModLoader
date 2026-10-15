@@ -25,7 +25,7 @@ public partial class FrontLine
     private Dictionary<(nint, int), int> _crisis = [];                     // front -> the last hour it was losing (the turn's Side)
 
     /// <summary>Each front's line and threat; a front that lost (or is losing) several provinces lately, or faces twice its divisions, is in a crisis.</summary>
-    private void Survey(nint country, int tag, IEnumerable<Front> fronts)
+    private void Survey(nint country, int tag, List<Front> fronts)
     {
         var hour = Game.Hour;
         foreach (var front in fronts)
@@ -66,9 +66,8 @@ public partial class FrontLine
     private const int PocketShare = 2; // our divisions per enemy division in the pocket, 2 at least
 
     /// <summary>A front facing only encircled enemy ground keeps PocketShare per pocket division; the rest go onto its army's biggest open front.</summary>
-    private void TrimPocketFronts(nint country, int tag, IEnumerable<Front> all)
+    private void TrimPocketFronts(nint country, int tag, List<Front> fronts)
     {
-        var fronts = all.ToList();
         var pockets = new Dictionary<Front, int>(); // pocket front -> enemy divisions it faces
         foreach (var front in fronts)
         {
@@ -87,7 +86,7 @@ public partial class FrontLine
             if (spare <= 0) continue;
             var moved = 0;
             // The ones not in contact with the pocket leave first.
-            foreach (var unit in front.Units.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Division.Location(u) != 0).OrderBy(u => NextToEnemy(country, tag, Division.Location(u))).Take(spare))
+            foreach (var unit in front.Units.Where(u => Free(u, tag) && !Division.Walking(u) && Division.Location(u) != 0).OrderBy(u => NextToEnemy(country, tag, Division.Location(u))).Take(spare))
             {
                 // An AI army with only this front: off its order, the theatre distribution gives them to fronts that want them.
                 if (!(main != null ? Commands.Assign(unit, Division.Group(unit), main.Key.Id, _force) : Commands.Unassign(unit, Division.Group(unit), _force))) continue;
@@ -107,14 +106,13 @@ public partial class FrontLine
     /// </summary>
     // ponytail: the shuffled divisions stand unassigned on the crisis line rather than joining its battle plan; simpler, and
     // their way home is the order they came from.
-    private void Shuffle(nint country, int tag, IEnumerable<Front> all)
+    private void Shuffle(nint country, int tag, List<Front> fronts)
     {
         Unpin();
         foreach (var (unit, held) in _held.ToArray())
             if (held.Job == Job.Shuffle && !Crisis(held.Front) && Release(unit, tag))
                 Log.Debug("shuffle: the crisis is over, a division goes back to its own front");
 
-        var fronts = all.ToList();
         var crises = fronts.Where(f => f.Line.Count > 0 && _crisis.GetValueOrDefault(f.Key, int.MinValue) == Game.Hour).ToList();
         if (crises.Count == 0) return;
         Dictionary<nint, List<nint>>? pool = null;
@@ -190,12 +188,12 @@ public partial class FrontLine
             if (_losingNow.ContainsKey(from) || !_at.TryGetValue(from, out var here) || here.Count < 2) continue; // one stays
             foreach (var id in Game.Neighbours(from))
             {
-                if (_sent.ContainsKey(id) || here.Count < 2) continue;
+                if (_sent.ContainsKey(id)) continue;
                 var target = Game.Province(id);
                 if (target == 0 || !Enemy(country, tag, target)) continue;
                 var defenders = Province.Units(target).ToArray().Where(u => u != 0).ToArray();
                 if (defenders.Length == 0 || defenders.Length * (Province.FortLevel(target) / 2 + 1) > PinOdds || defenders.Any(Division.Fighting)) continue; // empty: Attack's; busy already
-                var unit = here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr).OrderByDescending(Org).FirstOrDefault();
+                var unit = here.Where(u => Free(u, tag) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr).OrderByDescending(Org).FirstOrDefault();
                 if (unit == 0) break;
                 Send(unit, id, Job.Pin, Game.Id(from), id, crisis.Key);
                 here.Remove(unit);
@@ -220,8 +218,7 @@ public partial class FrontLine
                 continue;
             }
             if (Org(unit) >= PinStopOrg && Crisis(held.Front)) continue;
-            Commands.Move(unit, held.Post, _force); // an attacker may break off
-            _pending[unit] = _now + PendingMs;
+            Move(unit, held.Post); // an attacker may break off
             _held.Remove(unit);
             Log.Debug($"shuffle: a pinning attack breaks off at {Org(unit):0}% organisation");
         }

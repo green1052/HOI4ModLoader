@@ -84,7 +84,7 @@ public unsafe partial class FrontLine : Plugin
         public readonly Dictionary<int, (nint[] Units, bool Attack)> Sent = [];
         public readonly Dictionary<int, (int Hour, (nint, int) Front)> LastSeen = [];
         public readonly Dictionary<(nint, int), int> Crisis = [];
-        public readonly Dictionary<nint, int> Recent = []; // AI divisions we sent: unit -> game hour
+        public readonly Dictionary<nint, int> Recent = []; // divisions we let go (and AI ones we sent): unit -> game hour
         public readonly Dictionary<int, int> EscapedFrom = []; // province divisions escaped from -> game hour
     }
 
@@ -164,10 +164,9 @@ public unsafe partial class FrontLine : Plugin
         Jobs.AiMicro = _ai ? Info.Id : null;
         if (!micro && !operations) return;
 
-        _ = Sig.Find(Commands.AssignSig);
         // The core's game functions: a broken pattern fails the load, not a turn.
-        _ = Sig.Find(Commands.UnassignSig) + Sig.Find(Game.IsAtWarWithSig) + Sig.Find(Game.SameOrAlliedSig) + Sig.Find(Province.FortLevelSig)
-            + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig) + Sig.VTable(Signatures.LandCombat);
+        _ = Sig.Find(Commands.AssignSig) + Sig.Find(Commands.UnassignSig) + Sig.Find(Game.IsAtWarWithSig) + Sig.Find(Game.SameOrAlliedSig)
+            + Sig.Find(Province.FortLevelSig) + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig) + Sig.VTable(Signatures.LandCombat);
         _game = new PerGame(() => // one reset for the operations too: they share _held
         {
             _sides.Clear(); // Begin swaps a new side in
@@ -326,16 +325,17 @@ public unsafe partial class FrontLine : Plugin
             front.Units.Add(unit);
             _holding[(order, location)] = _holding.GetValueOrDefault((order, location)) + 1;
         }
+        var all = fronts.Values.ToList();
         _eta.Clear();
         _losingNow = _plugging || _shuffle ? LosingDefences(tag) : [];
-        if (_fireBrigade || _depth || _shuffle || _plugging) Survey(country, tag, fronts.Values); // the lines, lost ground (cordon's breaches)
+        if (_fireBrigade || _depth || _shuffle || _plugging) Survey(country, tag, all); // the lines, lost ground (cordon's breaches)
 
-        Return(tag);
+        Return(country, tag);
         // Not for the AI: its front orders take a division off its order straight back, so it walked to rest and back on and
         // on (Japan's in Shandong, every few hours).
         if (_rotation && !_force) foreach (var group in groups) RotateArmy(country, tag, group);
         if (_plugging) Plug(country, tag, units);
-        if (_fireBrigade) Counterattack(country, tag, fronts.Values);
+        if (_fireBrigade) Counterattack(country, tag, all);
         var reposition = _force || _playerRepositions; // the player's divisions stay where the player put them unless asked
         if (!reposition) ReleasePosts(tag);
         if (_plugging && reposition) Cordon(country, tag, units);
@@ -346,15 +346,19 @@ public unsafe partial class FrontLine : Plugin
         }
         if (_shuffle && reposition)
         {
-            Shuffle(country, tag, fronts.Values);
-            TrimPocketFronts(country, tag, fronts.Values);
+            Shuffle(country, tag, all);
+            TrimPocketFronts(country, tag, all);
         }
-        if (_depth && reposition) DepthDefense(country, tag, fronts.Values);
-        if (_fireBrigade && reposition) PostReserves(country, tag, fronts.Values);
+        if (_depth && reposition) DepthDefense(country, tag, all);
+        if (_fireBrigade && reposition) PostReserves(country, tag, all);
         if (_attack) Attack(country, tag);
     }
 
-    /// <summary>Our defences being lost, with the attacker's share of the battle (%), where no reserve already waits to step in.</summary>
+    /// <summary>
+    /// Our defences being lost (the attacker past LosingPercent of the battle, or the defenders' organisation gone within
+    /// EarlyPlugHours), with the attacker's share (%), where no reserve already waits to step in. Every defence's hours until
+    /// its organisation runs out go into _eta.
+    /// </summary>
     private Dictionary<nint, double> LosingDefences(int tag)
     {
         var landCombat = Sig.VTable(Signatures.LandCombat);
@@ -426,9 +430,8 @@ public unsafe partial class FrontLine : Plugin
     /// other orders (or moved to another army) are forgotten. Run by the operations' turns too (Done), whose orders
     /// (_orders) may be the last turn's, another country's: our commands' round trips (PendingMs) outlast that.
     /// </summary>
-    private void Return(int tag)
+    private void Return(nint country, int tag)
     {
-        var country = Game.Country(tag);
         foreach (var (unit, held) in _held.ToArray())
         {
             if (_pending.ContainsKey(unit)) continue; // our command is still on its way
@@ -443,7 +446,7 @@ public unsafe partial class FrontLine : Plugin
                 Release(unit, tag);
                 continue;
             }
-            if (Division.Walking(unit) || country == 0) continue;
+            if (Division.Walking(unit)) continue;
             var post = Game.Province(held.Post);
             if (held.Job == Job.Guard)
             {
@@ -470,7 +473,7 @@ public unsafe partial class FrontLine : Plugin
         var swaps = 0;
         foreach (var unit in Native.PdxArray(group + OrdersGroup.MembersOffset).ToArray()
                      .Where(m => _orders.TryGetValue(m, out var o) && IsFront(o)).Select(m => m - MemberOfUnit)
-                     .Where(u => Free(u, tag, _now) && (Org(u) < _wornOrg || Str(u) < _wornStrength) && InContact(country, tag, u)).OrderBy(Org).ToList())
+                     .Where(u => Free(u, tag) && (Org(u) < _wornOrg || Str(u) < _wornStrength) && InContact(country, tag, u)).OrderBy(Org).ToList())
         {
             if (swaps == MaxSwapsPerArmy) break;
             var front = _orders[unit + MemberOfUnit];
@@ -566,27 +569,21 @@ public unsafe partial class FrontLine : Plugin
     private bool Lure(nint country, int tag, nint province)
     {
         var shoulders = Game.Neighbours(province).Select(Game.Province)
-            .Where(p => p != 0 && Province.Controller(p) == tag && Province.NextToEnemy(country, tag, p)).ToList();
+            .Where(p => p != 0 && Province.Controller(p) == tag && NextToEnemy(country, tag, p)).ToList();
         if (shoulders.Count < 2 || shoulders.Any(p => _losingNow.ContainsKey(p) || !Province.Units(p).ToArray().Any(u => u != 0 && Division.Commander(u) == tag))) return false;
-        var attackers = Game.Neighbours(province).Select(Game.Province).Where(p => p != 0 && Province.Enemy(country, tag, p)).Sum(Province.Divisions);
+        var attackers = EnemiesNext(country, tag, province);
         var reserves = 0;
-        var seen = new HashSet<nint> { province };
-        var frontier = new List<nint> { province };
-        for (var depth = 0; depth < LureRadius && frontier.Count > 0; depth++)
+        Search(tag, province, LureRadius, (p, _) =>
         {
-            frontier = frontier.SelectMany(p => Game.Neighbours(p)).Select(Game.Province).Where(p => p != 0 && seen.Add(p) && Province.Controller(p) == tag).ToList();
-            foreach (var p in frontier)
             foreach (var u in Province.Units(p))
                 if (u != 0 && Division.IsLand(u) && Division.Commander(u) == tag && Division.Motorized(u) && Org(u) >= AttackOrg && !Division.Fighting(u)) reserves++;
-        }
+            return false; // count them all
+        });
         if (reserves < MinLureReserves || attackers > 2 * reserves) return false;
         var id = Game.Id(province);
         foreach (var (lured, hour) in _lured.ToArray()) if (Game.Hour - hour is < 0 or >= LureHours) _lured.Remove(lured);
-        if (!_lured.TryGetValue(id, out var at))
-        {
-            _lured[id] = Game.Hour;
+        if (_lured.TryAdd(id, Game.Hour))
             Log.Debug($"  #{tag} lure: lets {attackers} enemy division(s) into province {id} (both shoulders held, {reserves} mobile division(s) within {LureRadius})");
-        }
         return true;
     }
 
@@ -594,8 +591,7 @@ public unsafe partial class FrontLine : Plugin
     /// Divisions that can leave where they stand, by province: idle, free or resting with us, <paramref name="wanted"/>, and
     /// spare on their front (behind the line any; on it another of that front stays in the province; next to enemy troops,
     /// out of battle with two of that front staying, at least as many as the enemy divisions next to it: the AI stacks its
-    /// whole front on the line, so there was never a spare for reserves) or, with
-    /// <paramref name="unassigned"/>, on no order at all.
+    /// whole front on the line, so there was never a spare for reserves) or, with <paramref name="unassigned"/>, on no order.
     /// </summary>
     private Dictionary<nint, List<nint>> Pool(nint country, int tag, IEnumerable<nint> units, bool unassigned, Func<nint, bool> wanted)
     {
@@ -604,7 +600,7 @@ public unsafe partial class FrontLine : Plugin
         foreach (var unit in units)
         {
             var resting = _held.TryGetValue(unit, out var held);
-            if (resting && held.Job != Job.Rest || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
+            if (resting && held.Job != Job.Rest || !Ready(unit, tag) || Division.Walking(unit)) continue;
             // An AI division between armies (the army balancing regroups them): the AI walks it to its new army, so taken it
             // went back and forth between our post and that army, every few days.
             if (_force && Division.Group(unit) == 0) continue;
@@ -612,10 +608,11 @@ public unsafe partial class FrontLine : Plugin
             if (location == 0) continue;
             if (_orders.TryGetValue(unit + MemberOfUnit, out var order))
             {
-                var stay = left.GetValueOrDefault((order, location)) - 1;
                 if (!IsFront(order)) continue;
-                if (InContact(country, tag, unit) ? stay < 2 || Division.Fighting(unit) || stay < EnemiesNext(country, tag, location)
-                    : stay < 1 && Province.NextToEnemy(country, tag, location)) continue; // needed where it is (behind the line nobody is)
+                var stay = left.GetValueOrDefault((order, location)) - 1;
+                var enemies = EnemiesNext(country, tag, location);
+                if (enemies > 0 ? stay < 2 || Division.Fighting(unit) || stay < enemies
+                    : stay < 1 && NextToEnemy(country, tag, location)) continue; // needed where it is (behind the line nobody is)
                 if (!wanted(unit)) continue; // last: it may count the division as taken (Shuffle's budget)
                 left[(order, location)]--;
             }
@@ -669,10 +666,16 @@ public unsafe partial class FrontLine : Plugin
             Job.Counter or Job.Pin => (220, 60, 220),
             _ => (60, 220, 60), // a post: reserve, second line, a front's reinforcement
         });
-        Commands.Move(unit, province, _force);
-        _pending[unit] = _now + PendingMs;
+        Move(unit, province);
         if (_force) _recent[unit] = Game.Hour;
         return true;
+    }
+
+    /// <summary>A plain move, posted as the AI posts its own on an AI country's turn; the unit is left alone for PendingMs.</summary>
+    private void Move(nint unit, int province)
+    {
+        Commands.Move(unit, province, _force);
+        _pending[unit] = _now + PendingMs;
     }
 
     /// <summary>Logs who was sent where, for what; [Debug] AiActionArrows: an arrow from where the unit stands to where it was sent.</summary>
@@ -707,13 +710,9 @@ public unsafe partial class FrontLine : Plugin
     /// </summary>
     private bool Release(nint unit, int tag)
     {
-        if (!Ready(unit, tag, _now)) return false;
-        var held = _held[unit];
-        _held.Remove(unit);
-        _recent[unit] = Game.Hour; // not taken again for RepeatHours: retaken at once, it walked to and fro between a post and its order
-        Vacate(held);
-        if (held.Order == 0 || Division.Group(unit) != held.Group) return true; // in another army now: the player's
-        if (Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs; // its order gone: it stays in the army's reserve
+        if (!Ready(unit, tag)) return false;
+        _held.Remove(unit, out var held);
+        PutBack(unit, held);
         return true;
     }
 
@@ -724,21 +723,25 @@ public unsafe partial class FrontLine : Plugin
     private void GiveUp(nint unit, string job)
     {
         if (!_held.Remove(unit, out var held)) return;
-        _recent[unit] = Game.Hour;
-        Vacate(held);
-        if (held.Order != 0 && Division.Group(unit) == held.Group && Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs;
+        PutBack(unit, held);
         Log.Debug($"{job}: the AI moved a division off its post; it goes back onto its battle plan");
     }
 
     /// <summary>
-    /// A post (and a second line's key province) left is not filled again for RepeatHours: the next division standing there
-    /// went in its place and was taken back the same way, a new one every day or two.
+    /// A division let go: not taken again for RepeatHours (retaken at once, it walked to and fro between a post and its order),
+    /// back onto its order if it had one and is still in that army (in another army: the player's; its order gone: it stays
+    /// in the army's reserve). A post (and a second line's key province) left is not filled again for RepeatHours either: the
+    /// next division standing there went in its place and was taken back the same way, a new one every day or two.
     /// </summary>
-    private void Vacate(Held held)
+    private void PutBack(nint unit, Held held)
     {
-        if (held.Job is not (Job.Reserve or Job.Counter or Job.Depth or Job.Cordon)) return;
-        if (held.Post != 0) _vacated[held.Post] = Game.Hour;
-        if (held.Job == Job.Depth && held.Target != 0) _vacated[held.Target] = Game.Hour;
+        _recent[unit] = Game.Hour;
+        if (held.Job is Job.Reserve or Job.Counter or Job.Depth or Job.Cordon)
+        {
+            if (held.Post != 0) _vacated[held.Post] = Game.Hour;
+            if (held.Job == Job.Depth && held.Target != 0) _vacated[held.Target] = Game.Hour;
+        }
+        if (held.Order != 0 && Division.Group(unit) == held.Group && Commands.Assign(unit, held.Group, held.Order, _force)) _pending[unit] = _now + PendingMs;
     }
 
     private readonly Dictionary<int, int> _vacated = []; // province id -> hour a post (or key) there was left
@@ -756,9 +759,9 @@ public unsafe partial class FrontLine : Plugin
 
     private static bool IsFront(nint order) => Order.Type(order) == Order.Front;
 
-    /// <summary><see cref="Division.Ready"/> (can take orders now), and not just ordered.</summary>
-    private bool Ready(nint unit, int tag, long now) =>
-        Division.Ready(unit, tag) && !(_pending.TryGetValue(unit, out var until) && now < until) && !Jobs.Taken(unit, Info.Id) // AI Assist's posts stay
+    /// <summary><see cref="Division.Ready"/> (can take orders now), not just ordered, not another plugin's job, and not let go (or, an AI one, sent) lately unless still ours.</summary>
+    private bool Ready(nint unit, int tag) =>
+        Division.Ready(unit, tag) && !(_pending.TryGetValue(unit, out var until) && _now < until) && !Jobs.Taken(unit, Info.Id) // AI Assist's posts stay
         && (_held.ContainsKey(unit) || !_recent.ContainsKey(unit)); // an AI division its front order took back: not again for RepeatHours
 
     // The AI's front orders put a division we took off straight back on: sent again it walked to and fro (rotation, escape
@@ -768,7 +771,7 @@ public unsafe partial class FrontLine : Plugin
     private Dictionary<nint, int> _recent = [];
 
     /// <summary>Ready, and doing no job for us.</summary>
-    private bool Free(nint unit, int tag, long now) => Ready(unit, tag, now) && !_held.ContainsKey(unit);
+    private bool Free(nint unit, int tag) => Ready(unit, tag) && !_held.ContainsKey(unit);
 
     /// <summary>Organisation and strength in % of their maximum, from the division's own ratio getters (what has_unit_organization reads).</summary>
     private static double Org(nint unit) => Division.Organisation(unit) * 100.0 / Native.FixedPoint;
@@ -784,14 +787,14 @@ public unsafe partial class FrontLine : Plugin
     }
 
     /// <summary>Enemy divisions in the provinces next to <paramref name="province"/>.</summary>
-    private static int EnemiesNext(nint country, int tag, nint province) =>
-        Game.Neighbours(province).Sum(n => Game.Province(n) is var p && p != 0 && Province.Enemy(country, tag, p) ? Province.Divisions(p) : 0);
+    private int EnemiesNext(nint country, int tag, nint province) =>
+        Game.Neighbours(province).Sum(n => Game.Province(n) is var p && p != 0 && Enemy(country, tag, p) ? Province.Divisions(p) : 0);
 
     /// <summary>Enemy divisions stand next to the unit: only then is a worn division at risk on the line (it recovers as fast there otherwise).</summary>
     private bool InContact(nint country, int tag, nint unit)
     {
         var location = Division.Location(unit);
-        return location != 0 && Province.EnemyDivisionsNext(country, tag, location);
+        return location != 0 && EnemiesNext(country, tag, location) > 0;
     }
 
     private static readonly string HeldFile = Path.Combine(Loader.ModsDir, "cache", "frontline_held.txt");

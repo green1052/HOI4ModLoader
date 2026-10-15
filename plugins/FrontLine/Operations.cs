@@ -27,7 +27,8 @@ public static class OperationSignatures
 /// It ends when the objective is taken, the corridor is cut or a defence of it is being lost, or the spearheads are worn
 /// out; the same key again (with any of its divisions selected, or nothing) cancels it. Divisions taken off their battle
 /// plan go back onto it (a fighting one once its battle is over). A loaded save forgets running operations: their divisions
-/// stay where they are, off their battle plan. Vanilla commands only (multiplayer works).
+/// stay where they are, put back onto their battle plan by Restore when a front line feature is on (Manage), else left off
+/// it. Vanilla commands only (multiplayer works).
 /// </summary>
 public unsafe partial class FrontLine
 {
@@ -104,15 +105,16 @@ public unsafe partial class FrontLine
             DrawOperations();
             return;
         }
+        var name = pincer ? "pincer" : "blitz";
         if (selected.Count == 0)
         {
-            Log.Info($"{(pincer ? "pincer" : "blitz")}: select an army or divisions first");
+            Log.Info($"{name}: select an army or divisions first");
             return;
         }
         selected.ExceptWith(_held.Keys); // another feature's, or another operation's
         if (selected.Count == 0)
         {
-            Log.Info($"{(pincer ? "pincer" : "blitz")}: the selected divisions all have a job already");
+            Log.Info($"{name}: the selected divisions all have a job already");
             return;
         }
         var started = pincer ? StartPincer(country, tag, selected) : StartBlitz(country, tag, selected);
@@ -210,7 +212,7 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>The fresh armored and motorized divisions among <paramref name="force"/> that can move now.</summary>
-    private List<nint> Spearhead(IEnumerable<nint> force, int tag) => force.Where(u => Ready(u, tag, _now) && Division.Motorized(u) && Org(u) >= Op.StartOrg).ToList();
+    private List<nint> Spearhead(IEnumerable<nint> force, int tag) => force.Where(u => Ready(u, tag) && Division.Motorized(u) && Org(u) >= Op.StartOrg).ToList();
 
     private Operation? Fail(string name, string why)
     {
@@ -334,7 +336,7 @@ public unsafe partial class FrontLine
         if (_operations.Count == 0 && SideOf(Game.ControlledTag).Held.Count == 0) return;
         var country = Begin(out var tag, out _);
         if (country == 0) return;
-        Return(tag);
+        Return(country, tag);
         var hour = Game.Hour;
         if (hour == _opLastHour) return;
         _opLastHour = hour;
@@ -379,7 +381,7 @@ public unsafe partial class FrontLine
             {
                 if (arm.Spearhead.All(u => Org(u) < _stopOrg)) return "the spearhead is worn out";
                 var next = arm.Corridor[arm.Head + 1];
-                foreach (var unit in arm.Spearhead.Where(u => Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= _stopOrg && !Ordered(u)))
+                foreach (var unit in arm.Spearhead.Where(u => Ready(u, tag) && !Division.Walking(u) && Org(u) >= _stopOrg && !Ordered(u)))
                 {
                     if (Issue(unit, () => Commands.Move(unit, next))) op.Refused = 0;
                     else if (++op.Refused >= Op.MaxRefused) return $"province {next} can't be reached";
@@ -462,7 +464,7 @@ public unsafe partial class FrontLine
 
     /// <summary>A division of the operation's armies doing no job (for us or any other feature) that can move now.</summary>
     private bool Candidate(Operation op, nint unit, int tag) =>
-        op.Armies.Contains(Division.Group(unit)) && Free(unit, tag, _now) && !Division.Walking(unit) && !Ordered(unit);
+        op.Armies.Contains(Division.Group(unit)) && Free(unit, tag) && !Division.Walking(unit) && !Ordered(unit);
 
     private static nint Freshest(IEnumerable<nint> units) => units.DefaultIfEmpty().MaxBy(u => u == 0 ? -1 : Org(u));
 

@@ -11,9 +11,10 @@ public unsafe partial class FrontLine
     private readonly Dictionary<(int, int), int> _breakouts = []; // (tag, pocket's lowest province id) -> game hour of its last breakout
 
     /// <summary>
-    /// Our divisions in ground of ours (and allies') cut off from the rest by land and sea, up to MaxCutOff provinces, most of
-    /// them out of supply, with friendly lines within MaxBreakoutDistance provinces: once a day, all of them with some organisation attack the enemy province that starts the
-    /// shortest way out. Pockets far from any friendly ground (overseas colonies) are left alone.
+    /// Our divisions in ground of ours (and allies') cut off from the rest by land, up to MaxCutOff provinces and not on the
+    /// coast, most of them out of supply, with friendly lines within MaxBreakoutDistance provinces: once a day, all of them
+    /// with BreakoutOrg % organisation or more attack the enemy province that starts the shortest way out. Pockets far from
+    /// any friendly ground (overseas colonies) are left alone.
     /// </summary>
     private void Breakout(nint country, int tag, nint[] units)
     {
@@ -35,15 +36,14 @@ public unsafe partial class FrontLine
             var inside = region.ToHashSet();
             var trapped = units.Where(u => Division.Location(u) is var l && l != 0 && inside.Contains(l)).ToList();
             if (trapped.Count(LowSupply) * 2 <= trapped.Count) continue; // still supplied: it holds (attacking out daily left it bare)
-            var breakers = trapped.Where(u => Ready(u, tag, _now) && !Division.Walking(u) && Org(u) >= BreakoutOrg
+            var breakers = trapped.Where(u => Ready(u, tag) && !Division.Walking(u) && Org(u) >= BreakoutOrg
                                               && !(_held.TryGetValue(u, out var job) && job.Job == Job.Operation)).ToList(); // an operation keeps its own
             if (breakers.Count == 0) continue;
             foreach (var breaker in breakers)
             {
                 if (_held.TryGetValue(breaker, out var held)) _held[breaker] = held with { Job = Job.Done }; // whatever it was doing: back on its order afterwards (Return)
                 Arrow(breaker, Game.Id(target), "breakout", (0, 220, 255));
-                Commands.Move(breaker, Game.Id(target), _force);
-                _pending[breaker] = _now + PendingMs;
+                Move(breaker, Game.Id(target));
             }
             _breakouts[key] = hour;
             Log.Debug($"breakout: {breakers.Count} division(s) cut off in {region.Count} province(s) attack toward friendly lines");
@@ -102,7 +102,7 @@ public unsafe partial class FrontLine
         foreach (var unit in units)
         {
             if (escapes == MaxEscapesPerTurn) break;
-            if (!_orders.TryGetValue(unit + MemberOfUnit, out var order) || !IsFront(order) || !Free(unit, tag, _now)) continue;
+            if (!_orders.TryGetValue(unit + MemberOfUnit, out var order) || !IsFront(order) || !Free(unit, tag)) continue;
             var location = Division.Location(unit);
             if (location == 0) continue;
             if (_holding.GetValueOrDefault((order, location)) < 2) continue; // alone there: pulling it out opens the line
@@ -140,7 +140,7 @@ public unsafe partial class FrontLine
             if (next.Count == 0) return -1; // cut off already, an island, or a dead end behind the neck
             if (neck == 0)
             {
-                if (next.Count <= NeckWidth && next.All(p => NextToEnemy(country, tag, p)) && next.Any(p => Province.EnemyDivisionsNext(country, tag, p)))
+                if (next.Count <= NeckWidth && next.All(p => NextToEnemy(country, tag, p)) && next.Any(p => EnemiesNext(country, tag, p) > 0))
                 {
                     if (EnemyPower(country, next) < OurPower(tag, salient.Concat(next))) return -1; // we hold it
                     neck = depth;
@@ -165,11 +165,16 @@ public unsafe partial class FrontLine
         long power = 0;
         foreach (var p in provinces)
         foreach (var id in Game.Neighbours(p))
-        {
-            if (!seen.Add(id) || Game.Province(id) is not (var n and not 0)) continue;
-            foreach (var unit in Province.Units(n))
-                if (unit != 0 && Division.IsLand(unit) && AtWar(country, Division.Commander(unit))) power += Division.Power(unit);
-        }
+            if (seen.Add(id) && Game.Province(id) is var n && n != 0) power += HostilePower(country, n);
+        return power;
+    }
+
+    /// <summary>The power of the divisions of countries at war with us in the province.</summary>
+    private long HostilePower(nint country, nint province)
+    {
+        long power = 0;
+        foreach (var unit in Province.Units(province))
+            if (unit != 0 && Division.IsLand(unit) && AtWar(country, Division.Commander(unit))) power += Division.Power(unit);
         return power;
     }
 
@@ -183,17 +188,16 @@ public unsafe partial class FrontLine
     /// Reserves back from a counterattack return to their post; ones whose post the line moved away from (or onto) go back to
     /// their front. A ready reserve with a break-in within FireRadius attacks it, with as many reserves nearby as it takes.
     /// </summary>
-    private void Counterattack(nint country, int tag, IEnumerable<Front> all)
+    private void Counterattack(nint country, int tag, List<Front> fronts)
     {
-        var ready = ReadyReserves(country, tag, all.ToList());
+        var ready = ReadyReserves(country, tag, fronts);
         var counters = 0;
         foreach (var (location, here) in ready.ToArray())
         {
             if (counters == MaxCountersPerTurn) return;
             if (here.Count == 0) continue; // all sent with another
-            var target = 0;
-            if (BreakIn(country, tag, location) is var inside && inside != 0) target = inside;
-            else Search(tag, location, FireRadius, (p, _) => (target = BreakIn(country, tag, p)) != 0);
+            var target = BreakIn(country, tag, location);
+            if (target == 0) Search(tag, location, FireRadius, (p, _) => (target = BreakIn(country, tag, p)) != 0);
             if (target == 0) continue;
             var province = Game.Province(target);
             if (province == 0) continue;
@@ -228,7 +232,7 @@ public unsafe partial class FrontLine
         var ready = new Dictionary<nint, List<nint>>(); // province -> reserves there ready to strike
         foreach (var (unit, held) in _held.ToArray())
         {
-            if (held.Job is not (Job.Reserve or Job.Counter) || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
+            if (held.Job is not (Job.Reserve or Job.Counter) || !Ready(unit, tag) || Division.Walking(unit)) continue;
             var front = fronts.FirstOrDefault(f => f.Key == held.Front);
             var post = Game.Province(held.Post);
             var overrun = post == 0 || Province.Controller(post) != tag || NextToEnemy(country, tag, post);
@@ -246,8 +250,7 @@ public unsafe partial class FrontLine
             }
             if (location != post)
             {
-                Commands.Move(unit, held.Post, _force); // back from a counterattack, or pushed off its post
-                _pending[unit] = _now + PendingMs;
+                Move(unit, held.Post); // back from a counterattack, or pushed off its post
                 _held[unit] = held with { Job = Job.Reserve, Target = 0 };
                 continue;
             }
@@ -300,14 +303,12 @@ public unsafe partial class FrontLine
     /// MaxReserves) on posts a province behind the line covering most of it, taken from spare fresh armored or motorized divisions;
     /// an AI country without spare mobile ones uses infantry (Spain's: else nothing ever answers a break-in).
     /// </summary>
-    private void PostReserves(nint country, int tag, IEnumerable<Front> all)
+    private void PostReserves(nint country, int tag, List<Front> fronts)
     {
-        var fronts = all.ToList();
-        var posts = Posts();
-        Dictionary<nint, List<nint>>? pool = null;
-        var posted = 0;
-        Dictionary<nint, List<nint>>? infantry = null;
         if (!PostingDay(tag, "reserve")) return;
+        var posts = Posts();
+        Dictionary<nint, List<nint>>? pool = null, infantry = null;
+        var posted = 0;
         foreach (var front in fronts.OrderByDescending(f => f.Line.Count))
         {
             if (posted == MaxPostsPerTurn || front.Line.Count < MinReserveLine) return;
@@ -331,7 +332,6 @@ public unsafe partial class FrontLine
         }
     }
 
-    /// <summary>Provinces our reserves and second-line divisions stand on.</summary>
     // An AI post is kept a week however its front's line wobbles (only one overrun or touching the enemy goes at once), and an
     // AI country takes new posts once a day: let go and taken anew hourly, the posts were most of the AI's back and forth,
     // each division taken off a battle plan or put back reshuffling the rest of it too.
@@ -350,6 +350,7 @@ public unsafe partial class FrontLine
         return true;
     }
 
+    /// <summary>Posts of our reserves, second-line and wall divisions, and posts left lately (<see cref="Vacated"/>).</summary>
     private HashSet<int> Posts() => _held.Values.Where(h => h.Job is Job.Reserve or Job.Counter or Job.Depth or Job.Cordon).Select(h => h.Post)
         .Concat(_vacated.Keys.Where(Vacated)).ToHashSet();
 
@@ -367,19 +368,14 @@ public unsafe partial class FrontLine
     {
         foreach (var (unit, held) in _held.ToArray())
         {
-            if (held.Job != Job.Cordon || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
+            if (held.Job != Job.Cordon || !Ready(unit, tag) || Division.Walking(unit)) continue;
             var breach = Game.Province(held.Target);
             var post = Game.Province(held.Post);
             if (breach == 0 || post == 0 || Province.Controller(post) != tag || !Enemy(country, tag, breach) || Game.Hour - held.Since >= CordonKeepHours)
             {
                 if (Release(unit, tag)) Log.Debug("cordon: the breach is closed, a wall division goes back to its front");
             }
-            else if (Division.Location(unit) != post && _force) GiveUp(unit, held.Job.ToString());
-            else if (Division.Location(unit) != post)
-            {
-                Commands.Move(unit, held.Post, _force);
-                _pending[unit] = _now + PendingMs;
-            }
+            else BackToPost(unit, held, post);
         }
 
         var hour = Game.Hour;
@@ -407,6 +403,14 @@ public unsafe partial class FrontLine
             posted++;
             Log.Debug("cordon: a division walls in an enemy breach");
         }
+    }
+
+    /// <summary>A post's division not on it: an AI one the AI walked off is given up (<see cref="GiveUp"/>), the player's walks back.</summary>
+    private void BackToPost(nint unit, Held held, nint post)
+    {
+        if (Division.Location(unit) == post) return;
+        if (_force) GiveUp(unit, held.Job.ToString());
+        else Move(unit, held.Post);
     }
 
     /// <summary>A province of ours right behind <paramref name="line"/> (next to it, no enemy next to it), free of posts, next to the most of it; 0 if none.</summary>
@@ -437,13 +441,12 @@ public unsafe partial class FrontLine
     /// AI drew a front on) and their post behind it is safe, else go back to their front. Key line provinces without one get
     /// the nearest spare fresh division (not mobile ones while the fire brigade wants them), most important first.
     /// </summary>
-    private void DepthDefense(nint country, int tag, IEnumerable<Front> all)
+    private void DepthDefense(nint country, int tag, List<Front> fronts)
     {
-        var fronts = all.ToList();
         var lines = fronts.SelectMany(f => f.Line).ToHashSet();
         foreach (var (unit, held) in _held.ToArray())
         {
-            if (held.Job != Job.Depth || !Ready(unit, tag, _now) || Division.Walking(unit)) continue;
+            if (held.Job != Job.Depth || !Ready(unit, tag) || Division.Walking(unit)) continue;
             var key = Game.Province(held.Target);
             var post = Game.Province(held.Post);
             // On the line as Survey drew it, not only next to enemy ground: before a war no border is, and every post was
@@ -453,21 +456,16 @@ public unsafe partial class FrontLine
             {
                 if (Release(unit, tag)) Log.Debug("depth defence: the line moved, a second-line division goes back to its front");
             }
-            else if (Division.Location(unit) != post && _force) GiveUp(unit, held.Job.ToString());
-            else if (Division.Location(unit) != post)
-            {
-                Commands.Move(unit, held.Post, _force);
-                _pending[unit] = _now + PendingMs;
-            }
+            else BackToPost(unit, held, post);
         }
 
+        if (!PostingDay(tag, "depth")) return;
         var backed = _held.Values.Where(h => h.Job == Job.Depth).Select(h => h.Target).ToHashSet();
         var posts = Posts();
         posts.UnionWith(lines.Select(Game.Id)); // a post on the line itself would be given up the next turn
-        if (!PostingDay(tag, "depth")) return;
         Dictionary<nint, List<nint>>? pool = null;
         var posted = 0;
-        foreach (var (province, _) in fronts.SelectMany(f => f.Line).Distinct().Where(p => !backed.Contains(Game.Id(p)) && !Vacated(Game.Id(p)))
+        foreach (var (province, _) in lines.Where(p => !backed.Contains(Game.Id(p)) && !Vacated(Game.Id(p)))
                      .Select(p => (Province: p, Key: Key(country, tag, p))).Where(k => k.Key >= MinKey).OrderByDescending(k => k.Key).ToList())
         {
             if (posted == MaxDepthPerTurn) return;

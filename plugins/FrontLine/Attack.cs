@@ -25,7 +25,7 @@ public partial class FrontLine
         foreach (var (from, here) in _at)
         {
             if (here.Count < 2) continue; // one stays
-            var ready = fresh[from] = here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr).OrderByDescending(Org).ToList();
+            var ready = fresh[from] = here.Where(u => Free(u, tag) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr).OrderByDescending(Org).ToList();
             if (ready.Count == 0) continue;
             foreach (var id in Game.Neighbours(from))
             {
@@ -102,9 +102,7 @@ public partial class FrontLine
     /// <summary>Who of ours next to <paramref name="target"/> would attack it, strongest first, enough to outgun it; null if they can't (or it isn't worth it).</summary>
     private AssaultPlan? PlanAssault(nint country, int tag, int id, nint target)
     {
-        long defence = 0;
-        foreach (var unit in Province.Units(target))
-            if (unit != 0 && Division.IsLand(unit) && AtWar(country, Division.Commander(unit))) defence += Division.Power(unit);
+        var defence = HostilePower(country, target);
         if (defence == 0) return null;
         var intruders = !Enemy(country, tag, target);
         var encircled = !intruders && Province.Encircled(country, tag, target);
@@ -120,10 +118,11 @@ public partial class FrontLine
         foreach (var nid in Game.Neighbours(target))
         {
             var from = Game.Province(nid);
-            if (from == 0 || !_at.TryGetValue(from, out var here) || here.Count <= Keep(country, tag, from) || Game.AdjacencyType(from, id) == Province.Impassable) continue;
-            if (!mopUp && pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue;
-            var river = Game.AdjacencyType(from, id) is Province.River or Province.LargeRiver ? 1.5 : 1;
-            attackers.AddRange(here.Where(u => Free(u, tag, _now) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr && (_force || mopUp || OnRunningPlan(u)))
+            if (from == 0 || !_at.TryGetValue(from, out var here) || here.Count <= Keep(country, tag, from)) continue;
+            var adjacency = Game.AdjacencyType(from, id);
+            if (adjacency == Province.Impassable || !mopUp && pocket == 0 && Province.Starved(country, tag, from, target, SupplyShare)) continue;
+            var river = adjacency is Province.River or Province.LargeRiver ? 1.5 : 1;
+            attackers.AddRange(here.Where(u => Free(u, tag) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr && (_force || mopUp || OnRunningPlan(u)))
                 .OrderByDescending(Division.Power).Take(here.Count - Keep(country, tag, from)).Select(u => (u, Division.Power(u) / river)));
         }
         var need = defence * hard * (mopUp ? 100 : _odds) / 100;
@@ -144,8 +143,7 @@ public partial class FrontLine
         foreach (var unit in units)
         {
             Arrow(unit, to, "assault", pocket ? ((byte)255, (byte)40, (byte)40) : ((byte)255, (byte)140, (byte)0));
-            Commands.Move(unit, to, _force);
-            _pending[unit] = _now + PendingMs;
+            Move(unit, to);
             _at[Division.Location(unit)].Remove(unit);
         }
         _sent[to] = ([.. units], true);
