@@ -6,7 +6,7 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// Arrows on the map, in any map mode, made by the game's own map arrow manager in the supply map's style and tinted:
-/// AutoTrade's trade routes, and with [Debug] AiActionArrows the AI plugins' front line actions (<see cref="Flash"/>).
+/// AutoTrade's trade routes, FrontLine's operations, and with [Debug] AiActionArrows the AI plugins' front line actions (<see cref="Flash"/>).
 /// The manager is caught from the game's own CreateArrow calls (select a unit or open a map mode with arrows), once per
 /// game: a new map has a new manager and new arrows. Main thread only. Offsets for HOI4 1.19.3.
 /// </summary>

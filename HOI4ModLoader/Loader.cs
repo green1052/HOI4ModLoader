@@ -117,18 +117,12 @@ public static class Loader
             MainThread.Every(TimeSpan.FromMilliseconds(100), () =>
             {
                 if (Environment.TickCount64 < _reloadAt) return;
-                if (Multiplayer) return; // a settings toggle mid-session: rewrite deferred to the next single player menu
+                if (Multiplayer) return; // a settings change in a multiplayer session: FollowMultiplayer reloads back in single player
                 _reloadAt = long.MaxValue;
                 Reload();
             });
             var crashTest = config.Bind("Debug", "CrashTest", 0, CrashTestDescription);
-            // Every setting is bound by now: drop the ones the loader no longer has.
-            try
-            {
-                var removed = config.RemoveUnbound("");
-                if (removed.Count > 0) Log.Info($"removed settings it no longer has: {string.Join(", ", removed)}");
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"config cleanup: {e.Message}"); }
+            RemoveDroppedSettings(config, "", Log); // every setting is bound by now
             if (crashTest is 1 or 2)
             {
                 config.Set("Debug", "CrashTest", 0, CrashTestDescription); // once: the next start runs normally
@@ -330,7 +324,7 @@ public static class Loader
                 plugin.Load();
                 log.Info($"{info.Version} loaded");
                 Loaded.Add(plugin);
-                RemoveDroppedSettings(config, log);
+                RemoveDroppedSettings(config, "General", log);
                 return true;
             }
             catch (Exception e)
@@ -347,15 +341,16 @@ public static class Loader
     }
 
     /// <summary>
-    /// Deletes the settings a plugin that just loaded didn't bind: ones a newer version dropped, which the Mods tab would
-    /// list unnamed. [General] is the loader's (Enabled, IgnoreGameVersion). A plugin binds every setting in Load, even
-    /// for a feature switched off, or switching it off loses its values.
+    /// Deletes the settings the loader or a plugin that just loaded didn't bind (except in <paramref name="keep"/>): ones a
+    /// newer version dropped, which the Mods tab would list unnamed. A plugin's [General] is the loader's (Enabled,
+    /// IgnoreGameVersion). A plugin binds every setting in Load, even for a feature switched off, or switching it off loses
+    /// its values.
     /// </summary>
-    private static void RemoveDroppedSettings(ConfigFile config, Logger log)
+    private static void RemoveDroppedSettings(ConfigFile config, string keep, Logger log)
     {
         try
         {
-            var removed = config.RemoveUnbound("General");
+            var removed = config.RemoveUnbound(keep);
             if (removed.Count > 0) log.Info($"removed settings it no longer has: {string.Join(", ", removed)}");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.Error($"config cleanup: {e.Message}"); }

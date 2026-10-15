@@ -80,17 +80,31 @@ public static unsafe class Province
         return controller == tag || Game.Allied(country, controller);
     }
 
+    // Loops, not LINQ: the AI plugins ask these for every front province on AI threads, and a capturing lambda allocates per call.
+
     /// <summary>Next to enemy-held ground.</summary>
-    public static bool NextToEnemy(nint country, int tag, nint province) =>
-        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Enemy(country, tag, p));
+    public static bool NextToEnemy(nint country, int tag, nint province)
+    {
+        foreach (var n in Game.Neighbours(province))
+            if (Game.Province(n) is var p && p != 0 && Enemy(country, tag, p)) return true;
+        return false;
+    }
 
     /// <summary>Next to enemy-held ground with divisions in it.</summary>
-    public static bool EnemyDivisionsNext(nint country, int tag, nint province) =>
-        Game.Neighbours(province).Any(n => Game.Province(n) is var p && p != 0 && Divisions(p) > 0 && Enemy(country, tag, p));
+    public static bool EnemyDivisionsNext(nint country, int tag, nint province)
+    {
+        foreach (var n in Game.Neighbours(province))
+            if (Game.Province(n) is var p && p != 0 && Divisions(p) > 0 && Enemy(country, tag, p)) return true;
+        return false;
+    }
 
     /// <summary>No land neighbour is enemy-held: divisions in it (an enemy province) can't get out.</summary>
-    public static bool Surrounded(nint country, int tag, nint province) =>
-        Game.Neighbours(province).All(n => Game.Province(n) is var p && (p == 0 || Controller(p) == 0 || !Enemy(country, tag, p)));
+    public static bool Surrounded(nint country, int tag, nint province)
+    {
+        foreach (var n in Game.Neighbours(province))
+            if (Game.Province(n) is var p && p != 0 && Controller(p) != 0 && Enemy(country, tag, p)) return false;
+        return true;
+    }
 
     private const int MaxPocket = 12; // enemy provinces a pocket may span
 

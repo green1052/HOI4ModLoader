@@ -130,24 +130,18 @@ public sealed unsafe partial class Image
         try
         {
             foreach (var line in File.Exists(StoreFile) ? File.ReadAllLines(StoreFile) : [])
-                if (line.IndexOf('\t') is var tab and > 0) _stored[line[..tab]] = line[(tab + 1)..];
+                if (line.IndexOf('\t') is var tab and > 0 && !line.AsSpan(tab + 1).StartsWith('!')) // "!": a failure an older loader stored, looked for again
+                    _stored[line[..tab]] = line[(tab + 1)..];
         }
         catch (IOException) { _stored.Clear(); } // unreadable: scan
         return _stored;
     }
 
-    /// <summary>Appends a result: RVAs in hex (space-separated for FindAll), or "!" and the error.</summary>
+    /// <summary>Appends a hit: RVAs in hex (space-separated for FindAll).</summary>
     private void Store(string name, object result)
     {
         if (Stored() is not { } stored || name.Contains('\t') || name.Contains('\n')) return;
-        var value = result switch
-        {
-            Exception e => "!" + e.Message.Replace('\n', ' '),
-            nint[] hits => string.Join(' ', hits.Select(h => (h - _base).ToString("x"))),
-            nint hit => (hit - _base).ToString("x"),
-            _ => null,
-        };
-        if (value == null) return;
+        var value = result is nint[] hits ? string.Join(' ', hits.Select(h => (h - _base).ToString("x"))) : ((nint)result - _base).ToString("x");
         stored[name] = value;
         try
         {
@@ -160,7 +154,6 @@ public sealed unsafe partial class Image
 
     private object Parse<T>(string value)
     {
-        if (value.StartsWith('!')) return new InvalidOperationException(value[1..]);
         var hits = value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(h => _base + (nint)Convert.ToInt64(h, 16)).ToArray();
         return typeof(T) == typeof(nint[]) ? hits : hits[0];
     }
@@ -191,7 +184,7 @@ public sealed unsafe partial class Image
             if (run > length) (first, length) = (i - run + 1, run);
         }
         if (first < 0) throw new ArgumentException("pattern has no concrete byte", nameof(pattern));
-        var needle = pat.AsSpan(first, length).ToArray().Select(b => (byte)b).ToArray();
+        var needle = pat[first..(first + length)].Select(b => (byte)b).ToArray();
         var hits = new List<nint>();
         foreach (var (start, size, code) in _sections)
         {

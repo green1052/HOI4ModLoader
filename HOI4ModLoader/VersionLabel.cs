@@ -10,10 +10,10 @@ using Reloaded.Hooks.Definitions.X64;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Adds the loader to the main menu's version label: a second line "HOI4ModLoader 1.0.0" when the
-/// GuiPatch above made the panel and label two lines tall, else " +" on the version's line (a second line would run
-/// out of the menu frame); and a tooltip with the loader's version and the loaded plugins. Only that label changes: the game's version
-/// string (saves, multiplayer) is untouched.
+/// Adds the loader to the main menu's version label: a second line "HOI4ModLoader 1.0.0" when the GuiPatch above made the
+/// panel and label two lines tall, else " +" on the version's line (a second line would run out of the menu frame); and a
+/// tooltip with the loader's version, an update waiting for the next start and the loaded plugins. Only that label
+/// changes: the game's version string (saves, multiplayer) is untouched.
 /// </summary>
 public static unsafe class VersionLabel
 {

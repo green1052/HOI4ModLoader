@@ -83,13 +83,7 @@ public static class GameFiles
     }
 
     /// <summary><see cref="Add(string, string)"/> with the file's contents (e.g. a plugin's embedded resource).</summary>
-    public static void Add(string path, byte[] contents)
-    {
-        var target = Path.Combine(Dir, path);
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        File.Delete(target); // a hard link Add(path, source) left there would write into its source (a cached font)
-        File.WriteAllBytes(target, contents);
-    }
+    public static void Add(string path, byte[] contents) => File.WriteAllBytes(Target(path), contents);
 
     /// <summary>
     /// Puts <paramref name="source"/> where the game reads <paramref name="path"/> (e.g. "gfx/fonts/korean/hoi_18mbs.dds"), in
@@ -98,10 +92,20 @@ public static class GameFiles
     /// </summary>
     public static void Add(string path, string source)
     {
+        var target = Target(path);
+        if (!CreateHardLinkW(target, source, 0)) File.Copy(source, target);
+    }
+
+    /// <summary>
+    /// Where <paramref name="path"/> goes, its folder made and any earlier file gone: a hot reload's second add, or a hard
+    /// link <see cref="Add(string, string)"/> left there, which writing would write into its source (a cached font).
+    /// </summary>
+    private static string Target(string path)
+    {
         var target = Path.Combine(Dir, path);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        if (File.Exists(target)) File.Delete(target); // a hot reload's second add
-        if (!CreateHardLinkW(target, source, 0)) File.Copy(source, target);
+        File.Delete(target);
+        return target;
     }
 
     /// <summary>Writes the files of <paramref name="assemblies"/> anew (left out: vanilla). Before the game reads its interface.</summary>
@@ -130,9 +134,7 @@ public static class GameFiles
                     Log.Error($"{assembly.GetName().Name}: {patch.File} changed in this game version, left vanilla");
                     continue;
                 }
-                var target = Path.Combine(Dir, patch.File);
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.WriteAllText(target, built[patch.File] = patched);
+                File.WriteAllText(Target(patch.File), built[patch.File] = patched);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {

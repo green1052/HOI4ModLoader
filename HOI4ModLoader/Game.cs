@@ -136,7 +136,7 @@ public static unsafe class Game
     }
 
     /// <summary>Every CCountry, empty before a game is loaded.</summary>
-    public static ReadOnlySpan<nint> Countries => State == 0 ? default : Native.PdxArray(State + _countries);
+    public static ReadOnlySpan<nint> Countries => State is var gs && gs != 0 ? Native.PdxArray(gs + _countries) : default;
 
     private const int HourOfGameState = 0x468, TagOfCountry = 8, UnitsOfCountry = 0x290;
 
@@ -212,7 +212,8 @@ public static unsafe class Game
     /// <summary>The country's CStrategicAir by tag, or 0. Any thread.</summary>
     public static nint StrategicAir(int tag)
     {
-        var holder = tag <= 0 || State == 0 ? 0 : *(nint*)(State + AirHolder.Holder);
+        var gs = State;
+        var holder = tag <= 0 || gs == 0 ? 0 : *(nint*)(gs + AirHolder.Holder);
         var index = holder == 0 ? -1 : TagIndex(tag);
         if (index < 0 || index >= *(int*)(holder + AirHolder.Count)) return 0; // a tag from another game (a stale cache), as Country checks
         return *(nint*)(*(nint*)(holder + AirHolder.Array) + 8 * index);

@@ -1,8 +1,8 @@
 // The profiler's sampling (Profiler.cs starts it and writes the report). Every thread but the caller is sampled in turn,
 // a pass about every millisecond (slower with many threads: the report says how often): its instruction pointer, and its
-// call stack unwound through hoi4.exe and the system modules. Native, and
-// called through a normal P/Invoke: while a thread is suspended nothing here allocates, takes a lock (the thread may hold
-// the heap's) or runs C# (the C# runtime could wait for a thread this has suspended). The unwind lookup only runs on
+// call stack unwound through hoi4.exe and the system modules. Native, and called through a normal P/Invoke: while a
+// thread is suspended nothing here allocates, takes a lock (the thread may hold the heap's) or runs C# (the C# runtime
+// could wait for a thread this has suspended). The unwind lookup only runs on
 // addresses inside hoi4.exe and the system modules, whose static tables need no lock (for JIT code ntdll would search the
 // dynamic function tables under their lock, which the suspended thread may hold).
 #include <windows.h>

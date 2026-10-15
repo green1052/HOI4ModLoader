@@ -6,10 +6,10 @@ namespace HOI4ModLoader.Bootstrap;
 /// <summary>
 /// Profiler. HOI4ModLoader\profile-startup present: the first 150 s from the exe's entry point go to startup-profile.txt;
 /// afterwards, creating HOI4ModLoader\profile-now profiles the next 60 s (in game, at the speed to look at) into
-/// profile-&lt;tick&gt;.txt. profiler.c samples every game thread in turn, a pass about every millisecond; the report lists, per thread, how much of
-/// the time it ran and what it waited in, the hoi4.exe functions on the stacks of running samples (inclusive: a function
-/// and what it calls), and, for the main thread, the hoi4.exe function each wait is called from (what the frame or the load
-/// waits for).
+/// profile-&lt;tick&gt;.txt. profiler.c samples every game thread in turn, a pass about every millisecond; the report lists,
+/// per thread, how much of the time it ran, the hoi4.exe functions on the stacks of running samples (inclusive: a
+/// function and what it calls), and, for the main thread, the hoi4.exe function each wait is called from (what the frame
+/// or the load waits for).
 /// </summary>
 internal static unsafe class Profiler
 {

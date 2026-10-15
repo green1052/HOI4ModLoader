@@ -48,10 +48,7 @@ public static unsafe partial class Gui
     /// A child of <paramref name="window"/> by name through one of CContainerWindow's lookups (vtable slot: 13 button,
     /// 15 instantTextBox, 21 checkbox, 55 window). Like the game's own calls, only for children the .gui defines. 0 for no window.
     /// </summary>
-    public static nint Find(nint window, int slot, string name)
-    {
-        return window == 0 ? 0 : Find(window, slot, Name(name));
-    }
+    public static nint Find(nint window, int slot, string name) => window == 0 ? 0 : Find(window, slot, Name(name));
 
     private static nint Find(nint window, int slot, nint name) => ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[slot])(window, name, 0);
 
@@ -314,5 +311,4 @@ public static unsafe partial class Gui
         Native.SetMsvcString(s, value);
         return s;
     }
-
 }

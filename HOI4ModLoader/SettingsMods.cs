@@ -12,10 +12,10 @@ namespace HOI4ModLoader;
 
 /// <summary>
 /// A "Mods" tab in the game's settings window: a checkbox per plugin to switch it on or off (hover for what it does), and
-/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers, ▶ to a list to pick from for text with choices; pages of 8, with arrows by
-/// the title when there are more). Changes are written to the
-/// plugin's config and every plugin reloads. The tab comes from the GuiPatch above (built from the
-/// installed game's interface\settings.gui at startup); without it nothing changes.
+/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers, ▶ to a list to pick from
+/// for text with choices; pages of 8, with arrows by the title when there are more). Changes are written to the plugin's
+/// config and every plugin reloads. The tab comes from the GuiPatch above (built from the installed game's
+/// interface\settings.gui at startup); without it nothing changes.
 /// </summary>
 internal static unsafe class SettingsMods
 {
