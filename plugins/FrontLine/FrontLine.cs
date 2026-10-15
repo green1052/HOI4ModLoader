@@ -483,7 +483,7 @@ public unsafe partial class FrontLine : Plugin
             if ((resting + 1) * 100 > (Order.Members(front).Length + resting) * _maxResting) continue;
             var rest = RestProvince(country, tag, unit);
             if (rest < 0) continue; // nowhere safe to rest: it stays
-            Send(unit, rest, Job.Rest);
+            if (!Send(unit, rest, Job.Rest)) continue;
             swaps++;
             Log.Debug($"rotation: a division at {Org(unit):0}% organisation, {Str(unit):0}% strength goes to rest");
         }
@@ -651,12 +651,13 @@ public unsafe partial class FrontLine : Plugin
 
     /// <summary>
     /// Moves the unit for <paramref name="job"/> (off its order first, unless pinning), booked so no other feature takes it.
-    /// False, and nothing done, when its way runs through enemy divisions (<see cref="Commands.ClearWay"/>).
+    /// False, and nothing booked, when the move was refused: its way runs through enemy divisions (<see cref="Commands.ClearWay"/>)
+    /// or the game wouldn't take the command.
     /// </summary>
     private bool Send(nint unit, int province, Job job, int post = 0, int target = 0, (nint, int) front = default)
     {
-        if (!Commands.ClearWay(unit, province)) return false;
         var location = Division.Location(unit);
+        if (!Move(unit, province)) return false;
         _orders.TryGetValue(unit + MemberOfUnit, out var order);
         if (_holding.TryGetValue((order, location), out var n)) _holding[(order, location)] = n - 1; // one fewer holds it
         Book(unit, job, job == Job.Pin ? 0 : order, post, target, front);
@@ -666,16 +667,16 @@ public unsafe partial class FrontLine : Plugin
             Job.Counter or Job.Pin => (220, 60, 220),
             _ => (60, 220, 60), // a post: reserve, second line, a front's reinforcement
         });
-        Move(unit, province);
         if (_force) _recent[unit] = Game.Hour;
         return true;
     }
 
-    /// <summary>A plain move, posted as the AI posts its own on an AI country's turn; the unit is left alone for PendingMs.</summary>
-    private void Move(nint unit, int province)
+    /// <summary>A plain move, posted as the AI posts its own on an AI country's turn; the unit is left alone for PendingMs. False: refused.</summary>
+    private bool Move(nint unit, int province)
     {
-        Commands.Move(unit, province, _force);
+        if (!Commands.Move(unit, province, _force)) return false;
         _pending[unit] = _now + PendingMs;
+        return true;
     }
 
     /// <summary>Logs who was sent where, for what; [Debug] AiActionArrows: an arrow from where the unit stands to where it was sent.</summary>

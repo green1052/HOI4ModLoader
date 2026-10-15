@@ -211,12 +211,9 @@ public unsafe partial class FrontLine
             });
             if (team.Count < need) continue; // too strong for what is near: the line holds it
             team = team.Take(need).ToList();
-            foreach (var unit in team)
-            {
-                var held = _held[unit];
-                Send(unit, target, Job.Counter, held.Post, target, held.Front);
-                ready[Division.Location(unit)].Remove(unit);
-            }
+            foreach (var unit in team) ready[Division.Location(unit)].Remove(unit);
+            team.RemoveAll(unit => _held[unit] is var held && !Send(unit, target, Job.Counter, held.Post, target, held.Front));
+            if (team.Count == 0) continue; // every way there refused
             _sent[target] = ([.. team], true);
             counters++;
             Log.Debug($"fire brigade: {team.Count} reserve(s) counterattack a break-in ({defenders} enemy division(s))");
@@ -325,7 +322,7 @@ public unsafe partial class FrontLine
             }
             if (unit == 0) continue;
             var id = Game.Id(post);
-            Send(unit, id, Job.Reserve, id, 0, front.Key);
+            if (!Send(unit, id, Job.Reserve, id, 0, front.Key)) continue;
             posts.Add(id);
             posted++;
             Log.Debug($"fire brigade: a {(Division.Motorized(unit) ? "mobile" : "infantry")} division takes up a reserve post behind the line");
@@ -399,7 +396,7 @@ public unsafe partial class FrontLine
             pool ??= Pool(country, tag, units, true, u => Org(u) >= WallOrg && Str(u) >= WallStr);
             var unit = Take(tag, wall, CordonRadius, pool);
             if (unit == 0) continue;
-            Send(unit, Game.Id(wall), Job.Cordon, Game.Id(wall), Game.Id(breach));
+            if (!Send(unit, Game.Id(wall), Job.Cordon, Game.Id(wall), Game.Id(breach))) continue;
             posted++;
             Log.Debug("cordon: a division walls in an enemy breach");
         }
@@ -475,7 +472,7 @@ public unsafe partial class FrontLine
             var unit = Take(tag, post, DepthRadius, pool);
             if (unit == 0) continue;
             var id = Game.Id(post);
-            Send(unit, id, Job.Depth, id, Game.Id(province));
+            if (!Send(unit, id, Job.Depth, id, Game.Id(province))) continue;
             posts.Add(id);
             posted++;
             Log.Debug("depth defence: a spare division takes up a second-line post behind a key province");

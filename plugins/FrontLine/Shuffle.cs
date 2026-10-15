@@ -145,7 +145,7 @@ public partial class FrontLine
                 var unit = Take(tag, target, ShuffleRadius, pool);
                 if (unit == 0) break; // nothing spare within reach of this crisis
                 var id = Game.Id(target);
-                Send(unit, id, Job.Shuffle, id, 0, crisis.Key);
+                if (!Send(unit, id, Job.Shuffle, id, 0, crisis.Key)) continue; // Take dropped it from the pool: the next one is tried
                 extra[target] = extra.GetValueOrDefault(target) + 1;
                 sent++;
                 Log.Debug($"shuffle: a spare division from a quiet front reinforces a losing one ({crisis.Threat} enemy division(s) against {crisis.Units.Count})");
@@ -195,7 +195,7 @@ public partial class FrontLine
                 if (defenders.Length == 0 || defenders.Length * (Province.FortLevel(target) / 2 + 1) > PinOdds || defenders.Any(Division.Fighting)) continue; // empty: Attack's; busy already
                 var unit = here.Where(u => Free(u, tag) && !Division.Walking(u) && Org(u) >= AttackOrg && Str(u) >= AttackStr).OrderByDescending(Org).FirstOrDefault();
                 if (unit == 0) break;
-                Send(unit, id, Job.Pin, Game.Id(from), id, crisis.Key);
+                if (!Send(unit, id, Job.Pin, Game.Id(from), id, crisis.Key)) continue;
                 here.Remove(unit);
                 _sent[id] = ([unit], true);
                 pins++;
