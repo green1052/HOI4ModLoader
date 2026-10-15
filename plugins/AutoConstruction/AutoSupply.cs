@@ -80,6 +80,9 @@ public unsafe partial class AutoConstruction
         var countrySupply = countries == 0 ? 0 : *(nint*)(countries + 8 * Game.TagIndex(tag));
         var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);
         if (network == 0 || _supplyNode == 0) return;
+        var now = Game.Hour;
+        if (now / 24 == _supplyDay) return; // once a game day
+        _supplyDay = now / 24;
 
         var starving = new Dictionary<nint, int>(); // province -> divisions low on supply there
         foreach (var unit in Game.Units(country))
@@ -89,9 +92,6 @@ public unsafe partial class AutoConstruction
             if (province != 0) starving[province] = starving.GetValueOrDefault(province) + 1;
         }
 
-        var now = Game.Hour;
-        if (now / 24 == _supplyDay) return; // once a game day
-        _supplyDay = now / 24;
         var ids = starving.Keys.Select(Game.Id).ToHashSet();
         foreach (var id in _starvingSince.Keys.Where(id => !ids.Contains(id)).ToList()) _starvingSince.Remove(id); // supplied again
         var actions = 0;

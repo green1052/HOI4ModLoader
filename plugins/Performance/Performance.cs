@@ -27,8 +27,9 @@ public static class Signatures
 /// Game speed: lighter recurring work where nothing is lost but a short delay. Targeted decisions look for new targets every
 /// few days instead of daily (checking every state against every such decision, for every country, was the biggest
 /// single cost of a game day); targets that became invalid still drop out daily, and timers, missions and forced refreshes
-/// are untouched. At speeds 4 and 5 the screen is drawn at most every few tens of milliseconds: at speed 5 each frame
-/// advances an hour, so a frame not drawn is game time gained (input still runs every frame).
+/// are untouched. Optionally (FastSpeedFrameMs, off by default) the screen is drawn at most every few tens of milliseconds
+/// at speeds 4 and 5: at speed 5 each frame advances an hour, so a frame not drawn is game time gained (input still runs
+/// every frame).
 /// </summary>
 [Plugin("com.green1052.performance", "Performance", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class Performance : Plugin

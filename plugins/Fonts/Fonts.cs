@@ -505,7 +505,7 @@ internal sealed unsafe class Gdi : IDisposable
         var advance = (int)Math.Round((m.CellIncX + _embolden) / (double)Scale); // a thickened glyph is that much wider
         if (size == 0 || m.BlackBoxX == 0) return new Shape([], 0, 0, 0, 0, advance);
         // The big black box (top left from the pen on the baseline, y down): 1 bit a pixel, rows padded to 32 bits.
-        int bigW = (int)m.BlackBoxX, bigH = (int)m.BlackBoxY, pitch = bigW, bigX = m.OriginX, bigY = -m.OriginY, row = (bigW + 31) / 32 * 4;
+        int bigW = (int)m.BlackBoxX, bigH = (int)m.BlackBoxY, bigX = m.OriginX, bigY = -m.OriginY, row = (bigW + 31) / 32 * 4;
         var coverage = new byte[bigW * bigH];
         for (var y = 0; y < bigH; y++)
         for (var x = 0; x < bigW; x++)
@@ -520,7 +520,7 @@ internal sealed unsafe class Gdi : IDisposable
             for (var x = 0; x < tw; x++)
             {
                 byte v = 0;
-                for (var d = Math.Max(0, x - k); d <= Math.Min(bigW - 1, x); d++) v = Math.Max(v, coverage[y * pitch + d]);
+                for (var d = Math.Max(0, x - k); d <= Math.Min(bigW - 1, x); d++) v = Math.Max(v, coverage[y * bigW + d]);
                 wide[y * tw + x] = v;
             }
             var thick = new byte[tw * th];
@@ -531,7 +531,7 @@ internal sealed unsafe class Gdi : IDisposable
                 for (var d = Math.Max(0, y - k); d <= Math.Min(bigH - 1, y); d++) v = Math.Max(v, wide[d * tw + x]);
                 thick[y * tw + x] = v;
             }
-            (coverage, bigW, bigH, pitch, bigX, bigY) = (thick, tw, th, tw, bigX - k / 2, bigY - k / 2);
+            (coverage, bigW, bigH, bigX, bigY) = (thick, tw, th, bigX - k / 2, bigY - k / 2);
         }
         int left = (int)Math.Floor(bigX / (double)Scale), top = (int)Math.Floor(bigY / (double)Scale);
         int w = (int)Math.Ceiling((bigX + bigW) / (double)Scale) - left, h = (int)Math.Ceiling((bigY + bigH) / (double)Scale) - top;
@@ -539,7 +539,7 @@ internal sealed unsafe class Gdi : IDisposable
         for (var y = 0; y < bigH; y++)
         for (var x = 0; x < bigW; x++)
             sum[((int)Math.Floor((bigY + y) / (double)Scale) - top) * w + (int)Math.Floor((bigX + x) / (double)Scale) - left] +=
-                Math.Min(64, (int)coverage[y * pitch + x]) / (64f * Scale * Scale);
+                coverage[y * bigW + x] / (64f * Scale * Scale); // 0 or 64
         var ink = new byte[w * h];
         for (var i = 0; i < ink.Length; i++) ink[i] = (byte)Math.Round(255 * MathF.Pow(Math.Min(1f, sum[i]), Gamma));
         return new Shape(ink, w, h, left, top, advance);

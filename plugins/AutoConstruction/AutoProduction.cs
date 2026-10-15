@@ -18,8 +18,8 @@ public static class ProductionSignatures
 /// <summary>
 /// Auto production: moves military factories the way a player tweaks the production screen, from a line whose equipment
 /// has a big surplus to a line whose equipment is short, one factory at a time, with the production screen's own command
-/// (multiplayer works). Paced by game time, so nothing moves while paused. Land and air lines; ships are left alone. No
-/// line is created or emptied.
+/// (multiplayer works). Paced by game days (MovesPerTurn a day), so a pause adds no moves; the day's unused ones can still
+/// go while paused. Land and air lines; ships are left alone. No line is created or emptied.
 /// </summary>
 public unsafe partial class AutoConstruction
 {
@@ -57,8 +57,8 @@ public unsafe partial class AutoConstruction
         var logistics = *(nint*)(country + LogisticsOfCountry);
         if (production == 0 || logistics == 0) return;
         var now = Environment.TickCount64;
-        foreach (var (line, until) in _pending.ToArray())
-            if (now >= until) _pending.Remove(line);
+        foreach (var (line, until) in _pending)
+            if (now >= until) _pending.Remove(line); // removing while enumerating a Dictionary is allowed
 
         // Per equipment archetype: one balance, shared by every line making it.
         var donors = new List<(nint Line, double Surplus)>();

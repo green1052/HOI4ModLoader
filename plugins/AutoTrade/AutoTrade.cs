@@ -80,6 +80,7 @@ public unsafe partial class AutoTrade : Plugin
     private const int OilEveryHours = 7 * 24;
     private bool _alliesFirst;
     private nint _oil;
+    private byte[]? _autoPrefix; // "Auto " in the game's language, made once: Labels runs with every redraw of a column
     private const int FuelOfStatus = 0x08, MaxFuelOfStatus = 0x10;
     private const int ItemDatabaseRva = 0x332F088, OilOfDatabase = 0x68; // the strategic resources' database global (HOI4 1.19.3): its oil
 
@@ -171,7 +172,8 @@ public unsafe partial class AutoTrade : Plugin
     {
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "neededType");
         if (box == 0) return;
-        Gui.SetPrefix(box, Encoding.UTF8.GetBytes(Loc.Get("com.green1052.autotrade.auto", "Auto") + " "), _auto.Contains((Game.ControlledTag, *(nint*)(item + ResourceOfItem))));
+        _autoPrefix ??= Encoding.UTF8.GetBytes(Loc.Get("com.green1052.autotrade.auto", "Auto") + " ");
+        Gui.SetPrefix(box, _autoPrefix, _auto.Contains((Game.ControlledTag, *(nint*)(item + ResourceOfItem))));
     }
 
     private void Pump()

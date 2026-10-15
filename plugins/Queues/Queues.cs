@@ -145,9 +145,9 @@ public unsafe class Queues : Plugin
             _game.Check();
             var viewed = *(nint*)(view + ViewedCountryOfFocusView);
             var ours = viewed == 0 || *(int*)(viewed + TagOfCountry) == Game.ControlledTag; // another country's tree: never queued (it could never start)
-            if (ours && focus != 0 && Gui.ShiftHeld && _focus.Items.Contains(focus)) UnqueueFocus(focus);
-            else if (ours && focus != 0 && Gui.ShiftHeld) Toggle(_focus, focus);
-            else _focusClick!.OriginalFunction(view, focus, a3);
+            if (!ours || focus == 0 || !Gui.ShiftHeld) _focusClick!.OriginalFunction(view, focus, a3);
+            else if (_focus.Items.Contains(focus)) UnqueueFocus(focus);
+            else Toggle(_focus, focus);
         });
         _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
         {
@@ -233,7 +233,6 @@ public unsafe class Queues : Plugin
     /// </summary>
     private void UnqueueFocus(nint focus)
     {
-        _game.Check();
         var country = Game.Country(Game.ControlledTag);
         var progress = country == 0 ? 0 : *(nint*)(country + FocusOfCountry);
         var removed = new HashSet<nint> { focus };

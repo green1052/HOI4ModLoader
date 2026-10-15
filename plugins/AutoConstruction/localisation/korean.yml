@@ -8,6 +8,6 @@
     com.green1052.autoconstruction.SurplusPercent:0 "잉여 기준(필요량의 %)"
     com.green1052.autoconstruction.SurplusPercent.desc:0 "장비 잉여가 군 필요량의 이 비율(%)을 넘는 라인에서 공장을 빼 옵니다."
     com.green1052.autoconstruction.MovesPerTurn:0 "하루에 옮길 공장 수"
-    com.green1052.autoconstruction.MovesPerTurn.desc:0 "게임 시간 하루에 옮기는 최대 공장 수입니다.\n라인 효율이 한꺼번에 떨어지지 않게 조금씩 옮기며, 일시정지 중엔 옮기지 않습니다."
+    com.green1052.autoconstruction.MovesPerTurn.desc:0 "게임 시간 하루에 옮기는 최대 공장 수입니다.\n라인 효율이 한꺼번에 떨어지지 않게 조금씩 옮기며, 일시정지해도 하루 몫 이상은 옮기지 않습니다."
     com.green1052.autoconstruction.CoverDays:0 "자체 충당 기간(일)"
     com.green1052.autoconstruction.CoverDays.desc:0 "모자란 라인이 지금 생산량으로 이 기간 안에 부족분을 채우면 공장을 옮기지 않습니다.\n옮긴 공장은 생산 효율이 처음부터 다시 오르기 때문입니다."

@@ -63,7 +63,7 @@ public unsafe partial class AutoTrade
         var resources = country == 0 ? 0 : *(nint*)(country + ResourcesOfCountry);
         if (resources == 0) return;
         var used = 0;
-        foreach (var route in Native.PdxArray(resources + RoutesOfResources).ToArray())
+        foreach (var route in Native.PdxArray(resources + RoutesOfResources))
         {
             if (route == 0 || *(byte*)(route + KindOfRoute) is 0 or 3) continue;
             if (*(int*)(route + TagAOfRoute) != tag && *(int*)(route + TagBOfRoute) != tag) continue; // only ours
@@ -85,7 +85,7 @@ public unsafe partial class AutoTrade
     /// <summary>The centre of each state or strategic region the route passes through, in the route's own order.</summary>
     private static void Waypoints(nint holders, List<(int X, int Y)> points)
     {
-        foreach (var holder in Native.PdxArray(holders).ToArray())
+        foreach (var holder in Native.PdxArray(holders))
         {
             if (holder == 0) continue;
             long x = 0, y = 0;

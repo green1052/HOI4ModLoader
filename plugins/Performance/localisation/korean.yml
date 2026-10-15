@@ -1,6 +1,6 @@
 ﻿l_korean:
     com.green1052.performance.name:0 "성능"
-    com.green1052.performance.desc:0 "약간 늦어질 뿐 잃는 것이 없는 반복 작업을 가볍게 합니다.\n- 대상 지정 결정이 새 대상을 매일이 아니라 며칠마다 찾음\n- 배속 4~5에서 화면을 덜 자주 그려 게임 시간이 더 빨리 흐름\n싱글 전용."
+    com.green1052.performance.desc:0 "약간 늦어질 뿐 잃는 것이 없는 반복 작업을 가볍게 합니다.\n- 대상 지정 결정이 새 대상을 매일이 아니라 며칠마다 찾음\n- (선택) 배속 4~5에서 화면을 덜 자주 그려 게임 시간이 더 빨리 흐름\n싱글 전용."
     com.green1052.performance.DecisionTargetDays:0 "결정 대상 검색 주기(일)"
     com.green1052.performance.DecisionTargetDays.desc:0 "대상 지정 결정이 새 대상을 이 일수마다 찾습니다(1: 바닐라처럼 매일).\n새로 유효해진 대상은 그만큼 늦게 나타납니다. 무효가 된 대상은 여전히 매일 빠집니다."
     com.green1052.performance.FastSpeedFrameMs:0 "배속 4~5 화면 갱신 간격(ms)"

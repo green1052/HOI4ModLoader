@@ -86,9 +86,8 @@ internal sealed unsafe class PoliticalQueue(Logger log)
     [Function(CallingConventions.Microsoft)] public delegate nint ThreeFn(nint a, nint b, nint c);
 
     private IHook<OneFn>? _ideaClick, _decisionClick, _targetedDecisionClick, _advisorItemClick;
-    private IHook<TwoFn>? _advisorPick;
+    private IHook<TwoFn>? _advisorPick, _advisorUnselectable;
     private IHook<ThreeFn>? _ideaUpdate, _advisorUpdate, _decisionSet, _targetedDecisionSet;
-    private IHook<TwoFn>? _advisorUnselectable;
     private readonly HashSet<nint> _forced = []; // entries whose button we made clickable for Shift+click: a plain click does nothing
     private delegate* unmanaged<nint, void> _ideaListRefresh;
 
@@ -268,6 +267,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
     {
         if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
+        if (_queue.Count == 0) return;
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         var politics = country == 0 ? 0 : *(nint*)(country + PoliticsOfCountry);
