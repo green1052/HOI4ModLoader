@@ -71,6 +71,9 @@ public static unsafe class Allocator
         // The release build overrides the whole process's (ucrtbase) malloc when loaded unless told not to: only the
         // game's own CRT is meant to change. (Loaded this late it doesn't take over anyway; this makes sure.)
         Environment.SetEnvironmentVariable("MIMALLOC_DISABLE_REDIRECT", "1");
+        // Unused pages go back to the OS reset (MEM_RESET), not decommitted: the game reads through stale pointers into
+        // freed memory (a window's clip rect after the air wings panel was rebuilt), which a decommitted page turns into a crash.
+        Environment.SetEnvironmentVariable("MIMALLOC_PURGE_DECOMMITS", "0");
         var mimalloc = NativeLibrary.Load(Path.Combine(Path.GetDirectoryName(typeof(Allocator).Assembly.Location)!, "mimalloc.dll"));
         nint Mi(string name) => NativeLibrary.GetExport(mimalloc, name);
         var probe = NativeMemory.Alloc(16); // ucrtbase's malloc
