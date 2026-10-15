@@ -31,6 +31,12 @@ public static class Signatures
     /// <summary>Lexer: token -> std::string* (a building type's name).</summary>
     [Signature] public const string TokenToString = "40 53 48 83 EC 30 48 63 D9 80 3D";
 
+    /// <summary>
+    /// CProductionStatus::IsConstructionSaturated(status) -> bool: the queue takes every free civilian factory. Reads the
+    /// define MAX_CIV_FACTORIES_PER_LINE (`mov r9d, [rip+disp32]` at +0x41).
+    /// </summary>
+    [Signature] public const string ConstructionSaturated = "48 B8 09 E1 D1 C6 11 6B F1 29 48 F7 A9 78 03 00 00 4C 8B C2 49 C1 F8 0E 49 8B C0 48 C1 E8 3F 4C 03 C0 48 8B 41 70 44 2B 81 B0 03 00 00 44 2B 81 98 03 00 00 48 63 49 7C";
+
     [VTable] public const string ConstructionCommand = "CAddConstructionCommand";
     [VTable] public const string BuildingReference = "CBuildingReference";
     [VTable] public const string BuildingLine = "CBuildingProductionLine";
@@ -48,6 +54,8 @@ public unsafe partial class AutoConstruction : Plugin
 {
     // Layouts for HOI4 1.19.3.
     private const int StatesOfCountry = 0x460, ProductionOfCountry = 0xF68;
+    // CProductionStatus: civilian factories (fixed point), those used by construction lines, those used elsewhere (trade, consumer goods).
+    private const int CivilianFactories = 0x378, ConstructionFactories = 0x398, OtherFactories = 0x3B0;
     private const int CoresOfState = 176;
     private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
     private const int ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: its container, its type
@@ -68,6 +76,7 @@ public unsafe partial class AutoConstruction : Plugin
     private delegate* unmanaged<nint, nint, nint, byte, byte> _canBuildInState, _canBuildInProvince;
     private delegate* unmanaged<nint, int> _freeSharedSlots;
     private delegate* unmanaged<int, nint> _tokenToString;
+    private int* _maxFactoriesPerLine;
 
     // Wanted count, kept for the session: CBuildingTypes are database objects made once at startup (the database init
     // sets the global holding them, nothing else does), so a pointer names the same building in every game loaded.
@@ -94,6 +103,9 @@ public unsafe partial class AutoConstruction : Plugin
         _canBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInProvince);
         _freeSharedSlots = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FreeSharedSlots);
         _tokenToString = (delegate* unmanaged<int, nint>)Sig.Find(Signatures.TokenToString);
+        var saturated = Sig.Find(Signatures.ConstructionSaturated);
+        if (*(uint*)(saturated + 0x41) << 8 != 0x0D8B4400) throw new InvalidOperationException("MAX_CIV_FACTORIES_PER_LINE not found");
+        _maxFactoriesPerLine = (int*)(saturated + 0x48 + *(int*)(saturated + 0x44));
         RestoreTargets();
         _game = new PerGame(() =>
         {
@@ -202,14 +214,16 @@ public unsafe partial class AutoConstruction : Plugin
         var country = Game.Country(tag);
         if (country == 0) return;
         var now = Environment.TickCount64;
+        var room = Staffable(country);
         foreach (var ((owner, type), target) in _targets)
         {
             if (owner != tag) continue;
             var count = Count(country, type);
             if (_sent.TryGetValue(type, out var sent) && count < sent.Count && now < sent.Until) continue; // not all in the queue yet
             _sent.Remove(type);
-            if (count >= target) continue;
-            var queued = Queue(country, tag, type, target - count);
+            if (count >= target || room == 0) continue; // the rest once factories free up
+            var queued = Queue(country, tag, type, Math.Min(target - count, room));
+            room -= queued;
             if (queued > 0)
             {
                 _sent[type] = (count + queued, now + PendingMs);
@@ -217,6 +231,19 @@ public unsafe partial class AutoConstruction : Plugin
             }
             else if (_failed.Add(type)) Log.Info($"{Name(type)}: {count} of {target}, but no state can take more (or the game refused the command)");
         }
+    }
+
+    /// <summary>
+    /// New construction lines the country's idle civilian factories would staff: the game fills the queue in order, up to
+    /// MAX_CIV_FACTORIES_PER_LINE a line, so with factories idle every line queued is full and each new one takes up to that
+    /// many (the last a part). Lines beyond it would wait without factories.
+    /// </summary>
+    private int Staffable(nint country)
+    {
+        var production = *(nint*)(country + ProductionOfCountry);
+        if (production == 0 || *_maxFactoriesPerLine <= 0) return 0;
+        var idle = (int)(*(long*)(production + CivilianFactories) / Native.FixedPoint) - *(int*)(production + OtherFactories) - *(int*)(production + ConstructionFactories);
+        return idle <= 0 ? 0 : (idle + *_maxFactoriesPerLine - 1) / *_maxFactoriesPerLine;
     }
 
     /// <summary>Levels of <paramref name="type"/> built in the country's states plus levels queued.</summary>
