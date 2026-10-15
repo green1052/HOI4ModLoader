@@ -89,12 +89,15 @@ public unsafe partial class AutoConstruction
         foreach (var (to, _) in receivers.OrderByDescending(r => r.Gap))
         {
             if (_movesToday == _movesPerDay || !from.MoveNext()) break;
-            if (!AddFactories(tag, from.Current, -1)) continue;
-            // Refused: give it back. Still counted against the day and both lines left alone for a while, so a refusal
-            // doesn't take and give back a factory every second.
-            if (AddFactories(tag, to, +1)) moves++;
-            else AddFactories(tag, from.Current, +1);
-            _pending[from.Current] = _pending[to] = now + ProductionPendingMs;
+            // Refused either way: counted against the day and the lines left alone for a while, so a refusal isn't retried
+            // (or a factory taken and given back) every second. Refused at the receiver: the factory goes back.
+            if (!AddFactories(tag, from.Current, -1)) _pending[from.Current] = now + ProductionPendingMs;
+            else
+            {
+                if (AddFactories(tag, to, +1)) moves++;
+                else AddFactories(tag, from.Current, +1);
+                _pending[from.Current] = _pending[to] = now + ProductionPendingMs;
+            }
             _movesToday++;
         }
         if (moves > 0) Log.Info($"moved {moves} factor{(moves == 1 ? "y" : "ies")} from surplus lines to short ones");

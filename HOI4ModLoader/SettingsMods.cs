@@ -56,7 +56,7 @@ internal static unsafe class SettingsMods
     private static IHook<OpenFn>? _open;
     private static delegate* unmanaged<nint, void> _checkBoxSprite;
     private static readonly Logger Log = new("Settings");
-    private static bool _reportedMissing;
+    private static bool _reportedMissing, _tooMany;
 
     /// <summary>The widgets of the last built Mods page (the settings screen is built once per menu).</summary>
     private static nint _screen, _page, _list, _settings, _tab, _title, _listTitle, _prev, _next, _pageText;
@@ -189,7 +189,11 @@ internal static unsafe class SettingsMods
             Gui.SetText(PluginTitles[row], Gui.Literal(Loader.Name(plugins[row])));
             Check(PluginBoxes[row], Loader.IsEnabled(plugins[row].Id));
         }
-        if (plugins.Count > PluginRows) Log.Error($"{plugins.Count} plugins, but the Mods tab has {PluginRows} rows");
+        if (plugins.Count > PluginRows && !_tooMany)
+        {
+            _tooMany = true; // once: the list is shown on every visit
+            Log.Error($"{plugins.Count} plugins, but the Mods tab has {PluginRows} rows");
+        }
     }
 
     [UnmanagedCallersOnly]

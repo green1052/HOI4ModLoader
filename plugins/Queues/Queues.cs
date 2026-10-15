@@ -290,7 +290,7 @@ public unsafe class Queues : Plugin
             _agency.Items.Add(upgrade);
             Log.Info($"agency upgrade: queued #{_agency.Items.Count} ({queued + 1} of {left} levels left)");
         }
-        else
+        else if (queued > 0)
         {
             _agency.Items.RemoveAll(i => i == upgrade);
             Log.Info($"agency upgrade: unqueued, {_agency.Items.Count} left");
