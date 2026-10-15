@@ -162,11 +162,11 @@ public partial class AiAssist
                 long ours = 0, theirs = 0;
                 foreach (var p in inside)
                 foreach (var unit in Province.Units(p))
-                    if (unit != 0 && Division.IsLand(unit) && Division.Commander(unit) == tag) ours += Power(unit);
+                    if (unit != 0 && Division.IsLand(unit) && Division.Commander(unit) == tag) ours += Division.Power(unit);
                 foreach (var id in Game.Neighbours(neck))
                     if (Game.Province(id) is var e && e != 0 && Province.Enemy(me, tag, e))
                         foreach (var unit in Province.Units(e))
-                            if (unit != 0 && Division.IsLand(unit) && Game.AtWar(me, Division.Commander(unit))) theirs += Power(unit);
+                            if (unit != 0 && Division.IsLand(unit) && Game.AtWar(me, Division.Commander(unit))) theirs += Division.Power(unit);
                 return theirs >= ours;
             }
             inside.AddRange(next);

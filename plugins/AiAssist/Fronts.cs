@@ -64,18 +64,14 @@ public unsafe partial class AiAssist
         var diplomacy = *(nint*)(country + DiplomacyOfCountry);
         if (diplomacy == 0) return false;
         var expected = Native.PdxArray<int>(diplomacy + ExpectedTagsOfDiplomacy).ToArray();
-        var ours = 0;
-        foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) ours++;
+        var ours = LandDivisions(country);
         int safe = 0, other = 0;
         var verdicts = new Dictionary<int, bool?>(); // per country: true no threat, false keeps the front, null neither
         foreach (var p in across)
         {
             var c = Province.Controller(p);
             if (c <= 0 || c == tag) continue;
-            if (!verdicts.TryGetValue(c, out var verdict))
-            {
-                verdicts[c] = verdict = Verdict(country, tag, c, expected, ours);
-            }
+            if (!verdicts.TryGetValue(c, out var verdict)) verdicts[c] = verdict = Verdict(country, tag, c, expected, ours);
             if (verdict == false) return false;
             if (verdict == true) safe++;
             else other++;
@@ -134,9 +130,16 @@ public unsafe partial class AiAssist
         var them = Game.Country(c);
         var theirs = them == 0 ? 0 : *(nint*)(them + DiplomacyOfCountry);
         if (theirs == 0 || *(nint*)(theirs + FactionOfDiplomacy) != 0) return null; // in a faction: its friends are a threat
-        var divisions = 0;
-        foreach (var u in Game.Units(them)) if (u != 0 && Division.IsLand(u)) divisions++;
-        return divisions * 100 < ours * SmallArmyPercent ? true : null;
+        return LandDivisions(them) * 100 < ours * SmallArmyPercent ? true : null;
+    }
+
+    /// <summary>The country's land divisions.</summary>
+    private static int LandDivisions(nint country)
+    {
+        var n = 0;
+        if (country != 0)
+            foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) n++;
+        return n;
     }
 
     private const int AiOfCountry = 0x228, StrategiesOfAi = 0x68, StrategyValueSlot = 4; // CCountry -> CCountryAI; its strategy table, GetValue(type, tag index, 0)
@@ -236,12 +239,11 @@ public unsafe partial class AiAssist
 
     // Keyed by raw CAIGeneral pointers, which a freed and reallocated general can reuse: entries carry the tag they were made for.
     // Hour: last refreshed (hourly while the theatre has a line); Since: when its anchor was picked; Anchor: the province it is on.
-    // Head: the spearhead's province, SalientHead for a salient's neck, 0 for a thin sector.
+    // Head: the spearhead's province, SalientHead for a salient's neck, PincerHead for a pincer's first arm, 0 for a thin sector.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, int Head, HashSet<int> Core, HashSet<int> Line, int Since, int Anchor)> Axes = new(); // general -> its breakthrough axis
 
     private void LoadFronts()
     {
-        _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         if (_axis) _ = Sig.Find(Signatures.ConcentrationActive) + Sig.Find(Signatures.ConcentrationPath) + Sig.Find(Signatures.ConcentrationAttacking); // the force concentration offsets are still where they were
         _unitRequests = Patches.Hook<GeneralRetFn>(Sig.Find(Signatures.UpdateFrontUnitRequests), general =>
         {
@@ -430,8 +432,7 @@ public unsafe partial class AiAssist
             // (vanilla's other area fronts mostly want none: Britain's home islands held five divisions, the floor spread
             // over nine fronts reached none of them). To the line (a war at home, a short line) only that floor; at war on a
             // land line up to AreaSharePercent.
-            var divisions = 0;
-            foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) divisions++;
+            var divisions = LandDivisions(country);
             var toLine = GarrisonsToLine(country, tag);
             // Before a land war too (in peace, or at war with no land line yet) only the floor: the rest stand ready on the
             // fronts the AI draws for the war it expects, not along every coast. That floor is a division per home port then
@@ -550,14 +551,8 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool StrongerOwners(int tag, HashSet<nint> line)
     {
-        static int LandDivisions(int tag)
-        {
-            var n = 0;
-            foreach (var u in Game.Units(Game.Country(tag))) if (u != 0 && Division.IsLand(u)) n++;
-            return n;
-        }
-        var ours = LandDivisions(tag);
-        return line.Select(Province.Controller).Where(c => c > 0 && c != tag).Distinct().All(owner => LandDivisions(owner) >= ours);
+        var ours = LandDivisions(Game.Country(tag));
+        return line.Select(Province.Controller).Where(c => c > 0 && c != tag).Distinct().All(owner => LandDivisions(Game.Country(owner)) >= ours);
     }
 
     /// <summary>
@@ -580,8 +575,7 @@ public unsafe partial class AiAssist
         foreach (var unit in Province.Units(p))
             if (unit != 0 && Division.Commander(unit) == tag) holding++;
         var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, Math.Min(facing, MaxPerLineProvince * contact.Count));
-        var ours = 0;
-        foreach (var u in Game.Units(Game.Country(tag))) if (u != 0 && Division.IsLand(u)) ours++;
+        var ours = LandDivisions(Game.Country(tag));
         // A stronger ally's stretch of the line gets up to AllyHelpPercent of our divisions, our own stretch its full share,
         // and never more than we have: a 17-division minor on a 55-province line it held two provinces of was asked for 106.
         if (helping) need = Math.Min(need, Math.Max(1, MaxPerLineProvince * own + ours * AllyHelpPercent / 100));

@@ -62,10 +62,12 @@ public unsafe partial class AiAssist
         return true;
     }
 
-    /// <summary>The AI's regrouping can't take this division: a reserve, a grad garrison, resting, a new division on its way,
-    /// one another plugin runs, the last one of its country in a province on the line (next to enemy ground, troops there or not:
-    /// vanilla strips quiet stretches of a front bare) or one of no more than the enemy divisions next to it, or one on the wall of a pocket (an enemy province with divisions whose
-    /// neighbours are all ours). AI threads: read only.</summary>
+    /// <summary>
+    /// The AI's regrouping can't take this division: a reserve, a grad garrison, resting, a new division on its way, one another
+    /// plugin runs, the last one of its country in a province on the line (next to enemy ground, troops there or not: vanilla
+    /// strips quiet stretches of a front bare) or one of no more than the enemy divisions next to it, or one on the wall of a
+    /// pocket (an enemy province with divisions whose neighbours are all ours). AI threads: read only.
+    /// </summary>
     private static bool Pinned(nint unit)
     {
         if (unit == 0) return false;
@@ -138,6 +140,7 @@ public unsafe partial class AiAssist
     private static bool KeepsFrontOrder(nint cmd, int tag)
     {
         var vtable = *(nint*)cmd;
+        if (vtable != _replaceRootVTable && vtable != _armyGroupVTable && vtable != _editRootVTable) return true; // every AI command passes here
         List<nint> ours = [], theirs = [];
         if (vtable == _replaceRootVTable || vtable == _armyGroupVTable)
         {
@@ -165,7 +168,7 @@ public unsafe partial class AiAssist
                     theirs.Add(*(nint*)(pairs + 16 * i + 8));
                 }
         }
-        else if (vtable == _editRootVTable)
+        else
         {
             var group = Game.Resolve(*(long*)(cmd + 0x28));
             var order = group == 0 ? 0 : _findOrder(group, *(int*)(cmd + 0x30));
@@ -177,13 +180,10 @@ public unsafe partial class AiAssist
                 theirs.Add(*(nint*)(pairs + 16 * i + 8));
             }
         }
-        else return true;
         if (ours.Count == 0) return true;
         var country = Game.Country(tag);
         if (country == 0) return true;
-        var hour = Game.Hour;
-        var overseas = Overseas(country, tag, ours.ToHashSet(), hour);
-        return !overseas && !Bystanders(country, tag, theirs.Where(p => p != 0));
+        return !Overseas(country, tag, ours.ToHashSet(), Game.Hour) && !Bystanders(country, tag, theirs.Where(p => p != 0));
     }
 
     private const int ShortHours = 48;
@@ -281,8 +281,8 @@ public unsafe partial class AiAssist
         {
             if (unit == 0 || !Division.IsLand(unit)) continue;
             var commander = Division.Commander(unit);
-            if (commander == tag || Game.Allied(country, commander)) ours += Power(unit);
-            else if (Game.AtWar(country, commander)) theirs += Power(unit);
+            if (commander == tag || Game.Allied(country, commander)) ours += Division.Power(unit);
+            else if (Game.AtWar(country, commander)) theirs += Division.Power(unit);
         }
         return ours > 0 && ours >= 2 * theirs;
     }
@@ -370,8 +370,7 @@ public unsafe partial class AiAssist
             if (grad == null && !manned && !dominant) HoldOffensives(country, tag, hour);
             StopTrappedOffensives(country, tag);
             StopBeatenOffensives(country, tag, hour);
-            if (!manned) continue;
-            if (MicroElsewhere) continue;
+            if (!manned || MicroElsewhere) continue;
             Reserve(country, tag, line, hour);
             if (grad == null) Depth(country, tag, line, hour);
         }
@@ -405,6 +404,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private static void DropBystanderFronts(nint country, int tag)
     {
+        var hour = Game.Hour;
         foreach (var group in OrdersGroup.OfCountry(country))
         {
             if (group == 0 || new OrdersGroup(group).IsArmyGroup) continue;
@@ -424,7 +424,6 @@ public unsafe partial class AiAssist
                     if (ours != 0) standing.Add(ours);
                     if (theirs != 0 && Province.Controller(theirs) is var c && c > 0 && c != tag) across.Add(theirs);
                 }
-                var hour = Game.Hour;
                 var overseas = Overseas(country, tag, standing.ToHashSet(), hour);
                 if (!overseas && (across.Count == 0 || !Bystanders(country, tag, across))) continue;
                 var divisions = members.Length;

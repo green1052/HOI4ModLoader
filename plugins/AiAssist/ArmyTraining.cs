@@ -76,13 +76,7 @@ public unsafe partial class AiAssist
             var cmd = Commands.NewOrderCommand("COrderSetTrainingCommand", new OrdersGroup(group).Ref, 0, 0);
             *(byte*)(cmd + TrainingOfCommand) = want ? (byte)1 : (byte)0;
             *(byte*)(cmd + StopAtMaxOfCommand) = want ? (byte)1 : (byte)0;
-            if (!Commands.CanExecute(cmd))
-            {
-                Commands.Free(cmd);
-                continue;
-            }
-            var owner = *(int*)(group + TagOfGroup);
-            if (_postAi(cmd, &owner) == 0) continue;
+            if (!Post(cmd, *(int*)(group + TagOfGroup))) continue;
             Interlocked.Increment(ref want ? ref _armiesTraining : ref _armiesStopped);
         }
         return true;

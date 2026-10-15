@@ -98,7 +98,7 @@ public unsafe partial class AiAssist
             if (unit != 0 && Division.IsLand(unit))
             {
                 land++;
-                ours += Power(unit);
+                ours += Division.Power(unit);
             }
         var contact = new Dictionary<int, int>();          // enemy -> our line provinces facing it
         var ground = new Dictionary<int, HashSet<nint>>(); // enemy -> its provinces up to two deep from our line
@@ -124,7 +124,7 @@ public unsafe partial class AiAssist
             long theirs = 0;
             foreach (var p in provinces)
             foreach (var unit in Province.Units(p))
-                if (Division.IsLand(unit) && Game.AtWar(country, Division.Commander(unit))) theirs += Power(unit);
+                if (Division.IsLand(unit) && Game.AtWar(country, Division.Commander(unit))) theirs += Division.Power(unit);
             var ratio = (int)Math.Min(int.MaxValue, theirs * 100 / Math.Max(1, ours * contact[enemy] / border.Count));
             top = Math.Max(top, ratio);
             if (kept.Contains(enemy)) weak &= ratio < ExitRatio;
@@ -138,9 +138,6 @@ public unsafe partial class AiAssist
         strong.UnionWith(kept);
         return new Stance(hour, old.Since, strong, top, days, old.Blocked, history);
     }
-
-    /// <summary>A division's fighting power, 0-100: its strength, counted at half to full by its organisation.</summary>
-    private static long Power(nint unit) => Division.Power(unit);
 
     /// <summary>
     /// The grad: a minimum cut between the strong enemies' ground and the tag's core, through its own provinces up to

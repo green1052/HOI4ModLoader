@@ -126,10 +126,7 @@ public partial class AiAssist
     {
         if (hour == _scanned) return;
         _scanned = hour;
-        if (_provinceCount < 0)
-            for (int id = 1, misses = 0; misses < 512; id++)
-                if (Game.Province(id) == 0) misses++;
-                else (_provinceCount, misses) = (id, 0); // the run of valid ids up to here
+        ProbeProvinces();
         var first = _controllers.Length == 0;
         if (_controllers.Length <= _provinceCount)
         {
@@ -162,6 +159,15 @@ public partial class AiAssist
         }
         _portHolders = ports;
         _homePorts = homePorts;
+    }
+
+    /// <summary>Finds the last province id once (the game has no province enumeration): the run of valid ids, up to 512 misses in a row.</summary>
+    private static void ProbeProvinces()
+    {
+        if (_provinceCount >= 0) return;
+        for (int id = 1, misses = 0; misses < 512; id++)
+            if (Game.Province(id) == 0) misses++;
+            else (_provinceCount, misses) = (id, 0);
     }
 
     /// <summary>Naval bases each country holds on its own core ground, from the last controller scan. Read by AI worker threads.</summary>

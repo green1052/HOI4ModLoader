@@ -28,9 +28,10 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// Like the original check (nonzero = skip this target), but targets <see cref="RuledOut"/> are skipped (and don't count
-    /// as alternatives), and only the best kind of target of <paramref name="from"/> stays: ones opening a corridor to a pocket of ours (when it holds at least as many of our divisions as the best
-    /// pocket-closing target cuts off), else pocket-closing ones, else ones on the axis, else valuable ones, else none that
-    /// lengthen the front; the game's random pick then takes one of those. Vanilla's own rejections stay. AI threads: read only.
+    /// as alternatives), and only the best kind of target of <paramref name="from"/> stays: ones opening a corridor to a pocket
+    /// of ours (when it holds at least as many of our divisions as the best pocket-closing target cuts off), else pocket-closing
+    /// ones, else ones on the axis, else valuable ones, else none that lengthen the front; the game's random pick then takes one
+    /// of those. Vanilla's own rejections stay. AI threads: read only.
     /// </summary>
     [UnmanagedCallersOnly]
     private static byte PocketFilter(nint us, nint from, nint to)
@@ -82,16 +83,18 @@ public unsafe partial class AiAssist
     /// <summary>
     /// Why a local attack from <paramref name="from"/> on <paramref name="to"/> is off whatever else it could take (0: it isn't):
     /// on its grad only fought-out spearheads, pockets and the way to its own (Steered); from a thinly manned front only pockets
-    /// and the way to its own (Steered); not into terrain that cripples the armor
-    /// there (Steered); not where supply can't follow, unless it closes a pocket or opens the way to ours (Unsupplied).
+    /// and the way to its own (Steered); not into terrain that cripples the armor there (Steered); not where an attack was lost
+    /// lately (<see cref="BreakOff"/>), nor where supply can't follow (Unsupplied), unless it closes a pocket or opens the way to ours.
     /// </summary>
     private static int RuledOut(nint me, int tag, nint from, nint to)
     {
-        if (Grads.ContainsKey(tag) && !Exhausted(to) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
-        if (_holdLine && OnThinLine(tag, from) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered;
+        bool? noPocket = null; // the flood fills run once, and only when a rule asks
+        bool NoPocket() => noPocket ??= Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0;
+        if (Grads.ContainsKey(tag) && !Exhausted(to) && NoPocket()) return Steered;
+        if (_holdLine && OnThinLine(tag, from) && NoPocket()) return Steered;
         if (_armorTerrain && BadForArmor(tag, from, to)) return Steered;
-        if (LostLately(tag, to) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Steered; // an attack there was lost lately (BreakOff)
-        if (_supplyAware && Province.Starved(me, tag, from, to, _supplyShare) && Province.Pocket(me, tag, to) == 0 && Relief(me, tag, to) == 0) return Unsupplied;
+        if (LostLately(tag, to) && NoPocket()) return Steered;
+        if (_supplyAware && Province.Starved(me, tag, from, to, _supplyShare) && NoPocket()) return Unsupplied;
         return 0;
     }
 

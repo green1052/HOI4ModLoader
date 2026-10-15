@@ -80,12 +80,8 @@ public unsafe partial class AiAssist
         if (diplomacy == 0) return;
         var atWar = _atWarAny(diplomacy, 0) != 0;
         if (atWar ? !_shoreSupport : !_navalTraining) return;
-        var byRef = new Dictionary<long, nint>();
-        foreach (var fleet in Native.PdxArray(country + FleetsOfCountry))
-            if (fleet != 0)
-                foreach (var tf in Native.PdxArray(fleet + TaskForcesOfFleet))
-                    if (tf != 0) byRef[*(long*)(tf + RefOfTaskForce)] = tf;
         if (!atWar && WarComing(diplomacy)) return; // ships in training hold a fifth of their organisation
+        var byRef = TaskForcesByRef(country);
         var targets = atWar ? BombardTargets(country, tag) : [];
         var data = *(nint**)slots;
         var count = *(int*)(slots + 0xC);
@@ -120,11 +116,7 @@ public unsafe partial class AiAssist
         var country = Game.Country(tag);
         var diplomacy = country == 0 ? 0 : *(nint*)(country + DiplomacyOfCountry);
         if (diplomacy == 0 || _atWarAny(diplomacy, 0) == 0) return;
-        var byRef = new Dictionary<long, nint>();
-        foreach (var fleet in Native.PdxArray(country + FleetsOfCountry))
-            if (fleet != 0)
-                foreach (var tf in Native.PdxArray(fleet + TaskForcesOfFleet))
-                    if (tf != 0) byRef[*(long*)(tf + RefOfTaskForce)] = tf;
+        var byRef = TaskForcesByRef(country);
         var targets = BombardTargets(country, tag);
         var hour = Game.Hour;
         foreach (var (tf, sent) in Bombarding) if (hour - sent.Hour is < 0 or >= BombardWaitHours) Bombarding.TryRemove(tf, out _); // sunk, merged, done
@@ -150,6 +142,17 @@ public unsafe partial class AiAssist
             else data[kept++] = slot;
         }
         *(int*)(list + 0xC) = kept;
+    }
+
+    /// <summary>The country's task forces by their CRef id (the naval AI's slots hold CRefs).</summary>
+    private static Dictionary<long, nint> TaskForcesByRef(nint country)
+    {
+        var byRef = new Dictionary<long, nint>();
+        foreach (var fleet in Native.PdxArray(country + FleetsOfCountry))
+            if (fleet != 0)
+                foreach (var tf in Native.PdxArray(fleet + TaskForcesOfFleet))
+                    if (tf != 0) byRef[*(long*)(tf + RefOfTaskForce)] = tf;
+        return byRef;
     }
 
     /// <summary>A carrier among its ships (an air base on the ship).</summary>
@@ -223,7 +226,7 @@ public unsafe partial class AiAssist
         var on = *(int*)(tf + MissionOfTaskForce) == HoldMission;
         var ours = Bombarding.TryGetValue(tf, out var sent) && hour - sent.Hour >= 0;
         // On its way, or there; of several at one battle only one stays while another battle has none.
-        var doubled = ours && Bombarding.Any(b => b.Key != tf && b.Key < tf && b.Value.Tag == tag && b.Value.Province == sent.Province && hour - b.Value.Hour is >= 0 and < BombardStayHours);
+        var doubled = ours && Bombarding.Any(b => b.Key < tf && b.Value.Tag == tag && b.Value.Province == sent.Province && hour - b.Value.Hour is >= 0 and < BombardStayHours);
         if (on && ours && hour - sent.Hour < BombardStayHours && !(doubled && targets.Any(t => t.Sea != sent.Province
             && !Covered(tag, t.Sea, hour)))) return true;
         if (targets.Count == 0) return on && ours && hour - sent.Hour < BombardWaitHours; // battles pause: it waits at sea, not in port
@@ -305,7 +308,7 @@ public unsafe partial class AiAssist
         return steps;
     }
 
-    /// <summary>Posts an AI command if it can run (else frees it).</summary>
+    /// <summary>Posts an AI command through PostAICommand if it can run (else frees it); whether it went out.</summary>
     private static bool Post(nint cmd, int tag)
     {
         if (!Commands.CanExecute(cmd))

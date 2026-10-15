@@ -18,8 +18,8 @@ public unsafe partial class AiAssist
         foreach (var e in Line.Values)
         {
             if (e.Tag != tag || hour - e.Hour is < 0 or >= LineFreshHours) continue;
-            var held = e.Provinces.Where(p => Province.Controller(p) == tag).ToList();
-            if (held.Count == 0 || held.Count * 6 <= held.Sum(p => Standing(country, tag, p)) * 5) continue; // manned
+            var held = e.Provinces.Where(p => Province.Controller(p) == tag).ToHashSet();
+            if (held.Count == 0 || Manned(tag, held)) continue;
             foreach (var group in ArmiesIn(tag, held))
             {
                 if (!done.Add(group)) continue;

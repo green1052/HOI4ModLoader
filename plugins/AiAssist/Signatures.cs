@@ -20,8 +20,6 @@ public static class Signatures
     /// <summary>CAIFront: put its divisions into armies (front, CPdxArray&lt;CArmy*&gt;* units, CPdxArray&lt;CPdxArray&lt;int&gt;&gt;* partitions by army, specs, log): assigns, or makes new armies.</summary>
     [Signature] public const string ApplyArmiesBalancing = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC 50 49 8B F9 49 8B F0";
 
-    /// <summary>CRef::Resolve(int* ref) -> object.</summary>
-
     /// <summary>COrdersGroup::FindOrder(group, int id) -> COrder* (its own orders, then its parents').</summary>
     [Signature] public const string FindOrder = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B EA 48 8B D9 0F 1F 80 00 00 00 00 33 FF 39 BB A4 00 00 00 7E";
 
@@ -122,10 +120,6 @@ public static class Signatures
     /// <summary>CAIForceConcentration::SetExecute: `movzx edi,byte [rcx+84h]; cmp byte [rdx+248h],0; setnz al` (attack on vs the order executing). Never called.</summary>
     [Signature] public const string ConcentrationAttacking = "0F B6 B9 84 00 00 00 80 BA 48 02 00 00 00 0F 95 C0";
 
-
-
-
-
     /// <summary>
     /// CAIGeneral's daily army training pass (CCountry*, bool haltAll, CPdxArray&lt;CAIFront*&gt;* fronts): stops every exercise when
     /// haltAll (surrender progress, 10 %+ of divisions fighting, war preparation), else decides per army of its fronts.
@@ -169,14 +163,14 @@ public static class Signatures
     /// </summary>
     [Signature] public const string FilterTaskForces = "41 56 48 83 EC 30 48 89 5C 24 ? 4C 8B F1 48 89 6C 24 ? 48 89 74 24 ? 33 F6 48 89 7C 24 ? 4C 89 7C 24 ? 39 71 0C";
 
-    /// <summary>
-    /// AI leader score (0x14194B960), the candidate who commands another group: `cmp rbp,rax; je; call InCombat(group); test al,al;
-    /// jnz reject(-100); sub esi,200`. Every AI leader choice (FindBestLeader 0x14194C710) scores through it.
-    /// </summary>
     /// <summary>`mov ecx,48h; call alloc; ...; mov r8b,1; mov rdx,rsi; mov rcx,rax; call CCancelMovementCommand ctor (mem[0x48], CArmy*, bool)`
     /// (+28: the call): stops a division's move or attack, as the UI's stop does.</summary>
     [Signature] public const string CancelMovement = "B9 48 00 00 00 E8 ? ? ? ? 48 89 45 ? 48 85 C0 74 ? 41 B0 01 48 8B D6 48 8B C8 E8";
 
+    /// <summary>
+    /// AI leader score (0x14194B960), the candidate who commands another group: `cmp rbp,rax; je; call InCombat(group); test al,al;
+    /// jnz reject(-100); sub esi,200`. Every AI leader choice (FindBestLeader 0x14194C710) scores through it.
+    /// </summary>
     [Signature] public const string LeaderStealBranch = "48 3B E8 74 ? 48 8B C8 E8 ? ? ? ? 84 C0 75 ? 81 EE C8 00 00 00";
 
     /// <summary>

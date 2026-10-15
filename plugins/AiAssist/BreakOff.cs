@@ -20,8 +20,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Once a game hour: an AI attack the attacker is losing (under LosingProgressPercent of the battle against as many
-    /// defenders again, or under HopelessProgressPercent) is broken off, and the province isn't attacked again for
+    /// Once a game hour: an AI attack the attacker is losing (under LosingProgressPercent of the battle against half again as
+    /// many defenders, reserves counted, or under HopelessProgressPercent) is broken off, and the province isn't attacked again for
     /// BreakOffHours (<see cref="RuledOut"/>), unless there is a reason to bear the losses: it closes a pocket, opens the way to
     /// a pocket of ours, is a feint drawing the enemy's reserves, or another feature runs those divisions (a breakout, a
     /// pinning attack, an operation). Vanilla fought such battles to the last organisation point. Main thread.

@@ -91,10 +91,7 @@ public unsafe partial class AiAssist
         var civilian = new Dictionary<int, int>();
         var type = Buildings.Type(Buildings.CivilianFactorySlot);
         if (type == 0) return civilian;
-        if (_provinceCount < 0) // the run of valid ids (the game has no province enumeration), as the beach watch probes it
-            for (int id = 1, misses = 0; misses < 512; id++)
-                if (Game.Province(id) == 0) misses++;
-                else (_provinceCount, misses) = (id, 0);
+        ProbeProvinces();
         var counted = new HashSet<nint>();
         for (var id = 1; id <= _provinceCount; id++)
         {

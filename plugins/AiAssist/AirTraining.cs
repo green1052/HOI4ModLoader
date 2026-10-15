@@ -83,17 +83,14 @@ public unsafe partial class AiAssist
                     if (OnCarrier(_baseOf(wing))) continue; // a carrier's wings fly with it
                     if (room <= 0) break;
                     if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel) continue;
-                    var cmd = Allocator.AllocZeroed(SetMissionSize);
-                    _setMission(cmd, wing, TrainingMission, 1, 1);
-                    *(byte*)(cmd + StopAtMaxOfSetMission) = 1;
+                    var cmd = TrainingCommand(wing);
                     if (!Commands.CanExecute(cmd))
                     {
                         Commands.Free(cmd);
                         continue;
                     }
                     if (!Commands.Post(cmd, true)) continue;
-                    TrainingPosted.AddOrUpdate(tag, (day, 1), (_, sent) => sent.Day == day ? (day, sent.Count + 1) : (day, 1));
-                    Interlocked.Increment(ref _training);
+                    CountTraining(tag, day);
                     room--;
                 }
             }
@@ -123,19 +120,25 @@ public unsafe partial class AiAssist
         if (atWar && !(mission is AirSuperiorityIndex or InterceptionIndex && LandRegion(region) && Quiet(tag, region))) return false;
         if ((*(int*)(wing + MissionsOfWing) & TrainingMission) != 0) return true; // already training: kept
         var day = Game.Hour / 24;
-        if (!RoomToTrain(tag, day)) return false;
+        if (TrainingRoom(tag, day) <= 0 || !Post(TrainingCommand(wing), tag)) return false;
+        CountTraining(tag, day);
+        return true;
+    }
+
+    /// <summary>The training mission command for the wing, as the AI's own training pass sends it (stop at max XP).</summary>
+    private static nint TrainingCommand(nint wing)
+    {
         var cmd = Allocator.AllocZeroed(SetMissionSize);
-        _setMission(cmd, wing, TrainingMission, 1, 1); // as the AI's own training pass sends it
+        _setMission(cmd, wing, TrainingMission, 1, 1);
         *(byte*)(cmd + StopAtMaxOfSetMission) = 1;
-        if (!Commands.CanExecute(cmd))
-        {
-            Commands.Free(cmd);
-            return false;
-        }
-        if (_postAi(cmd, &tag) == 0) return false; // deleted by PostAICommand
+        return cmd;
+    }
+
+    /// <summary>A training mission posted today: counted until it shows in the wing's bits (<see cref="TrainingRoom"/>).</summary>
+    private static void CountTraining(int tag, int day)
+    {
         TrainingPosted.AddOrUpdate(tag, (day, 1), (_, sent) => sent.Day == day ? (day, sent.Count + 1) : (day, 1));
         Interlocked.Increment(ref _training);
-        return true;
     }
 
     /// <summary>
@@ -178,9 +181,6 @@ public unsafe partial class AiAssist
         Moved[wing] = (from, hour);
         return false;
     }
-
-    /// <summary>Fewer than half of the country's wings train (<see cref="TrainingRoom"/> above 0).</summary>
-    private static bool RoomToTrain(int tag, int day) => TrainingRoom(tag, day) > 0;
 
     /// <summary>
     /// How many more of the country's wings may go on training under MaxTrainingPercent: those with the training bit, or the

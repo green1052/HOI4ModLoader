@@ -30,7 +30,7 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// Why the order's divisions shouldn't attack: for each enemy province next to them with enemy divisions in it, the hours
-    /// until each side's organisation runs out, the way the game's land combat deals it (attacks a hour from soft and hard
+    /// until each side's organisation runs out, the way the game's land combat deals it (attacks an hour from soft and hard
     /// attack by the other side's hardness, those up to its defense, or our breakthrough when it hits back, hit at the base
     /// avoid chance and the rest at the no-defense one, half damage under armor, forts and rivers off our attack); more of
     /// those lost than won and it holds. Null: it may go. Unlike power, this counts quality (Japan beats China's numbers).

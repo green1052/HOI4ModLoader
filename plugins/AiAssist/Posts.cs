@@ -238,11 +238,12 @@ public unsafe partial class AiAssist
         return ours >= 3 || ours == 2 && country != 0 && !Province.EnemyDivisionsNext(country, tag, province);
     }
 
-    /// <summary>A land division of the tag (not lent) that can take orders now: not fighting, retreating or embarked, not one we sent or rest.</summary>
-    private static bool Movable(nint unit, int tag)
-    {
-        return Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Jobs.Taken(unit, Id);
-    }
+    /// <summary>
+    /// A land division of the tag (not lent, not an HQ) that can take orders now: not fighting, retreating or embarked, not one
+    /// we sent or rest, nor another plugin's.
+    /// </summary>
+    private static bool Movable(nint unit, int tag) =>
+        Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Jobs.Taken(unit, Id);
 
     /// <summary>Our divisions with a job (posted, resting, walking somewhere for us), for the other plugins to leave alone.</summary>
     private static void ShareJobs() => Jobs.Set(Id, Posted.Keys.Concat(Resting.Keys).Concat(Sent.Keys));

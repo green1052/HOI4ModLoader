@@ -14,7 +14,8 @@ namespace AiAssist;
 ///   thinly held front, first. Its passes run on game time.
 /// - Beach defence: landings (ground taken from the sea in the last ten days) are walled in and attacked at once.
 /// - Breakthrough axis: local attacks (and close air support) keep to the AI's own armoured spearhead while it attacks, moving on
-///   with it, else to the theatre's thinnest enemy sector for a day; off the axis only pinning attacks on enemy stacks next to it.
+///   with it, else to the theatre's thinnest enemy sector for three days; off the axis only pinning attacks on enemy stacks next to
+///   it. Enemy salients are cut at their neck first (encirclement), a massed enemy gets two arms (pincers), a new push a feint first.
 /// - Defensive postures: facing a much stronger enemy, a country gives up exposed ground for its grad (a minimum cut through its
 ///   provinces: rivers, rough ground, forts, few attack directions), holds it, and counterattacks only fought-out spearheads.
 /// - Strategic invasions: naval invasions pick thinly held, valuable beaches and wait (a week at most) while their beach is crowded;
@@ -30,7 +31,11 @@ namespace AiAssist;
 /// - Production lines: small factory cuts on efficiently running production lines are held for a while (vanilla restarts the
 ///   freed factories elsewhere at 10 % efficiency).
 /// - Refit priority: front-line divisions get reinforcements and upgrades first (until they are 75 % full).
-/// - Encirclement: enemy salients are cut at their neck from both flanks instead of pushed head-on.
+/// - Offensive timing, battle odds: a battle plan's offensive waits until its divisions are ready and the game's combat sums say
+///   it wins; running offensives losing most of their attacks are called off, and losing local attacks broken off.
+/// - Exploitation: fresh mobile divisions drive through gaps in the enemy line to what is worth taking behind it.
+/// - No fronts on bystanders' borders or allies' lines overseas; stable leaders; idle armies and fleets train; task forces
+///   bombard coastal battles.
 /// - Railway guns: the armies on the breakthrough axis get the railway guns first and keep them.
 /// - Supply hubs: the railway from the hub feeding starving AI divisions to the capital is upgraded, and (late, rich countries)
 ///   a new hub goes where they starve with none near (vanilla only upgrades and links hubs).
@@ -78,7 +83,9 @@ public unsafe partial class AiAssist : Plugin
             + "at least five provinces away, so its reserves move there; the push waits meanwhile.") && _axis;
         _timing = Config.Bind("AI", "OffensiveTiming", true,
             "Needs HoldTheLine. The AI starts a battle plan's offensive only once its divisions are ready: not while they average under 60% organisation, "
-            + "nor while over 30% of them are still on their way to the line, nor while the enemy holds over 70% of the air over most of them, nor while most of them stand in mud.") && _holdLine;
+            + "nor while over 30% of them are still on their way to the line, nor while the enemy holds over 70% of the air over most of them, nor while most of them stand in mud; "
+            + "nor while the line ahead is fortified (half its provinces at fort level 3+) and they don't outgun it two to one, nor while one of them stands in a salient whose way back is closing, "
+            + "nor for three days after an offensive of that army lost most of its attacks, nor while the game's own combat sums (battle odds) say it loses more of its attacks than it wins.") && _holdLine;
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
             "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
             + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "
