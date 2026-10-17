@@ -43,6 +43,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | Reroll | A fresh random seed at every load, so reloading doesn't replay the same dice | Single player only |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 | Performance | Targeted decisions look for new targets every few days; optional frame cap at speeds 4-5 | Single player only |
+| Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them | Single player only |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show their position as a gold numbered badge in front of their name (`[31]` and up past 30); techs show it on their bonus text, agency upgrades as `N` (or `NxL` for repeated levels) in a number box.
@@ -143,10 +144,14 @@ Single player only (it changes when the game state updates).
 - **Decision targets** (`DecisionTargetDays`, 3 by default; 1 is vanilla): targeted decisions (one per country or state, like Sheep Mod's) look for new targets every few days instead of every day. Targets that stop being valid still drop daily, and a refresh the game forces still runs at once.
 - **Frame cap** (`FastSpeedFrameMs`, 0/off by default): at speeds 4 and 5, unpaused, the screen is drawn at most every that many milliseconds, so more time goes to the simulation; input is still read every frame.
 
+### Intelligence
+Single player only (the game has no command for it, so the agency's own list of operatives is reordered, and saved with the game).
+- **Operatives:** in the intelligence screen, drag an operative in the bottom bar onto another to move it to that place.
+
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join the same game.
 - Plugins like the queues and auto construction send the same commands a player's clicks would, so they work as usual.
-- Features that change game rules (field marshals holding air wings and railway guns, railway gun positioning, FrontLine's Apply to AI) and the single-player plugins (AiAssist, Reroll, Performance) switch off in a multiplayer lobby and back on in single player. Field marshal assignment switches to spreading over the marshal's armies with vanilla commands instead.
+- Features that change game rules (field marshals holding air wings and railway guns, railway gun positioning, FrontLine's Apply to AI) and the single-player plugins (AiAssist, Reroll, Performance, Intelligence) switch off in a multiplayer lobby and back on in single player. Field marshal assignment switches to spreading over the marshal's armies with vanilla commands instead.
 - Settings changed in the Mods tab during a multiplayer session (lobby or game) are saved but take effect back in single player; rebuilt plugin DLLs are likewise reloaded only in single player.
 
 ## Loader: start-up speed
