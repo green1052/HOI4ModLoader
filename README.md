@@ -145,8 +145,8 @@ Single player only (it changes when the game state updates).
 - **Frame cap** (`FastSpeedFrameMs`, 0/off by default): at speeds 4 and 5, unpaused, the screen is drawn at most every that many milliseconds, so more time goes to the simulation; input is still read every frame.
 
 ### Intelligence
-Single player only (the game has no command for it, so the agency's own list of operatives is reordered, and saved with the game).
-- **Operatives:** in the intelligence screen, drag an operative in the bottom bar onto another to move it to that place.
+Single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game).
+- In the intelligence screen, drag an operative in the bottom bar onto another to move it to that place.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join the same game.

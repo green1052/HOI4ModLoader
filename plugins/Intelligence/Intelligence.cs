@@ -8,30 +8,29 @@ namespace Intelligence;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
-    /// <summary>COperativeBottomBar update (bar): rebuilds the intelligence screen's operative bar from the agency's operatives, in their order.</summary>
+    /// <summary>COperativeBottomBar update (bar): fills the bar from the agency's operatives, in their order.</summary>
     [Signature] public const string BarUpdate = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 48 8B D9 48 83 B9 E0 0A 00 00 00";
 
-    /// <summary>COperativeBottomBar full refresh (bar): DoFullUpdate from the agency's operatives as they stand.</summary>
+    /// <summary>COperativeBottomBar full refresh (bar).</summary>
     [Signature] public const string BarRefresh = "40 55 48 83 EC 20 48 8B E9 48 8B 49 30 48 8B 01";
 
-    /// <summary>An operative entry's button glues (portrait at item+0x50, open button at item+0x558); slot 1 dispatches mouse events.</summary>
+    /// <summary>Button glue of an operative entry; vtable slot 1 handles mouse events.</summary>
     [VTable] public const string ItemGlue = "?$CLegacyButtonObserverGlue@VCOperativeBottomBarItem@@";
 
     [VTable] public const string Item = "COperativeBottomBarItem";
 }
 
 /// <summary>
-/// Drag an operative in the intelligence screen's bottom bar onto another to move it there, as army cards are dragged. The
-/// bar shows the agency's operatives in their stored order and the game has no command to reorder them, so the agency's
-/// list itself is reordered (saved with the game): single player only. The drop is the operative under the cursor when the button comes up.
+/// Drag an operative in the intelligence screen's bottom bar onto another to move it there. The game has no command for
+/// this, so the agency's own list is reordered: single player only.
 /// </summary>
 [Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class Intelligence : Plugin
 {
     // Layouts for HOI4 1.19.3.
     private const int AgencyOfCountry = 0xFC0, OperativesOfAgency = 0xD8;
-    private const int PortraitGlue = 0x50, ButtonGlue = 0x558, OperativeOfItem = 0x20; // COperativeBottomBarItem: glues, CRef
-    private const int ButtonOfEvent = 0x20, TypeOfEvent = 0x24;                          // GUI mouse event
+    private const int PortraitGlue = 0x50, ButtonGlue = 0x558, OperativeOfItem = 0x20; // entry: its two glues, operative CRef
+    private const int ButtonOfEvent = 0x20, TypeOfEvent = 0x24;                          // mouse event
     private const int MouseUp = 1, MouseDown = 2, MouseEnter = 3, MouseLeave = 4, Click = 5;
     private const int DragPixels = 4;
 
@@ -53,18 +52,17 @@ public unsafe partial class Intelligence : Plugin
         _glueVTable = Sig.VTable(Signatures.ItemGlue);
         _itemVTable = Sig.VTable(Signatures.Item);
         _barRefresh = (delegate* unmanaged<nint, void>)Sig.Find(Signatures.BarRefresh);
-        // Slot 1 is the button glues' shared event dispatcher: only this glue's events are looked at.
+        // Every button glue shares this handler: other buttons pass straight through.
         _dispatch = Patches.Hook<DispatchFn>(*(nint*)(_glueVTable + 8), (glue, ev) =>
         {
             if (*(nint*)glue != _glueVTable || Item(glue) is var item && item == 0) return _dispatch!.OriginalFunction(glue, ev);
-            var type = *(int*)(ev + TypeOfEvent);
-            var left = *(int*)(ev + ButtonOfEvent) <= 1;
-            if (_seen.Add(type << 8 | *(int*)(ev + ButtonOfEvent))) Log.Info($"operative bar: mouse event {type}, button {*(int*)(ev + ButtonOfEvent)}"); // ponytail: diagnostic until drag is confirmed in game
+            var (type, button) = (*(int*)(ev + TypeOfEvent), *(int*)(ev + ButtonOfEvent));
+            // ponytail: event numbers are from IDA, not yet seen in game; remove once dragging works.
+            if (_seen.Add(type << 8 | button)) Log.Info($"operative bar: mouse event {type}, button {button}");
             switch (type)
             {
-                case MouseDown when left:
-                    _pressed = item;
-                    _dragging = false;
+                case MouseDown when button <= 1:
+                    (_pressed, _dragging) = (item, false);
                     GetCursorPos(out _downAt);
                     break;
                 case MouseEnter:
@@ -74,7 +72,7 @@ public unsafe partial class Intelligence : Plugin
                     _hover = 0;
                     break;
                 case Click or MouseUp when _dragging:
-                    return 0; // a drop, not a click on the operative
+                    return 0; // a drop: don't select the operative
             }
             return _dispatch!.OriginalFunction(glue, ev);
         });
@@ -87,14 +85,14 @@ public unsafe partial class Intelligence : Plugin
         });
     }
 
-    /// <summary>The entry a glue of it belongs to, or 0.</summary>
+    /// <summary>The entry owning the glue, or 0.</summary>
     private nint Item(nint glue)
     {
         if (*(nint*)(glue - PortraitGlue) == _itemVTable) return glue - PortraitGlue;
         return *(nint*)(glue - ButtonGlue) == _itemVTable ? glue - ButtonGlue : 0;
     }
 
-    /// <summary>Follows a press on an entry: past a few pixels it is a drag, and its release over another entry moves the operative there.</summary>
+    /// <summary>A press that moved a few pixels is a drag; released over another entry, it moves the operative. True if moved.</summary>
     private bool Drag()
     {
         if (_pressed == 0) return false;
@@ -109,7 +107,7 @@ public unsafe partial class Intelligence : Plugin
         return dragged && to != 0 && to != from && Move(Game.Resolve(*(long*)(from + OperativeOfItem)), Game.Resolve(*(long*)(to + OperativeOfItem)));
     }
 
-    /// <summary>Moves <paramref name="operative"/> to where <paramref name="target"/> stands in the player's agency, shifting those between.</summary>
+    /// <summary>Puts <paramref name="operative"/> at <paramref name="target"/>'s place in the player's agency; those between shift by one.</summary>
     private bool Move(nint operative, nint target)
     {
         var country = Game.Country(Game.ControlledTag);
