@@ -55,7 +55,7 @@ public unsafe partial class AutoConstruction : Plugin
     // Layouts for HOI4 1.19.3.
     private const int StatesOfCountry = 0x460, ProductionOfCountry = 0xF68;
     // CProductionStatus: civilian factories (fixed point), those used by construction lines, those used elsewhere (trade, consumer goods).
-    private const int CivilianFactories = 0x378, ConstructionFactories = 0x398, OtherFactories = 0x3B0;
+    private const int CivilianFactories = 0x378, DamagedFactories = 0x390, ConstructionFactories = 0x398, OtherFactories = 0x3B0;
     private const int CoresOfState = 176;
     private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
     private const int ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: its container, its type
@@ -238,7 +238,9 @@ public unsafe partial class AutoConstruction : Plugin
     {
         var production = *(nint*)(country + ProductionOfCountry);
         if (production == 0 || *_maxFactoriesPerLine <= 0) return 0;
-        var idle = (int)(*(long*)(production + CivilianFactories) / Native.FixedPoint) - *(int*)(production + OtherFactories) - *(int*)(production + ConstructionFactories);
+        // Damaged factories are subtracted as the construction tab's "available" does: under repair they build nothing.
+        var idle = (int)((*(long*)(production + CivilianFactories) - *(long*)(production + DamagedFactories)) / Native.FixedPoint)
+                   - *(int*)(production + OtherFactories) - *(int*)(production + ConstructionFactories);
         return idle <= 0 ? 0 : (idle + *_maxFactoriesPerLine - 1) / *_maxFactoriesPerLine;
     }
 

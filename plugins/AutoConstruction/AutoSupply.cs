@@ -81,6 +81,7 @@ public unsafe partial class AutoConstruction
         if (network == 0 || _supplyNode == 0) return;
         var now = Game.Hour;
         if (now / 24 == _supplyDay) return; // once a game day
+        if (Staffable(country) == 0) return; // no idle civilian factories: a fix would only wait in the queue
         _supplyDay = now / 24;
 
         var starving = new Dictionary<nint, int>(); // province -> divisions low on supply there
