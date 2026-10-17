@@ -15,12 +15,12 @@ The bundled plugins add quality-of-life features: research, focus and political 
    - Steam library → right-click Hearts of Iron IV → Manage → Browse local files
 4. Start the game: the main menu's version label shows `HOI4ModLoader <version>` under the game version.
 
-There is no mod to enable in the launcher. The few interface files the plugins change are built from your installed game each time it starts, so they keep up with game updates.
+There is no mod to enable in the launcher. The few interface files the plugins change are rebuilt from your installed game at each start, so they keep up with game updates.
 
 ### Update
-Automatic: at startup and every 6 hours the loader checks the latest GitHub release and installs a newer one in the background; it takes effect at the next start (the main menu version tooltip says when one is waiting). `[Update] CheckHours` in `HOI4ModLoader\config\HOI4ModLoader.cfg` sets the interval (0: only at startup, -1: off).
-
-By hand: delete the old `HOI4ModLoader\plugins` folder first (plugins get merged or renamed between versions), then install as above. Your settings in `HOI4ModLoader\config` stay.
+- **Automatic:** at startup and every 6 hours the loader installs a newer GitHub release in the background. It takes effect at the next start; the main menu version tooltip says when one is waiting.
+  - `[Update] CheckHours` in `HOI4ModLoader\config\HOI4ModLoader.cfg` sets the interval (0: only at startup, -1: off).
+- **By hand:** delete the old `HOI4ModLoader\plugins` folder first (plugins get merged or renamed between versions), then install as above. Your settings in `HOI4ModLoader\config` stay.
 
 ### Uninstall
 Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
@@ -46,134 +46,320 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them | Single player only |
 
 ### Queues
-**Shift+click** to queue, again to unqueue. Queued items show their position as a gold numbered badge in front of their name (`[31]` and up past 30); techs show it on their bonus text, agency upgrades as `N` (or `NxL` for repeated levels) in a number box.
+**Shift+click** to queue, again to unqueue. Queued items show their position as a gold badge (`[31]` and up past 30); agency upgrades show `N` or `NxL` in a number box.
 - **Research, national focus, intelligence agency upgrades:** the first queued item starts as soon as a slot is free.
   - Repeatable agency upgrades queue one more level per click (`1x3`).
   - Unqueueing a focus also unqueues the queued focuses that need it.
-  - Items that can no longer start are dropped: researched techs, focuses already taken or shut out by a mutually exclusive focus, agency levels already done.
-- **National spirits, laws, designers, advisors, decisions:** taken one at a time as soon as you have the political power; a full slot is replaced.
-- Settings: the political power queue on/off.
+  - Items that can no longer start are dropped.
+- **National spirits, laws, designers, advisors, decisions:** taken one at a time once you have the political power. A full slot is replaced.
+- Setting: `PoliticalPower` (on).
 
 ### AutoConstruction
-In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1. The button shows how many are still to be built as `+N` (queued ones count until they are finished). Targets are kept per country for the whole session, across loads.
-- What's missing is added to the end of the construction queue, one level per state (or province) so they are built at the same time, but only as many as your idle civilian factories can work on (up to 15 a line); the rest follows as factories free up.
-- Location priority: core states, then higher infrastructure (lower infrastructure first when the building is infrastructure itself), then free building slots.
-- **Auto supply:** where your divisions have been low on supply for a week (a few days' shortage in an advance is left alone), the right fix is queued, once a game day at most, each area a month apart and a new hub at most once a month: a saturated hub gets its railway to the capital upgraded (a naval base if the bottleneck is at sea), a cut-off hub a railway to the nearest connected one, and an area with no hub near a new supply hub (railway-connected provinces first). Setting: on/off.
-- **Auto production:** military factories move one at a time from a line whose equipment has a big surplus to a line whose equipment is short (biggest shortage first), with the production screen's own command, at most a few per game day (the limit is per game day, so pausing adds no moves). Land and air lines only; no line is created or emptied. Settings: on/off, what counts as surplus (% of need), cover days, factories moved per game day.
+In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1.
+- The button shows how many are still to be built as `+N`.
+- Targets are kept per country for the session, across loads.
+- Missing levels are queued one per state (or province), only as many as your idle civilian factories can staff. The rest follow as factories free up.
+- Location priority: core states, then higher infrastructure (lower first for infrastructure itself), then free building slots.
+
+**Auto supply** (`AutoSupply`, on): where your divisions have been low on supply for a week, the fix is queued.
+- A saturated hub gets its railway to the capital upgraded, or a naval base if the bottleneck is at sea.
+- A cut-off hub gets a railway to the nearest connected hub.
+- An area with no hub near gets a new supply hub, at most one a month.
+
+**Auto production** (`AutoProduction`, on): military factories move one at a time from a land or air line with a big surplus to one that is short.
+- Settings: surplus threshold (`SurplusPercent`, 50 % of need), `CoverDays` (60), factories moved per game day (`MovesPerTurn`, 2).
+- No line is created or emptied.
 
 ### AutoTrade
-In the trade view, **Shift+click** a resource icon to turn auto trade on or off for it (`Auto` shows; kept per country for the session). A shortage is imported automatically (each change waits for the balance to show it, two game days at most), and an import that is no longer needed is cut back by whole steps (cancelled at 0), so the balance stays at the surplus you set.
-- Seller priority: your subjects, your faction, then whoever can sell the most; trade influence breaks ties. Cuts go the other way round.
-- **Oil** follows the fuel stockpile instead of its balance (only oil the factories don't use becomes fuel, so the balance never shows a shortage): once a game week, a step more while fuel is under `FuelLowPercent` (50) of its maximum and not filling up on its own (under 2 % of it a week), a step less while at or over `FuelHighPercent` (90) and not falling (the stockpile fills slowly: daily steps piled imports up).
-- Settings: allies first, a surplus to keep (imports until the balance is at least that, not just 0), and the two fuel thresholds.
-- **Trade routes:** **Ctrl+Alt+C** draws your country's trade routes in gold, in any map mode: an arrow over the states a land route crosses and the strategic regions a sea route sails, for your imports and your exports alike.
+In the trade view, **Shift+click** a resource icon to toggle auto trade for it (`Auto` shows; kept per country for the session).
+- Shortages are imported; imports no longer needed are cut back. The balance stays at the surplus you set (`Surplus`, 0).
+- Seller priority: your subjects, your faction (`AlliesFirst`, on), then whoever can sell the most.
+- **Oil** follows the fuel stockpile, checked weekly:
+  - one step more while fuel is under `FuelLowPercent` (50 %) of its maximum and not filling up;
+  - one step less while it is at or over `FuelHighPercent` (90 %) and not falling.
+- **Trade routes:** **Ctrl+Alt+C** draws your import and export routes in gold, in any map mode.
 
 ### FrontLine
-Front line micro a player does by hand, with the battle plan UI's own commands (multiplayer works). Divisions taken off a front go back onto it once their job is done; yours are remembered in `cache\frontline_held.txt`, so loading a save puts them back on their battle plan. Divisions in combat are never picked (a defender can only retreat).
-- **Rotation:** a worn-out division in contact with the enemy rests a few provinces back, where another of ours holds its province; at most a share of a front rests at once. One that can't recover (short of supply, equipment or manpower) goes back after two weeks whatever its state; none goes back within three days (an escaped one too). A division a feature lets go isn't taken again for three days, so none walks to and fro between a post and its battle plan.
-- **Plugging:** a defence of ours that is being lost (the attacker past `LosingPercent` of the battle, or its organisation gone within two days at the rate it falls) gets fresh divisions (resting, unassigned, behind the line, or spare on a front) that can walk there in time (mobile ones 10 hours a province, infantry 20), two when it falls within a day. A line province facing more than twice its divisions (three or more enemy divisions) gets one before the attack (thicken), up to four a turn. They hold the defence while enemy divisions stand next to it, a week at most.
-- **Escape:** front divisions in a salient whose way back narrows to a neck of one or two provinces next to the enemy (salients up to 20 provinces) pull back through the neck, to safe ground behind it, before the pocket closes, if the enemy at the neck is strong enough to close it; one division stays in each province it held alone. **Breakout:** divisions already cut off (pockets up to 30 provinces, friendly lines within 6, not on the coast) attack together once a day at the enemy province that starts the shortest way out, once most of them are out of supply.
-- **Attack:** empty enemy provinces next to the line are taken by a fresh division; surrounded enemy divisions are attacked only with at least as many fresh divisions as they have (more behind forts), and no more are sent while the first ones are still on their way or fighting. Best targets first: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front; skipped are provinces our supply couldn't follow (unless they close a pocket) and worthless ones that lengthen the front by more than two provinces. Divisions on a landing with no port of its own (up to 12 provinces) go for the nearest enemy port right after closing a pocket, since everything else reaches them only over the beach. **Mop-up:** enemy divisions in a pocket (up to 12 provinces) or inside our ground are finished off by any fresh divisions around them (yours too, plan or not), as soon as they outgun them. **Assaults:** an enemy province the fresh divisions of our neighbouring provinces outgun twice over (`AttackOdds`; more behind forts, in rough ground or across a river) is attacked by all of them, each province keeping one; your divisions do this only on a battle plan that is running. `AttackOdds = 0` turns assaults and the mop-up of pockets and intruders off (empty provinces and surrounded divisions are still taken).
-- **Fire brigade:** each front keeps one armored or motorized reserve per four line provinces (up to four, from up to twelve provinces away) on posts a province behind its line, off the battle plan (before a war, behind the border the AI drew a front on). Where the enemy breaks in (a province of ours lost in the last two days, a landing, enemy troops inside our lines), the nearest reserves counterattack with enough to win and then return to their post; a post the line moved away from is given up and its division goes back to its front. Fronts with a line of three provinces or more get one; an AI country without spare mobile divisions uses infantry (from up to six provinces away).
-- **Depth defence:** key line provinces (ports, victory points, river crossings, cities and mountains) get a second division a province behind them, from spare divisions of a front; it stays while the line holds there.
-- **Shuffle:** a front that is losing (its line provinces lost in two days and defences being lost, three or more together, or facing twice its divisions) gets spare fresh divisions of quiet fronts in its most pressed provinces; they go back to their own front a day after the crisis. Meanwhile fresh divisions next to the crisis pin idle enemy stacks of one or two divisions with a cheap attack each (broken off when their organisation runs low), so those stay locked in combat and can't be shuffled in. A front that only faces an encircled pocket (the game splits one off with a share of the army) keeps twice the pocket's divisions, two at least; the rest go onto the army's main front.
-- **Cordon** (defence in depth, with Plugging): ground of ours the enemy took in the last two days gets our empty provinces around it manned (the breach's shoulders and its tip, the most surrounded first, four a turn), so a breakthrough runs into a wall and its corridor stays narrow until its supply fails; the fire brigade and the cut at the salient's neck deal with what got in. A wall division holds its post while the breach next to it is the enemy's, a week at most.
-- **Lure** (AI only, with ApplyToAI): an AI defence being lost is let go instead of plugged, to draw the attacker in, when both its shoulders are held and not being lost and two or more fresh mobile divisions stand within three provinces against at most twice as many attackers; AI Assist's encirclement then cuts the salient at its neck and the fire brigade counterattacks.
-- **Battle plan keys:** Ctrl+Alt+E activates every battle plan of all your armies and army groups at once, Ctrl+Alt+H halts them (the same command the battle plan window's button posts).
-- **Operations:** select an army (or divisions, at the line or up to seven provinces behind it) and press **Ctrl+Alt+B** for a blitz: its fresh armored and motorized divisions break through the cheapest enemy sector (few divisions, no forts, open ground, no river) and push province by province toward a deep objective (victory points, a supply hub, many enemy divisions along the way), while its infantry holds the corridor behind them, one division per corridor province next to the enemy. Select two armies or an army group and press **Ctrl+Alt+P** for a pincer: two spearheads, one per wing, meet at the same objective behind the enemy; once the ring closes they go back and the infantry holds the ring for a week. Meanwhile fresh divisions of those armies support-attack idle enemy stacks next to the breakthrough and the corridor (one each, broken off when worn), so they are locked in combat and can't be moved into the gap. An operation ends when its objective is taken, the corridor is cut or a defence of it is being lost, a wing's spearheads are all worn out (an organisation setting), the next corridor province can't be reached (three refused moves), or, for a pincer, no enemy division is left next to the ring; the same key again cancels it. Its divisions then go back onto their battle plan (a fighting one once its battle is over). A loaded save forgets running operations; their divisions go back onto their battle plan with the rest FrontLine held (needs one of the front line features on). A running operation shows on the map as an arrow per spearhead from its latest gain to the objective (red: blitz, orange: pincer; once the game has drawn an arrow of its own, e.g. a selected unit's move), and the log says why one didn't start.
-- **Your divisions stay put** (`PlayerRepositions`, off by default): FrontLine doesn't take your divisions off your battle plans to stand elsewhere (depth defence and fire brigade posts, shuffles to other fronts, cordons); it only acts where they stand (rotation, plugging, escape, breakouts, attacks) and on the operation keys. Turn it on to have those posts made for you too; AI countries get them either way with Apply to AI.
-- **Apply to AI** (off by default, single player): AI countries get the same micro, with the same settings (not the keys or operations, and not rotation: their front orders took resting divisions straight back), plus the lure. A division the AI's own orders walk off a post (reserve, second line, cordon) is left to them, and one between armies is never taken, so neither goes back and forth. AI Assist's own rotation, escape, reserves, second line and local attacks stand aside meanwhile, and its regrouping hooks leave these divisions alone; without AI Assist, the AI's regrouping may take them back.
-- Settings: every threshold, each feature on/off.
+Does the front line micro a player would do by hand, with the battle plan UI's own commands (multiplayer works).
+- Divisions taken off a front go back onto it once their job is done.
+- Yours are remembered in `cache\frontline_held.txt`, so a loaded save puts them back on their battle plan.
+- Divisions in combat are never picked.
+
+**Rotation**
+- A worn-out division in contact rests a few provinces back while another holds its province.
+- At most `MaxRestingPercent` (25) of a front rests at once.
+- It returns once recovered, or after two weeks if it can't recover.
+
+**Plugging**
+- A defence being lost gets fresh divisions that can reach it in time; two if it falls within a day.
+- Being lost: the attacker is past `LosingPercent` (50) of the battle, or the defender's organisation runs out within two days.
+- **Thicken:** a line province facing more than twice its divisions gets one more before the attack.
+- Plugs stay while enemies stand next to it, a week at most.
+
+**Escape and breakout**
+- **Escape:** divisions in a salient whose way back narrows to a one- or two-province neck pull back before the pocket closes. One stays in each province it held alone.
+- **Breakout:** divisions already cut off attack together along the shortest way out, once most are out of supply.
+
+**Attack**
+- Empty enemy provinces next to the line are taken by a fresh division.
+- Surrounded enemy divisions are attacked only with at least as many fresh divisions.
+- Target order: closing a pocket, then victory points, supply hubs, airfields and ports, then shortening the front.
+- Skipped: provinces our supply couldn't follow, and worthless ones that lengthen the front.
+- Divisions on a beachhead without a port go for the nearest enemy port.
+- **Mop-up:** enemy divisions in a pocket or behind our lines are finished off by any fresh divisions around them that outgun them.
+- **Assaults:** an enemy province our neighbouring fresh divisions outgun twice over (`AttackOdds`, 200) is attacked by all of them, each province keeping one.
+  - Your divisions assault only on a running battle plan.
+  - `AttackOdds = 0` turns off assaults and mop-up.
+
+**Fire brigade**
+- Each front keeps one armored or motorized reserve per four line provinces (up to four), a province behind the line.
+- Where the enemy breaks in, the nearest reserves counterattack, then return to their post.
+- An AI country without spare mobile divisions uses infantry.
+
+**Depth defence**
+- Key line provinces (ports, victory points, river crossings, cities, mountains) get a second division a province behind them.
+
+**Shuffle**
+- A losing front gets spare fresh divisions from quiet fronts. They go back a day after the crisis.
+- Meanwhile fresh divisions near the crisis pin idle enemy stacks with cheap attacks, so they can't be shifted in.
+- A front facing only an encircled pocket keeps twice the pocket's divisions; the rest go to the army's main front.
+
+**Cordon** (with Plugging)
+- Around a breach of the last two days, our empty provinces are manned: its shoulders and tip, four a turn.
+- The breakthrough hits a wall and its corridor stays narrow. Wall divisions hold a week at most.
+
+**Lure** (AI only, with Apply to AI)
+- An AI defence being lost is let go instead of plugged, to draw the attacker into a salient.
+- Only when both shoulders hold and fresh mobile divisions are near to cut it off.
+
+**Battle plan keys** (`BattlePlanKeys`, on)
+- **Ctrl+Alt+E** activates every battle plan of all your armies and army groups; **Ctrl+Alt+H** halts them.
+
+**Operations** (`OperationKeys`, on)
+- **Blitz:** select an army (or divisions near the line) and press **Ctrl+Alt+B**.
+  - Its fresh armored and motorized divisions break through the weakest enemy sector and push toward a deep objective.
+  - Its infantry holds the corridor behind them.
+- **Pincer:** select two armies or an army group and press **Ctrl+Alt+P**.
+  - Two spearheads meet at the same objective behind the enemy; the infantry then holds the ring for a week.
+- During both, other fresh divisions pin enemy stacks next to the breakthrough.
+- An operation ends when its objective is taken, the corridor is cut, a wing's spearheads are worn out (`SpearheadOrganisation`, 35), the advance stalls, or you press the key again.
+- Its divisions then go back onto their battle plan. A loaded save forgets running operations.
+- The map shows an arrow per spearhead (red: blitz, orange: pincer). The log says why an operation didn't start.
+
+**Your divisions stay put** (`PlayerRepositions`, off)
+- While off, FrontLine doesn't move your divisions off your battle plans to stand elsewhere (depth defence, fire brigade, shuffles, cordons).
+- It still acts where they stand (rotation, plugging, escape, breakouts, attacks) and on the operation keys.
+
+**Apply to AI** (`ApplyToAI`, off, single player)
+- AI countries get the same micro with the same settings, plus the lure, but not rotation, hotkeys or operations.
+- AI Assist's own versions of these stand aside meanwhile. Without AI Assist, the AI's regrouping may take divisions back.
+
+Settings: every threshold, each feature on/off.
 
 ### ArmySupport
-- **Field marshals:** right-click a marshal's card with air wings or railway guns selected. In single player they are attached to the marshal (army group): his card gets air wing slots, his air wings support his armies' battles, and his railway guns take positions along all of his armies' divisions. In multiplayer they are spread over the marshal's armies instead. Army and marshal cards keep the **+** (attach) slot once fighters, CAS and tactical bombers are all attached, for more wings of a type. Setting: on/off.
-- **Railway gun positioning (single player):** guns stay just behind the front line instead of on it, and never ship out by sea. The penalty and sea transfer are settings.
-- **Airbase capacity:** with air wings selected, **Shift+right-click** an airbase to send only the wings that fit. The rest stay where they are.
-- **Auto rebase:** a wing whose airbase reaches less than a share of its mission region (setting, 100% by default; 0 turns it off) flies to a usable airbase with room that reaches more, keeping its mission. Wings attached to an army are left to the game, which already does this.
-- **Auto aces:** once a game day your idle aces are put on air wings without a living ace that they can fly, wings on a mission first, then the biggest. Aces killed in action are taken off their wings: vanilla leaves a fallen ace on the wing, blocking the slot for good (the AI never frees it either), so in single player every country's are taken off. The game's own assign command (multiplayer works). Setting: on/off.
-- **Auto ground crews** (off by default): More Ground Crews (+10 % air efficiency in a region for command power, given back when turned off) goes on where your air wings fought hardest in the last two days (10+ planes lost and shot down where enemy planes are active), two regions at most, while command power stays above the reserve (setting, 50 by default), and off again where they stopped fighting for three days or command power falls under the reserve. Only the regions it turned on are turned off; one you turn off yourself is left alone for the rest of the game. Your own commands (multiplayer works).
-- **Army organizer:** select divisions (drag a box, or click armies' and field marshals' cards) and press **Ctrl+Alt+G**. They are split into armies of at most the game's army size for a general (24 in vanilla), divisions standing near each other together; a whole army of at least half that size stays as it is. Each new army gets the best idle general, and all of them join the army group most of the divisions came from, or a new army group under the best idle field marshal. Armies without an idle general are left without one. The army list's own commands (multiplayer works). Setting: on/off.
+- **Field marshals** (`FieldMarshal`, on): right-click a marshal's card with air wings or railway guns selected.
+  - Single player: they are attached to the marshal. His air wings support all his armies' battles; his railway guns cover all his armies.
+  - Multiplayer: they are spread over the marshal's armies instead.
+  - Cards keep the **+** slot once every air wing type is attached, for more wings.
+- **Railway gun positioning** (single player): guns stay just behind the front instead of on it, and never ship out by sea.
+  - Settings: `FrontPenalty` (500; 0: off), `NoSeaTransfer` (on).
+- **Airbase capacity:** with air wings selected, **Shift+right-click** an airbase to send only the wings that fit.
+- **Auto rebase:** a wing whose airbase covers less than `Coverage` (100 %; 0: off) of its mission region moves to a base with room that covers more.
+- **Auto aces** (`AutoAces`, on): daily, idle aces are put on air wings without an ace, wings on a mission first.
+  - Fallen aces are taken off their wings, which vanilla never does (in single player, for every country).
+- **Auto ground crews** (`AutoGroundCrews`, off): turns More Ground Crews on in the two regions where your wings fight hardest.
+  - Only while command power stays above `GroundCrewsReserve` (50).
+  - Turned off where the fighting stops for three days. Regions you turn off yourself are left alone.
+- **Army organizer** (`Organize`, on): select divisions and press **Ctrl+Alt+G**.
+  - They are split into full armies of nearby divisions; an army already at least half full stays as it is.
+  - Each new army gets the best idle general and joins the army group most of its divisions came from (or a new one under the best idle field marshal).
 
 ### ChecksumPatcher
 Keeps achievements available when mods change the checksum (Ironman already works with mods). Patched in memory only.
 
 ### Fonts
-The game's text in a font you choose, with no font mod to make: pick an installed font from the Font setting's list (Settings → Mods → Fonts: its ▶ lists the installed fonts, a page at a time, to tick one), or set `Font` in `HOI4ModLoader\config\com.green1052.fonts.cfg` to the path of a `.ttf`/`.otf`/`.ttc` file, and restart the game.
-- At startup every bitmap font of the game's language (`gfx\fonts\korean` for Korean, `gfx\fonts` for English, ...) is drawn anew with it by Windows: the same characters, line height and baseline, sized so its letters are as tall as the original's, as bold as the original, and with a dark outline and shadow as strong as the original's where it has one. Characters the font lacks keep the original glyph. Fonts whose texture is compressed (the map labels, a few others) stay as they are.
-- The first start with new settings takes some seconds (Korean: about 10); the result is cached in `HOI4ModLoader\cache\fonts` until the settings or the game's fonts change.
-- Settings: `HeaderFont` (titles; empty: the same font), `SizePercent` (glyph size in the same lines), `Typewriter` (redraw the typewriter fonts of documents and reports too; off by default).
-- A font name Windows doesn't know is reported in the log, and the game's fonts stay.
+The game's text in a font you choose, with no font mod to make.
+- **Pick a font:** in Settings → Mods → Fonts, the Font setting's ▶ lists installed fonts; tick one. Or set `Font` in `HOI4ModLoader\config\com.green1052.fonts.cfg` to a `.ttf`/`.otf`/`.ttc` file path. Restart the game.
+- At startup the game's bitmap fonts are redrawn with it, matching the original size, weight, outline and shadow.
+- Characters the font lacks keep the original glyph. Map labels and a few other fonts stay as they are.
+- The first start with new settings takes a few seconds (Korean: about 10). The result is cached in `HOI4ModLoader\cache\fonts`.
+- Settings: `HeaderFont` (titles; empty: same font), `SizePercent` (100), `Typewriter` (off: also redraw the typewriter fonts of documents).
+- An unknown font name is reported in the log, and the game's fonts stay.
 
 ### Reroll
-HOI4 saves its random number generator's seed with the game, so reloading a save and doing the same thing replays the same battles and event outcomes. With Reroll, every game start and save load gets a fresh seed instead: combat, events' `random_list` and mean-time-to-happen events, and everything else drawn from the synced generator after the load come out differently. What was already decided before the save (an open event window, an event scheduled for a date) stays. Off in Ironman games unless `[Reroll] InIronman = True`. Single player only (every player's simulation must draw the same numbers).
+HOI4 saves its random seed, so reloading and doing the same thing replays the same battles and events. Reroll gives every game start and save load a fresh seed.
+- Combat, `random_list` and mean-time-to-happen events come out differently after a load.
+- Events already scheduled before the save stay.
+- Off in Ironman unless `[Reroll] InIronman = True`.
 
 ### AiAssist
-An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod, and only in single player.
-- **Hold the line:** at war, a front whose line provinces get under 80 % of the supply they need asks for no more divisions than stand on it (none crammed onto a narrow front past what supply feeds);  every province on the line keeps a defender and the front at least as many divisions as the enemy has across it (the theatre distribution only takes what is beyond a front's minimum, and that minimum is raised), no division on or right behind a line with enemy divisions near is strategically redeployed to another front, and against enemies that hold no port (they can't land) the AI keeps no coast and home garrisons; otherwise its garrisons always keep at least a tenth of its divisions, each other coast what vanilla wants there and the capital's defence the rest (spread evenly over every coast, Britain's home islands had kept only five divisions; all on the capital's front, the United States' west coast kept one), and before it fights on a land line its garrisons keep only a division per home port (its naval bases on core ground); for a month after its line was short, or while a war on its home land border is on or coming (a justification, war goal, focus or war preparation either way: Poland while Germany justifies over Danzig), they keep a division per home port and the rest go to the line, and otherwise, while it fights on a land line (its own or an ally's), they take a tenth to a third; from 1939 to 1942 these grow (35 % to half at war on a land line, 35 % at least before one), as landings do; a front already holding twice the enemy keeps one division per province, so the rest can go where the line is short, and none asks for more than three divisions per line province (on the line of a stronger ally, up to a quarter of its own divisions, so allies help each other); vanilla can ship a whole fighting front away (supply crisis, another front). The AI's regrouping can't take the last defender of a province next to enemy ground (troops there or not), nor one of no more than the enemy divisions next to it, the divisions walling in a pocket, a reserve, or a division that arrived in the last week (vanilla shuffles fresh arrivals back and forth). Free divisions walk back into empty line provinces — ports, victory points, river banks, cities and mountains, and the wall around an enemy pocket first, key ground from further away — the same front's divisions first; one taken from another front is held there. A country with divisions to spare keeps reserves a province behind its line and a second division behind its key line provinces (depth defence); ready reserves counterattack break-ins near them (enemy troops inside our lines, ground lost in the last two days, a landing) and go back to their post (fire brigade). Divisions worn out by fighting (not by short supply) rest a few provinces back, a quarter of those around at most, and divisions in a salient whose way back is closing under an enemy at least as strong pull out before the pocket closes, as long as another division holds their province; neither happens where the AI outguns the enemy two to one. Rested divisions, and reserves the line moved away from, go back on their own order instead of being regrouped to a far front. A country short of divisions for its line doesn't start attacks and stops the running offensives of its thinly held fronts (advancing would widen the line and get the spearhead encircled), unless it outguns the enemy there two to one; from such a front, local attacks only close pockets or open the way to a pocket of its own. Running offensives that lose most of their attacks, or push a division into a salient whose way back closes, are called off, and army HQs are kept off the fronts. These passes run on game time, so they keep up at any game speed.
-- **Beach defence:** a naval landing is answered at once: free divisions near it wall the beachhead in and attack into it, instead of waiting for the front to collapse. A beachhead is ground the enemy took from the sea in the last ten days (even right next to its own coast), or a small enemy pocket on the coast.
-- **Defensive postures** (needs Hold the line): an AI country facing a much stronger enemy (twice its share of power along the line, or 1.6x while it lost line provinces in the last week) gives up exposed ground and holds its *grad*: the most defensible short line between the enemy and its capital, found as a minimum cut through its own provinces (rivers, mountains, marsh, forests, hills, cities and forts in front, few directions to be attacked from). It is redrawn weekly, or one line back once the enemy breaks in. Divisions walk there and stay put (victory point cities get one more). The country starts no offensives (landings still go); it attacks only fought-out enemy stacks next to the line, with two fresh divisions or more (reserves behind the grad too), while single divisions pin the enemy stacks that could come to their aid, and worn-out attackers break off. Once every enemy it fell back from stays under 80 % of its power for a week (a month after falling back at the earliest), its divisions go back on their orders; for a month after that, only twice its strength puts it back on a grad. Out of contact, the posture stays as it is. (Vanilla's own fallback lines are switched off by Sheep Mod's defines.)
-- **Breakthrough axis:** local attacks keep to a breakthrough axis so the pushes don't zig-zag: while the AI's own armoured spearhead (the game's force concentration) attacks, the axis is where its path crosses the enemy line, and it moves forward with the spearhead; otherwise it is the theatre's thinnest enemy sector, held three days and moved on only once taken. Off the axis, the line only makes pinning attacks on enemy divisions next to it (a division under attack can't move except to retreat, so they can't shift into the breakthrough). Close air support backs battles on the axis first.
-- **Strategic invasions:** naval invasions land where it hurts and can hold: thinly held coast near victory points, capitals, supply hubs, airfields and resources scores higher, beaches with enemy divisions nearby, forts or coastal bunkers lower (vanilla weighs only distance, ports and area priorities). A planned landing waits, a week at most, while the enemy divisions around its beach outnumber half the landing force.
-- **Attack targets:** local attacks go for pocket-closing targets first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, empty or worn defences, dug-in defenders counting against a target), then ones that shorten the front, instead of a random pick. Next to a pocket of the AI's own divisions, the province that opens a corridor to it comes first (and breakouts from inside), ahead of pocket closing when at least as many of its divisions are trapped as the attack would cut off; vanilla has no relief logic. Fresh divisions also take empty enemy provinces next to the line, which vanilla's local attacks often skip.
-- **Exploitation** (needs Hold the line): through a gap in the enemy line (empty enemy ground no enemy division covers), fresh mobile divisions drive up to four provinces deep to the most valuable province there (a capital, victory points, a supply hub, airfields), off their battle plan for a week (two at most per target, four per country every three hours); vanilla only takes the next province, so an empty capital behind a broken line stayed untaken.
-- **Pincers** (needs Breakthrough axis): where the enemy masses divisions on the line (3+ in a province, twice the line's average), the axis becomes two arms, the thinnest enemy sector on each side 2-5 line provinces away, so the attacks close behind the mass; kept three days while both arms' targets are still the enemy's.
-- **Feints** (needs Breakthrough axis): before a new main push, the AI's local attacks first hit, for 36 hours, the enemy line province with the most divisions at least five provinces away, so its reserves move there; the push waits meanwhile.
-- **Offensive timing** (needs Hold the line): a battle plan's offensive starts once its divisions are ready, not while they average under 60% organisation nor while over 30% of them are still on their way to the line, nor while the enemy holds over 70% of the air over most of them, nor while most of them stand in mud (the weather manager's province mud flag). Nor while the line ahead is fortified (half its provinces at fort level 3+) and they don't outgun it two to one, nor while one of them stands in a salient whose way back is closing, nor for three days after an offensive of that army lost most of its attacks (attacker under 25 % of the battle, or under 40 % against half again as many defenders, reserves counted: it is called off). **Battle odds:** before it starts, each enemy province next to its divisions is rated the way the game's land combat deals damage: attacks an hour from soft and hard attack by the other side's hardness, the ones up to the target's defense (its breakthrough when it hits back) avoided at the base chance and the rest at the no-defense one, half damage under armor, forts and rivers off the attackers; the hours until each side's organisation runs out decide each attack, and more predicted lost than won hold the offensive. It counts quality, not numbers: a stronger army beats a bigger, weaker one.
-- **Armor terrain:** armored and motorized divisions don't attack into terrain or across rivers that cripple them.
-- **Supply-aware attacks:** local attacks skip provinces the attackers couldn't be supplied in once taken (setting: the supply share required); pocket-closing targets and the corridor to a pocket of ours are still taken.
-- **Air retreat:** planes leave regions where the AI keeps losing the air war badly and go where it can win.
-- **Bombing targets:** strategic bombers ask for twice the planes for enemy regions next to the land front and half for ones far behind it, which also rank lower; vanilla ignores how far a region is from the front.
-- **Air training:** green air wings (under the second experience level) fly the training mission instead of going where nothing happens: at peace any wing the air AI sends on a mission, at war fighters it sends to patrol a land region no enemy plane flies in. Wings with no mission at all train too (daily, at war as well); carrier wings never do. At most half of a country's wings train at once; trained wings go back to the AI's missions, and a wing isn't flown back to the base it left this week (vanilla flipped wings between two bases daily). Vanilla trains only the wings it has no mission for, with the fuel left over, so its pilots learn in combat.
-- **No fronts on bystanders' borders** (with Hold the line): an AI front whose border is at least 80 % held by countries that are no threat (and none of the rest at war with it or expected to be) wants no divisions and its orders are deleted, so the divisions go where a war is or may come. No threat: a country its own AI strategies mark as no target (a negative conquer, or ignore, befriend, alliance or protect; the scripts' antagonize is ideological and ignored), one in its faction, or a neutral too small to attack (in no faction, under half its land divisions: the Low Countries, Switzerland and Yugoslavia against Germany, not Poland). A country it expects a war with (the game's daily list: at war, a war goal or justification either way, a focus either way, a war preparation strategy, their factions and subjects), a guarantor of one, or a rival (a positive conquer or contain) always keeps its front. An ally's front overseas in its colonies (its line all in the ally's non-core ground, with no land route to the country's own) wants no divisions either and its orders are deleted, so none are shipped there (Germany had sent nine to Italian East Africa), unless the ally lost ground on that line in the last week (while the country's own line wasn't short in the last two days) or the country's own line has been manned all week; then a small expeditionary force goes, up to a tenth of its divisions (an Afrika Korps).
-- **Break off losing attacks:** an AI attack it is losing (under 40 % of the battle against half again as many defenders, or under 25 %) is broken off and the province isn't attacked again for three days, unless the attack closes a pocket, opens the way to a pocket of its own or is a feint drawing the enemy's reserves; divisions another plugin runs (breakouts, pinning attacks, operations) are left alone. Vanilla fought such battles to the last organisation point.
-- **Stable leaders:** the AI no longer takes a general or field marshal from an army or army group he commands. Its daily leader choice let a group without a leader take the next best one even if he led another group, which then took him back the next day: every army changed its leader every day or two.
-- **Army training:** AI armies with nothing to do train their divisions up to regular: at peace any army, at war armies holding no front (garrisons, reserves), while none of their divisions fights, stands next to enemy ground or is under 70 % strength; training stops by itself at regular, and none trains while the AI expects a war (a war preparation strategy, a focus aimed either way). Vanilla stops every exercise once the country is at war (or has an occupied victory point, or prepares a war) and never looks at armies on no front.
-- **Naval training:** AI task forces no naval objective takes (vanilla puts them on hold and sends them to port) train at peace until their ships are regulars (vanilla stops training once world tension passes 50 %), but not while the AI expects a war.
-- **Shore bombardment:** at war, task forces with guns or carriers go to the sea next to the country's coastal land battles and hold there: ships on hold next to a battle bombard the enemy divisions in it, and carriers' wings reach its land region. They are taken before the naval AI's objectives do, off patrol, strike force, hold or training (never invasion support, convoys, raiding or mines): one per battle no other covers, within 6 sea provinces. A task force stays a week at the battle and waits at sea up to two weeks for the next; one of 4+ ships is split in two when a second battle has none.
-- **Production lines:** a small factory cut to equipment whose lines run at 35 %+ efficiency is held for a while (setting: how many days), the factories coming off the smallest increases elsewhere; vanilla drains the last lines whatever their efficiency and restarts the factories at 10 %.
-- **Refit priority:** reinforcements and new equipment go to front-line divisions (in combat or next to the enemy) before rear and garrison ones.
-- **New divisions** (part of Hold the line): newly deployed divisions go where they are needed most first: the grad's holes, else the empty provinces of the threatened line, then the least held province of the most thinly held front, instead of wherever vanilla's theatre share-out sends them. They are left alone while they walk there.
-- **Invasion escort** (part of Strategic invasions): the sea regions on a planned landing's route get twice the fighters the air AI wants there (100 at least) and twice the naval bombers. Vanilla's navy already has to win those regions before a landing sails, and its fleets already head there; its air AI never looks at the route.
-- **Encirclement:** enemy salients are cut at their base instead of pushed head-on: where enemy ground bulges into the AI's line through a neck of one to three provinces and taking it cuts off 3+ enemy divisions for less than it costs, the local attacks and close air support of both flanks go for the neck until the pocket closes (a week at most).
-- **Railway guns:** the AI's railway guns go to the armies on its breakthrough axis first and stay there.
-- **Supply hubs:** where an AI country's divisions are low on supply, the railway from the hub feeding them to the capital is upgraded a level (one a week, the same hub's again after 60 days), cheap next to a hub. From 1941 on, where the divisions of an AI country with 60+ civilian factories starve with no hub within 3 provinces, it also builds one (weekly, two a month at most); a hub costs 20000, so earlier or poorer it doesn't. Vanilla's AI already upgrades and links existing hubs.
-- **Ground crews:** the AI spends spare command power on More Ground Crews (+10 % air efficiency in a region; 20 command power, given back when turned off), which vanilla's AI never uses: every two days, in the regions where its air wings fought hardest in the last three days (10+ planes lost and shot down where enemy planes are active), two at most, while 50 command power is left after the cost. Off again where its wings stopped fighting for a week, or one a pass while command power is under 50.
+An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fixes vanilla AI logic that the mod's scripts can't reach, with no bonuses. It does nothing without Sheep Mod. Each feature can be turned off in its settings.
+
+**Hold the line**
+- Front sizes, at war:
+  - Every line province keeps a defender, and each front at least as many divisions as the enemy across it.
+  - A front short of supply (under 80 %) asks for no more divisions than it has.
+  - A front holding twice the enemy gives its spare divisions to fronts that are short.
+  - No front asks for more than three divisions per line province.
+- Divisions on a line with enemies near are not redeployed to other fronts.
+- Coast and home garrisons:
+  - None against enemies that hold no port.
+  - Only a division per home port before a land war, for a month after its line was short, or while a war on its home border is on or coming.
+  - A tenth to a third of its divisions at war on a land line, rising from 1939 to 1942 (to 35 %-50 %).
+- The AI's regrouping can't take the last defender of a province next to the enemy, divisions walling in a pocket, reserves, or divisions that arrived this week.
+- Free divisions walk back into empty line provinces, key ground (ports, victory points, rivers, cities, mountains) first.
+- A country with divisions to spare keeps reserves behind its line that counterattack break-ins, and a second division behind key provinces.
+- **Rest:** divisions worn out by fighting rest a few provinces back, a quarter of those around at most.
+- **Escape:** divisions in a closing salient pull out if another division holds their province.
+- Neither rest nor escape happens where the AI outguns the enemy two to one.
+- A country short of divisions for its line starts no attacks and stops offensives on thin fronts, unless it outguns the enemy two to one.
+- Offensives that lose most of their attacks, or push into a closing salient, are called off.
+- Army HQs are kept off the fronts.
+
+**Beach defence**
+- Free divisions near a fresh enemy beachhead wall it in and attack into it at once.
+
+**Defensive postures** (needs Hold the line)
+- An AI country facing an enemy twice its power along the line (1.6x while losing ground) falls back to its *grad*: the most defensible short line before its capital.
+- The grad is redrawn weekly, or moved one line back once the enemy breaks in.
+- It starts no offensives (landings still go). It only attacks fought-out enemy stacks next to the line, with two or more fresh divisions.
+- It ends once every enemy it fell back from stays under 80 % of its power for a week.
+
+**Breakthrough axis**
+- Local attacks keep to one axis so pushes don't zig-zag: its armoured spearhead's path, else the thinnest enemy sector.
+- Off the axis, the line only makes pinning attacks.
+- Close air support backs battles on the axis first.
+
+**Strategic invasions**
+- Invasions target thinly held coast near victory points, capitals, supply hubs, airfields and resources, and avoid defended or fortified beaches.
+- A planned landing waits up to a week while the beach is heavily defended.
+
+**Attack targets**
+- Local attacks go for pocket-closing targets, then valuable provinces, then ones that shorten the front.
+- Next to a pocket of the AI's own divisions, opening a corridor to it comes first.
+- Fresh divisions also take empty enemy provinces next to the line.
+
+**Exploitation** (needs Hold the line)
+- Fresh mobile divisions drive up to four provinces through a gap in the enemy line to the most valuable province there.
+
+**Pincers** (needs Breakthrough axis)
+- Where the enemy masses divisions, the axis splits into two arms that close behind the mass.
+
+**Feints** (needs Breakthrough axis)
+- Before a new main push, local attacks hit a strong enemy province elsewhere for 36 hours to draw its reserves.
+
+**Offensive timing** (needs Hold the line)
+- A battle plan's offensive waits while:
+  - its divisions average under 60 % organisation, or over 30 % are still moving up;
+  - the enemy holds over 70 % of the air over them, or most stand in mud;
+  - the line ahead is fortified and they don't outgun it two to one;
+  - one of them is in a closing salient;
+  - the army's last offensive failed in the last three days.
+- **Battle odds:** each target is rated with the game's own combat rules. If more attacks are predicted lost than won, the offensive waits.
+
+**Armor terrain**
+- Armored and motorized divisions don't attack into terrain or across rivers that cripple them.
+
+**Supply-aware attacks**
+- Local attacks skip provinces the attackers couldn't be supplied in (`SupplyAwareMinPercent`, 25 %), unless they close a pocket.
+
+**Air retreat**
+- Planes leave regions where the AI keeps losing the air war badly.
+
+**Bombing targets**
+- Strategic bombers favour enemy regions next to the land front over ones far behind it.
+
+**Air training**
+- Green air wings train instead of flying idle missions: at peace any wing, at war fighters over quiet regions.
+- At most half of a country's wings train at once. Carrier wings never do.
+
+**No fronts on bystanders' borders** (with Hold the line)
+- AI fronts facing only countries that are no threat get no divisions, so they go where a war is or may come.
+  - No threat: one its AI strategies don't target, a faction member, or a neutral too small to attack.
+  - Countries it expects a war with, their guarantors and rivals always keep a front.
+- An ally's colonial front overseas gets no divisions either, except a small expeditionary force (up to a tenth) when that ally is losing ground there.
+
+**Break off losing attacks**
+- An AI attack it is clearly losing is broken off, and the province isn't attacked again for three days.
+- Pocket-closing attacks, feints and divisions another plugin runs are left alone.
+
+**Stable leaders**
+- The AI no longer takes a general or field marshal from an army or army group he commands.
+
+**Army training**
+- AI armies with nothing to do (at war: no front, no fighting, over 70 % strength) train their divisions up to regular.
+- None trains while the AI expects a war.
+
+**Naval training**
+- Idle AI task forces train at peace until their ships are regulars, unless the AI expects a war.
+
+**Shore bombardment**
+- At war, idle task forces with guns or carriers support the country's coastal land battles from the next sea, one per battle within 6 sea provinces.
+
+**Production lines**
+- A small factory cut to an efficient line (35 %+) is held for `StickyDays` (30) days.
+
+**Refit priority**
+- Reinforcements and new equipment go to front-line divisions first.
+
+**New divisions** (part of Hold the line)
+- New divisions go where they are needed most: the grad's holes, then empty line provinces, then the most thinly held front.
+
+**Invasion escort** (part of Strategic invasions)
+- The sea regions on a planned landing's route get twice the fighters and naval bombers.
+
+**Encirclement**
+- Enemy salients with a neck of one to three provinces, cutting off 3+ enemy divisions, are cut at the neck by both flanks.
+
+**Railway guns**
+- Railway guns go to the armies on the breakthrough axis first.
+
+**Supply hubs**
+- Where AI divisions are low on supply, the railway from their hub to the capital is upgraded.
+- From 1941, AI countries with 60+ civilian factories also build a hub where their divisions starve with none near.
+
+**Ground crews**
+- The AI spends spare command power (keeping 50) on More Ground Crews in its two hardest-fought air regions, which vanilla's AI never uses.
 
 ### Performance
 Single player only (it changes when the game state updates).
-- **Decision targets** (`DecisionTargetDays`, 3 by default; 1 is vanilla): targeted decisions (one per country or state, like Sheep Mod's) look for new targets every few days instead of every day. Targets that stop being valid still drop daily, and a refresh the game forces still runs at once.
-- **Frame cap** (`FastSpeedFrameMs`, 0/off by default): at speeds 4 and 5, unpaused, the screen is drawn at most every that many milliseconds, so more time goes to the simulation; input is still read every frame.
+- **Decision targets** (`DecisionTargetDays`, 3; 1 is vanilla): targeted decisions look for new targets every few days instead of daily. Invalid targets still drop daily.
+- **Frame cap** (`FastSpeedFrameMs`, 0: off): at speeds 4 and 5, the screen is drawn at most every that many milliseconds, leaving more time for the simulation.
 
 ### Intelligence
 Single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game).
 - In the intelligence screen, drag an operative in the bottom bar onto another to move it to that place.
 
 ## Multiplayer
-- Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join the same game.
-- Plugins like the queues and auto construction send the same commands a player's clicks would, so they work as usual.
-- Features that change game rules (field marshals holding air wings and railway guns, railway gun positioning, FrontLine's Apply to AI) and the single-player plugins (AiAssist, Reroll, Performance, Intelligence) switch off in a multiplayer lobby and back on in single player. Field marshal assignment switches to spreading over the marshal's armies with vanilla commands instead.
-- Settings changed in the Mods tab during a multiplayer session (lobby or game) are saved but take effect back in single player; rebuilt plugin DLLs are likewise reloaded only in single player.
+- Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join.
+- Plugins like the queues and auto construction send the same commands a player's clicks would.
+- These switch off in a multiplayer lobby and back on in single player: field marshals holding air wings and railway guns (spread over his armies instead), railway gun positioning, FrontLine's Apply to AI, and the single-player plugins.
+- Settings changed during a multiplayer session, and rebuilt plugin DLLs, take effect back in single player.
 
 ## Loader: start-up speed
-- **Prefetch:** each start records the files the game opens in its first two minutes (`HOI4ModLoader\cache\prefetch.txt`, about 19,000 files and 4 GB with Sheep Mod), and the next start reads that list on four threads from the exe's entry point, so they are in the system's file cache before the game asks for them. A cold start is mostly waiting on the disk (24 s warm against 62 s cold measured). An empty `HOI4ModLoader\no-prefetch` file turns it off.
-- **Signature cache:** the loader's code lookups are saved per game exe (`HOI4ModLoader\cache\signatures-*.txt`): its own start went from about 3 s to 0.3 s.
-- **Profiler:** an empty `HOI4ModLoader\profile-startup` file makes the next start write `HOI4ModLoader\startup-profile.txt` (150 s from the entry point); creating `HOI4ModLoader\profile-now` while the game runs profiles the next 60 s into `profile-<tick>.txt`. Every game thread is sampled with its call stack: per thread how much it ran, the hoi4.exe functions on running stacks (inclusive), and what the main thread waits in.
+- **Prefetch:** each start records the files the game opens in its first two minutes (`HOI4ModLoader\cache\prefetch.txt`) and reads them ahead at the next start. An empty `HOI4ModLoader\no-prefetch` file turns it off.
+- **Signature cache:** the loader's code lookups are cached per game exe (`HOI4ModLoader\cache\signatures-*.txt`).
+- **Profiler:**
+  - An empty `HOI4ModLoader\profile-startup` file makes the next start write `HOI4ModLoader\startup-profile.txt` (the first 150 s).
+  - Creating `HOI4ModLoader\profile-now` while the game runs profiles the next 60 s into `profile-<tick>.txt`.
 
 ## Loader: game fixes
-- **Intelligence agency:** an operative the game took off the wrong country's agency (game error.log: `RemoveOperative: ... not found in agency=---`) and freed stayed on its real agency's list, and loading a save then crashed. It now comes off the agency that holds it.
-- **Division stats:** a division template deleted while its division view or designer stayed open left the stat tooltips pointing at it, and hovering one crashed. Such a stat now shows without the template until the view refreshes.
+- **Intelligence agency:** fixes a crash on loading a save after the game removed an operative from the wrong agency (error.log: `RemoveOperative: ... not found in agency=---`).
+- **Division stats:** fixes a crash when hovering a stat of a division template deleted while its view stayed open.
 
 ## Loader: mimalloc
-On by default: the game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap. `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` turns it off (takes effect at the next start). The game sometimes reads memory it just freed, which the Windows heap tolerates; so small blocks (up to 4 KB) are freed a little late (after the same thread's next 16384 small frees), and the known case, targeted decisions, waits until the decision is done. Memory mimalloc gives back to Windows stays mapped (reset, not decommitted), so a late read of it finds old data instead of crashing.
+On by default: the game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap.
+- `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` turns it off (at the next start).
+- The game sometimes reads memory it just freed, so small blocks are freed a little late and freed memory stays mapped, to avoid crashes.
 
 ## Troubleshooting
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.
 - **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins made for a game version (1.19.3) don't load on another; `[General] IgnoreGameVersion = True` in the plugin's config loads them anyway (may crash).
-- **The game crashed:** `HOI4ModLoader\crash.log` names the code that faulted (and the hook or timer of a plugin, if one was running); include it with a bug report.
-- **UI elements missing or broken:** other mods that replace the same interface files (settings window, main menu, construction tab, intelligence agency, army group card) can conflict; the loader's versions win.
+- **The game crashed:** `HOI4ModLoader\crash.log` names the code that faulted (and the plugin hook, if any). Include it with a bug report.
+- **UI elements missing or broken:** other mods replacing the same interface files (settings window, main menu, construction tab, intelligence agency, army group card) can conflict. The loader's versions win.
 - **Turning a plugin off:** use the Mods tab, or set `Enabled = False` in `config\<plugin id>.cfg`.
-- **The log:** `HOI4ModLoader\LogOutput.log` holds what was done for you, summaries and errors; past 20 MB it rolls over to `LogOutput.old.log`. `[Debug] VerboseLog = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` adds every division FrontLine moves and every front AI Assist adjusts (DEBUG lines, tens of thousands in a long game).
-- **What do FrontLine and AI Assist do?** `[Debug] AiActionArrows = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` flashes an arrow on the map for a few seconds for each front line action they take (encirclements, breakouts, assaults, holes filled). Arrows show once the game has drawn one of its own (select a unit or open a map mode with arrows).
+- **The log:** `HOI4ModLoader\LogOutput.log` rolls over to `LogOutput.old.log` past 20 MB. `[Debug] VerboseLog = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` logs every FrontLine move and AI Assist front change (very long).
+- **What do FrontLine and AI Assist do?** `[Debug] AiActionArrows = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` flashes a map arrow for each front line action they take. Arrows show once the game has drawn one of its own (select a unit).
 
 ## Development
 See [docs/development.md](docs/development.md) for building and writing plugins.
