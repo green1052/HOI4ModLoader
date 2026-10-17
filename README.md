@@ -328,7 +328,7 @@ Single player only (it changes when the game state updates).
 
 ### Intelligence
 Single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game).
-- In the intelligence screen, drag an operative in the bottom bar onto another to move it to that place.
+- In the intelligence screen, drag an operative in the bottom bar to another place, as army cards are dragged: it follows the mouse and the others make room.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join.
