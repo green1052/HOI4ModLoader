@@ -32,8 +32,7 @@ public partial class FrontLine
         {
             foreach (var unit in front.Units)
                 if (Division.Location(unit) is var at && at != 0 && NextToEnemy(country, tag, at)) front.Line.Add(at);
-            // Before the war: the AI draws fronts only on borders it expects a war on (its target, the target's guarantors), so
-            // the border its divisions hold is the line: the fire brigade takes its posts behind it before the first attack.
+            // Before a war the AI draws fronts only on borders it expects a war on, so the border is the line: posts go up early.
             if (front.Line.Count == 0)
                 foreach (var unit in front.Units)
                     if (Division.Location(unit) is var at && at != 0 && Game.Neighbours(at).Any(id => Game.Province(id) is var q && q != 0
@@ -61,7 +60,7 @@ public partial class FrontLine
                 _crisis[front.Key] = hour;
     }
 
-    // ---- Pocket fronts: the game splits a pocket off a front with a share of its divisions, often far more than the pocket needs ----
+    // ---- Pocket fronts: the game splits off a front for a pocket, often with far more divisions than it needs ----
 
     private const int PocketShare = 2; // our divisions per enemy division in the pocket, 2 at least
 
@@ -88,7 +87,7 @@ public partial class FrontLine
             // The ones not in contact with the pocket leave first.
             foreach (var unit in front.Units.Where(u => Free(u, tag) && !Division.Walking(u) && Division.Location(u) != 0).OrderBy(u => NextToEnemy(country, tag, Division.Location(u))).Take(spare))
             {
-                // An AI army with only this front: off its order, the theatre distribution gives them to fronts that want them.
+                // An AI army with only this front: unassigned, the AI's theatre distribution sends them where needed.
                 if (!(main != null ? Commands.Assign(unit, Division.Group(unit), main.Key.Id, _force) : Commands.Unassign(unit, Division.Group(unit), _force))) continue;
                 _pending[unit] = _now + PendingMs;
                 moved++;
@@ -100,12 +99,12 @@ public partial class FrontLine
     private bool Crisis((nint, int) front) => _crisis.TryGetValue(front, out var hour) && Game.Hour - hour is >= 0 and < CrisisHours;
 
     /// <summary>
-    /// A front in a crisis gets spare fresh divisions of quiet fronts (no enemy across, or three times the divisions it faces)
-    /// in its most pressed line provinces; they go back to their own front a day after the crisis. Fresh divisions next to
-    /// the crisis pin idle enemy stacks with one attacker each. Plain moves within reach over our ground: no naval transfers.
+    /// A front in a crisis gets spare fresh divisions of quiet fronts (three times the divisions they face) on its most
+    /// pressed line provinces; they go back a day after the crisis. Fresh divisions near it pin idle enemy stacks. Plain
+    /// moves over our ground: no naval transfers.
     /// </summary>
-    // ponytail: the shuffled divisions stand unassigned on the crisis line rather than joining its battle plan; simpler, and
-    // their way home is the order they came from.
+    // ponytail: shuffled divisions stand unassigned on the crisis line instead of joining its battle plan; their way home is
+    // the order they came from.
     private void Shuffle(nint country, int tag, List<Front> fronts)
     {
         Unpin();
@@ -164,9 +163,8 @@ public partial class FrontLine
     }
 
     /// <summary>
-    /// Idle enemy stacks next to the crisis (within PinRadius of its line) that one division of ours can attack without being
-    /// hopelessly outmatched (forts counted) get one fresh attacker from a province where another of ours stays: locked in
-    /// combat, they can't be moved into the crisis.
+    /// Idle enemy stacks within PinRadius of the crisis line, small enough for one division (PinOdds, forts counted), get one
+    /// fresh attacker from a province where another of ours stays. Locked in combat, they can't move into the crisis.
     /// </summary>
     private void Pin(nint country, int tag, Front crisis)
     {

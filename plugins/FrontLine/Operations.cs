@@ -5,30 +5,25 @@ namespace FrontLine;
 /// <summary>Byte patterns for the operations (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static class OperationSignatures
 {
-    /// <summary>The map's support attack: +0x28 the division's CRef (CArmy+0x18), +0x30 the province id; it attacks from where it stands and doesn't move in.</summary>
+    /// <summary>The map's support attack: +0x28 the division's CRef (CArmy+0x18), +0x30 the province id. Attacks without moving in.</summary>
     [VTable] public const string SupportAttack = "CSupportAttackCommand";
 
     /// <summary>
-    /// The map's right-click on the province a division stands in: `mov ecx,48h; call malloc; ...; mov r8b,1; mov rdx,rsi;
-    /// mov rcx,rax; call CCancelMovementCommand ctor (mem[0x48], CArmy*, bool)`: stops its move or attack, support attacks too.
+    /// The map's right-click on a division's own province: `mov ecx,48h; call malloc; ...; mov r8b,1; mov rdx,rsi; mov rcx,rax;
+    /// call CCancelMovementCommand ctor(mem[0x48], CArmy*, bool)`. Stops its move or attack, support attacks too.
     /// </summary>
     [Signature] public const string CancelMovement = "B9 48 00 00 00 E8 ? ? ? ? 48 89 45 ? 48 85 C0 74 ? 41 B0 01 48 8B D6 48 8B C8 E8";
 }
 
 /// <summary>
-/// Player operations, from the selected divisions (an army card or a field marshal's card selects all of theirs):
-/// - Ctrl+Alt+B, blitz: the armored and motorized divisions break through the cheapest enemy sector and push province by
-///   province to a deep objective (victory points, a supply hub, many enemy divisions along the way); infantry holds the
-///   corridor behind them, one division per corridor province next to the enemy.
-/// - Ctrl+Alt+P, pincer: the selection splits in two wings (by army, or by position), each with a spearhead, both aiming at
-///   the same objective behind the enemy; once the ring closes the spearheads go back and the infantry holds the ring a week.
-/// While one runs, fresh divisions of the same armies support-attack idle enemy stacks next to the breakthrough and the
-/// corridor (one each), so they are locked in combat and can't be shifted into the gap; worn ones break off.
-/// It ends when the objective is taken, the corridor is cut or a defence of it is being lost, or the spearheads are worn
-/// out; the same key again (with any of its divisions selected, or nothing) cancels it. Divisions taken off their battle
-/// plan go back onto it (a fighting one once its battle is over). A loaded save forgets running operations: their divisions
-/// stay where they are, put back onto their battle plan by Restore when a front line feature is on (Manage), else left off
-/// it. Vanilla commands only (multiplayer works).
+/// Player operations with the selected divisions (an army or field marshal card selects all of theirs):
+/// - Ctrl+Alt+B, blitz: armor breaks through the cheapest enemy sector toward a deep objective; infantry holds the corridor.
+/// - Ctrl+Alt+P, pincer: two wings (by army, or by position) meet at one objective behind the enemy; once the ring closes,
+///   the spearheads go back and infantry holds the ring for a week.
+/// Meanwhile fresh divisions of the same armies support-attack idle enemy stacks next to the corridor, so they can't move.
+/// It ends when the objective is taken, the corridor is cut or being lost, or the spearheads are worn out; the same key
+/// again cancels it. Its divisions then go back onto their battle plan. A loaded save forgets running operations; Restore
+/// puts their divisions back only while a front line feature runs. Vanilla commands only (works in multiplayer).
 /// </summary>
 public unsafe partial class FrontLine
 {
@@ -72,15 +67,14 @@ public unsafe partial class FrontLine
     private bool BindOperations()
     {
         var keys = Config.Bind("Operations", "OperationKeys", true,
-            "Ctrl+Alt+B: blitz with the selected divisions (armor breaks through the weakest sector to a deep objective, infantry holds the corridor). "
-            + "Ctrl+Alt+P: pincer with two selected armies or an army group (two spearheads meet behind the enemy, infantry holds the ring). "
-            + "Meanwhile fresh divisions of those armies lock enemy stacks next to the breakthrough in combat. The same key again cancels.");
+            "Ctrl+Alt+B: blitz with the selected divisions. Ctrl+Alt+P: pincer with two selected armies or an army group. "
+            + "The same key again cancels.");
         _opDepth = Math.Clamp(Config.Bind("Operations", "OperationDepth", 8, "How deep (provinces) behind the enemy line an operation's objective may lie."), 2, 15);
-        _stopOrg = Math.Clamp(Config.Bind("Operations", "SpearheadOrganisation", 35, "Spearheads stop advancing below this organisation (%); the operation ends when all of a wing's are."), 5, 90);
+        _stopOrg = Math.Clamp(Config.Bind("Operations", "SpearheadOrganisation", 35, "Spearheads stop advancing below this organisation (%); the operation ends when a whole wing has stopped."), 5, 90);
         return keys;
     }
 
-    /// <summary>The operations' own game functions and timers (FrontLine.Load resolved the shared ones).</summary>
+    /// <summary>The operations' own patterns and timers (Load resolved the shared ones).</summary>
     private void LoadOperations()
     {
         _ = Sig.Find(Gui.AirWingsSelectedSig) + Sig.VTable(OperationSignatures.SupportAttack);
@@ -123,9 +117,8 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>
-    /// Each running operation on the map: an arrow per arm from its spearhead's latest gain (its start before any) through
-    /// the corridor to the objective, red for a blitz, orange for a pincer, gone when it ends. Needs the game's arrow manager,
-    /// caught once the game draws an arrow itself (a selected unit's move); before that only the log shows it.
+    /// Draws an arrow per arm from its latest gain (or start) through the corridor to the objective: red for a blitz, orange
+    /// for a pincer. Needs the game's arrow manager, caught once the game draws an arrow itself; until then only the log shows it.
     /// </summary>
     private void DrawOperations()
     {
@@ -223,7 +216,7 @@ public unsafe partial class FrontLine
     private static HashSet<nint> Armies(IEnumerable<nint> units) => units.Select(Division.Group).Where(g => g != 0).ToHashSet();
 
     /// <summary>
-    /// Two wings: two armies or more go whole to the nearer of the two farthest-apart divisions; one army's divisions each.
+    /// Two wings around the two farthest-apart divisions: whole armies go to the nearer one, or single divisions if only one army.
     /// </summary>
     // ponytail: hop distance over land from two seeds, no real geometry; an L-shaped front may pair the wrong flanks.
     private static (List<nint> A, List<nint> B) Wings(HashSet<nint> force)
@@ -266,15 +259,14 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>
-    /// Cheapest ways into enemy ground from where <paramref name="from"/> stand (Dijkstra, up to the depth setting): each
-    /// province costs 1 plus its divisions (twice), forts, harsh terrain and a river in front, as the AI's axis weighs a sector.
+    /// Cheapest ways into enemy ground from where <paramref name="from"/> stand (Dijkstra, up to OperationDepth): each province
+    /// costs 1 plus <see cref="Province.AttackWeight"/> (divisions, forts, terrain, river).
     /// </summary>
     private Dictionary<int, (int Cost, int Prev, int Depth)> Reach(nint country, int tag, IEnumerable<nint> from)
     {
         var best = new Dictionary<int, (int Cost, int Prev, int Depth)>();
         var queue = new PriorityQueue<(int Id, int Prev, int Depth), int>();
-        // The line may lie ahead of them (divisions in reserve behind it): over friendly ground first, a province a step, up to
-        // Op.Radius; the corridor starts at the first enemy province. Only those right next to the enemy found nothing from the rear.
+        // The line may lie ahead of them: walk friendly ground first, up to Op.Radius; the corridor starts at the first enemy province.
         var walked = new Dictionary<nint, int>();
         var steps = new Queue<nint>();
         foreach (var location in from.Select(Division.Location).Distinct())
@@ -313,8 +305,8 @@ public unsafe partial class FrontLine
     private static bool Enterable(nint from, nint to) => Province.Enterable(to) && Game.AdjacencyType(from, Game.Id(to)) != Province.Impassable;
 
     /// <summary>
-    /// What reaching <paramref name="objective"/> along <paramref name="path"/> is worth: what taking it is worth (Attack's
-    /// value: victory points, supply hub, port, airfields) and enemy divisions next to the path (flanked or cut off once ours).
+    /// What reaching <paramref name="objective"/> along <paramref name="path"/> is worth: its <see cref="Value"/> plus the enemy
+    /// divisions next to the path (flanked or cut off).
     /// </summary>
     private double Worth(nint country, int tag, IEnumerable<int> path, int objective)
     {
@@ -330,7 +322,7 @@ public unsafe partial class FrontLine
 
     // ---- Running operations, once per game hour ----
 
-    /// <summary>Gives back what ended operations left (Return: FrontLine's turns may not run), then runs each operation once per game hour.</summary>
+    /// <summary>Returns what ended operations left (Manage may not run), then steps each operation once per game hour.</summary>
     private void RunOperations()
     {
         if (_operations.Count == 0 && SideOf(Game.ControlledTag).Held.Count == 0) return;
@@ -422,9 +414,8 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>
-    /// Pinning: idle enemy stacks next to the sector and the corridor get a support attack from one fresh division of the
-    /// operation's armies standing next to them; a division being attacked can't be moved, so the enemy can't shift them
-    /// into the gap. A worn attacker breaks off and another takes over.
+    /// Pins idle enemy stacks next to the sector and corridor with a support attack from one fresh division of the
+    /// operation's armies; units under attack can't move into the gap. A worn attacker breaks off and another takes over.
     /// </summary>
     private void Lock(Operation op, nint country, int tag, HashSet<int> held)
     {
@@ -480,7 +471,7 @@ public unsafe partial class FrontLine
         Log.Info($"{op.Name} ended: {why}");
     }
 
-    /// <summary>Booked for the operation (FrontLine's bookkeeping: no other feature takes it); with <paramref name="offOrder"/> off its order first.</summary>
+    /// <summary>Books the unit for the operation, so no other feature takes it; with <paramref name="offOrder"/> off its order first.</summary>
     private void Enlist(Operation op, nint unit, int post, int target, bool offOrder)
     {
         var group = Division.Group(unit);
@@ -489,8 +480,8 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>
-    /// Leaves the operation, back onto the order it came from: now if it can take orders, else (a spearhead fighting) once it
-    /// can (Return), after FrontLine's view of the orders (_orders) caught up with our commands.
+    /// Leaves the operation and goes back onto its order: now if it can take orders, else (a spearhead fighting) later via
+    /// Return, once _orders has caught up with our commands.
     /// </summary>
     private void GiveBack(Operation op, nint unit, int tag)
     {
@@ -525,7 +516,7 @@ public unsafe partial class FrontLine
     private static bool SupportAttack(int tag, nint unit, int province)
     {
         var cmd = Commands.New(OperationSignatures.SupportAttack, Op.SupportAttackSize, tag, 0);
-        *(long*)(cmd + 0x28) = Division.Ref(unit); // the ctor's layout: unit CRef at +0x28 (over New's tag), province at +0x30
+        *(long*)(cmd + 0x28) = Division.Ref(unit); // unit CRef at +0x28 (over New's tag), province at +0x30
         *(long*)(cmd + 0x30) = province;
         return Commands.TryPost(cmd);
     }

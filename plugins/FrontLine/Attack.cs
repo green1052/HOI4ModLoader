@@ -7,15 +7,13 @@ public partial class FrontLine
     // ---- Attack: empty and surrounded enemy provinces next to the line, best targets first ----
 
     private const int MinValue = 15, MaxFrontChange = 2; // a target worth less than MinValue may lengthen the front this much at most
-    private const int SupplyShare = 25; // % of what the attacking province needs it must get, or a friendly neighbour of the target must have spare
+    private const int SupplyShare = 25; // % of its need the attacking province must get, or a friendly neighbour of the target have spare (Province.Starved)
 
     /// <summary>
-    /// Empty enemy provinces next to the line get one fresh division; surrounded enemy divisions at least as many as they are,
-    /// more behind forts (as vanilla's local attacks weigh them), or none. A province of ours always keeps one. Targets in
-    /// order: closing a pocket (and mopping one up), then value (victory points, supply hubs, airfields, ports), then
-    /// shortening the front; skipped: ones our supply can't follow and worthless ones that lengthen the front by more than two
-    /// provinces (unless they close a pocket). Then assaults (<see cref="Assault"/>). Nothing more goes where ours are still on
-    /// their way or fighting. Plain moves: front divisions go back to their front by themselves afterwards.
+    /// Empty enemy provinces next to the line get one fresh division; surrounded enemy divisions at least as many (more behind
+    /// forts). A province of ours always keeps one. Best first: closing a pocket, then value, then a shorter front. Skipped:
+    /// targets supply can't follow, and worthless ones that lengthen the front more than MaxFrontChange (unless they close a
+    /// pocket). Then <see cref="Assault"/>. Plain moves: front divisions return to their front by themselves.
     /// </summary>
     private void Attack(nint country, int tag)
     {
@@ -61,12 +59,10 @@ public partial class FrontLine
     }
 
     /// <summary>
-    /// An enemy province next to the line, or enemy divisions inside our ground (cut off, landed, broken through), whose
-    /// defenders the fresh divisions of our neighbouring provinces outgun _odds % (more behind forts, in mountains, cities,
-    /// marshes and jungles, across a river): they all attack it. Provinces on the line keep one; ones behind it may all go.
-    /// The player's divisions only on a battle plan that is running. Enemy divisions in a pocket already (or inside our ground)
-    /// are finished off first, by any of ours, as soon as they outgun them. Supply and front length filters as for empty
-    /// provinces; then the ones that cut off the most enemy divisions (a salient's neck), then the strongest odds.
+    /// Attacks an enemy province next to the line, or enemy divisions inside our ground, when our neighbouring fresh divisions
+    /// outgun the defenders by _odds % (more for forts, rough terrain, rivers). Line provinces keep one division. The player's
+    /// divisions join only on a running battle plan. Mop-up (encircled, or inside our ground) needs only even odds, any of ours
+    /// may join. Same supply and front length filters as <see cref="Attack"/>. Best first: most enemies cut off, a port, odds, value.
     /// </summary>
     private void Assault(nint country, int tag, int max)
     {
@@ -86,7 +82,7 @@ public partial class FrontLine
         {
             if (max == 0) break;
             if (plan.Units.Any(used.Contains)) continue; // promised to a better one this turn
-            if (plan.Units.GroupBy(Division.Location).Any(g => _at[g.Key].Count - g.Count() < Keep(country, tag, g.Key))) continue; // a better one left that province its last
+            if (plan.Units.GroupBy(Division.Location).Any(g => _at[g.Key].Count - g.Count() < Keep(country, tag, g.Key))) continue; // a better plan took that province's last
             used.UnionWith(plan.Units);
             Strike(plan.Units, plan.To, plan.Pocket > 0);
             max--;
@@ -137,7 +133,7 @@ public partial class FrontLine
         return power >= need ? new AssaultPlan(id, sent, pocket, power / (defence * hard), value, port) : null;
     }
 
-    /// <summary>Attack moves into <paramref name="to"/> (plain moves: front divisions go back to their front by themselves afterwards); nothing more goes there this turn.</summary>
+    /// <summary>Attack moves into <paramref name="to"/>; nothing more is sent there this turn.</summary>
     private void Strike(List<nint> units, int to, bool pocket)
     {
         foreach (var unit in units)
@@ -156,9 +152,8 @@ public partial class FrontLine
     private readonly Dictionary<nint, bool> _beachheads = []; // province -> in a landing without a port: per Attack call
 
     /// <summary>
-    /// From a beachhead (our ground around <paramref name="from"/> is cut off, up to BeachheadSize provinces, with no naval base:
-    /// supply only over the beach) the way to the nearest enemy port is worth the most: PortPullValue for the port, less with
-    /// each step to it through enemy ground (up to PortSearch). 0 elsewhere.
+    /// From a beachhead (our cut-off ground around <paramref name="from"/>, up to BeachheadSize provinces, no naval base) the
+    /// way to the nearest enemy port is worth PortPullValue, less per step through enemy ground (up to PortSearch). 0 elsewhere.
     /// </summary>
     private int PortPull(nint country, int tag, nint from, nint target)
     {
