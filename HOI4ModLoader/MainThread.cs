@@ -5,8 +5,8 @@ using Reloaded.Hooks.Definitions.X64;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Periodic callbacks on the game's main (UI) thread, which pumps window messages every frame. That's where the UI
-/// itself reads game state and sends commands, so plugins doing the same are safe there.
+/// Periodic callbacks on the game's main (UI) thread, hooked into its message pump. The UI reads game state and sends
+/// commands there, so plugins can too.
 /// </summary>
 public static class MainThread
 {
@@ -20,7 +20,7 @@ public static class MainThread
 
     /// <summary>
     /// Runs <paramref name="action"/> on the main thread at most every <paramref name="interval"/>, until the plugin that
-    /// registered it (in <see cref="Plugin.Load"/>) is reverted or reloaded.
+    /// registered it is reverted or reloaded.
     /// </summary>
     public static void Every(TimeSpan interval, Action action)
     {
@@ -35,14 +35,14 @@ public static class MainThread
     private static void Install()
     {
         var owner = Patches.Owner;
-        Patches.Owner = "HOI4ModLoader"; // shared by every plugin: don't revert it with whichever plugin asked first
+        Patches.Owner = "HOI4ModLoader"; // shared by all plugins, so not reverted with the first one
         try
         {
             var peek = NativeLibrary.GetExport(NativeLibrary.Load("user32.dll"), "PeekMessageW");
             _hook = Patches.Hook<PeekMessageFn>(peek, (msg, hwnd, min, max, remove) =>
             {
                 var result = _hook!.OriginalFunction(msg, hwnd, min, max, remove);
-                if (Environment.CurrentManagedThreadId == Id) Log.Guard("timers", Tick); // never PeekMessage twice: it removes a message
+                if (Environment.CurrentManagedThreadId == Id) Log.Guard("timers", Tick);
                 return result;
             });
         }
@@ -54,13 +54,13 @@ public static class MainThread
 
     private static void Tick()
     {
-        Log.Guard("game tracking", Game.Track); // before any timer: a loaded save resets the plugins' per-game state first
+        Log.Guard("game tracking", Game.Track); // first, so a loaded save resets per-game state before timers run
         var now = Environment.TickCount64;
-        var due = false; // PeekMessage runs several times a frame: most ticks have no timer due, and need no copy of the list
+        var due = false; // most ticks have nothing due: skip copying the list
         foreach (var timer in Timers)
             if (now >= timer.Next) { due = true; break; }
         if (!due) return;
-        foreach (var timer in Timers.ToArray()) // a timer may reload plugins, which removes and adds timers
+        foreach (var timer in Timers.ToArray()) // a timer may reload plugins, changing the list
         {
             if (now < timer.Next || !Timers.Contains(timer)) continue;
             timer.Next = now + timer.IntervalMs;
@@ -69,7 +69,7 @@ public static class MainThread
             catch (Exception e)
             {
                 if (timer.Failed) continue;
-                timer.Failed = true; // once: a timer runs several times a second
+                timer.Failed = true; // log once
                 Log.Error(e.ToString());
             }
             finally { Breadcrumb.Leave(crumb); }

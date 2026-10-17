@@ -1,10 +1,7 @@
-// The profiler's sampling (Profiler.cs starts it and writes the report). Every thread but the caller is sampled in turn,
-// a pass about every millisecond (slower with many threads: the report says how often): its instruction pointer, and its
-// call stack unwound through hoi4.exe and the system modules. Native, and called through a normal P/Invoke: while a
-// thread is suspended nothing here allocates, takes a lock (the thread may hold the heap's) or runs C# (the C# runtime
-// could wait for a thread this has suspended). The unwind lookup only runs on
-// addresses inside hoi4.exe and the system modules, whose static tables need no lock (for JIT code ntdll would search the
-// dynamic function tables under their lock, which the suspended thread may hold).
+// The profiler's sampling (Profiler.cs starts it and writes the report). Each other thread is sampled in turn, a pass
+// about every millisecond: its instruction pointer and its stack, unwound through hoi4.exe and the system modules.
+// While a thread is suspended, nothing here allocates, locks or runs C#, since the thread may hold that lock. Unwinding
+// stays in modules with static tables: JIT code would need ntdll's locked dynamic tables.
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdint.h>
@@ -52,21 +49,20 @@ static ThreadStats* Stats(DWORD id) {
     return &g_threads[MAX_THREADS - 1];
 }
 
-// One sample of a suspended thread: unwinds its stack from the given context (static .pdata only: frames outside hoi4.exe
-// and the system modules stop the walk, so no JIT callback runs while the thread is suspended).
+// One sample of a suspended thread. The walk stops at frames outside hoi4.exe and the system modules.
 static void Record(DWORD id, CONTEXT* ctx) {
     g_samples++;
     ThreadStats* stats = Stats(id);
     stats->samples++;
     uint64_t leaf = ctx->Rip;
     Add(&g_tables[0], leaf);
-    int waiting = In(leaf, g_ntdll, g_ntdllEnd); // a system call: a wait, a sleep or file I/O
+    int waiting = In(leaf, g_ntdll, g_ntdllEnd); // in a system call: wait, sleep or I/O
     if (waiting) stats->waiting++;
     uint64_t seen[MAX_FRAMES];
     int seenCount = 0, mainWaitDone = 0;
     for (int depth = 0; depth < MAX_FRAMES && ctx->Rip; depth++) {
         if (!In(ctx->Rip, g_exe, g_exeEnd) && !In(ctx->Rip, g_ntdll, g_ntdllEnd) && !In(ctx->Rip, g_kernel32, g_kernel32End)
-            && !In(ctx->Rip, g_kernelbase, g_kernelbaseEnd)) break; // JIT code, a hook stub, another module: stop
+            && !In(ctx->Rip, g_kernelbase, g_kernelbaseEnd)) break; // JIT code, hook stub or other module
         uint64_t image = 0;
         PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry(ctx->Rip, &image, NULL);
         if (In(ctx->Rip, g_exe, g_exeEnd) && fe) {
@@ -78,8 +74,8 @@ static void Record(DWORD id, CONTEXT* ctx) {
                 if (!dup) { seen[seenCount++] = begin; Add(&g_tables[1], begin); } // inclusive: once per stack
             }
         }
-        if (!fe) { // a leaf function (system call stubs): its return address is on top of the stack
-            if (!In(ctx->Rip, g_ntdll, g_ntdllEnd) && !In(ctx->Rip, g_exe, g_exeEnd)) break; // JIT code, a hook stub: stop
+        if (!fe) { // a leaf function: its return address is on top of the stack
+            if (!In(ctx->Rip, g_ntdll, g_ntdllEnd) && !In(ctx->Rip, g_exe, g_exeEnd)) break;
             ctx->Rip = *(uint64_t*)ctx->Rsp;
             ctx->Rsp += 8;
             continue;
@@ -90,7 +86,7 @@ static void Record(DWORD id, CONTEXT* ctx) {
     }
 }
 
-// A bad stack (a thread mid-switch) must not take the game down: the sample is dropped.
+// A bad stack drops the sample instead of crashing the game.
 static void SafeRecord(DWORD id, CONTEXT* ctx) {
     __try { Record(id, ctx); }
     __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -110,7 +106,7 @@ void hm_profile(DWORD ms, DWORD mainThread) {
     int count = 0;
     DWORD self = GetCurrentThreadId(), start = GetTickCount(), listed = start - THREADS_EVERY_MS;
     while (GetTickCount() - start < ms) {
-        if (GetTickCount() - listed >= THREADS_EVERY_MS) { // threads come and go; nothing is suspended here
+        if (GetTickCount() - listed >= THREADS_EVERY_MS) { // refresh the thread list; nothing is suspended here
             listed = GetTickCount();
             HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             THREADENTRY32 te = {sizeof te};
@@ -125,7 +121,7 @@ void hm_profile(DWORD ms, DWORD mainThread) {
             CloseHandle(snap);
         }
         for (int i = 0; i < count; i++) {
-            if (SuspendThread(threads[i]) == (DWORD)-1) { // exited: its slot goes, so a new thread that reuses the id is opened
+            if (SuspendThread(threads[i]) == (DWORD)-1) { // exited: drop it, so a thread reusing the id is reopened
                 CloseHandle(threads[i]);
                 threads[i] = threads[--count], ids[i] = ids[count];
                 i--;

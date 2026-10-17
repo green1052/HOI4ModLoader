@@ -4,9 +4,8 @@ using System.Text.RegularExpressions;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Text in the game's language. Every assembly (the loader, each plugin) carries its own translations as embedded
-/// localisation\&lt;language&gt;.yml files in the game's format (`l_english:` then ` key:0 "text"` lines); the loader reads them,
-/// so they work without any HOI4 mod. A key missing in the game's language falls back to English, then to the given text.
+/// Text in the game's language. Each assembly embeds localisation\&lt;language&gt;.yml files in the game's format, read
+/// here without any HOI4 mod. A missing key falls back to English, then to the given text.
 /// </summary>
 public static partial class Loc
 {
@@ -22,7 +21,7 @@ public static partial class Loc
     /// <summary><see cref="Get"/> with {0}, {1}... filled in (string.Format).</summary>
     public static string Format(string key, string fallback, params object[] args) => string.Format(Get(key, fallback), args);
 
-    /// <summary>Reads the translations of <paramref name="assemblies"/> (the loader's included by the caller), replacing the last set.</summary>
+    /// <summary>Reads the translations of <paramref name="assemblies"/>, replacing the last set.</summary>
     internal static void Load(IEnumerable<Assembly> assemblies)
     {
         Dictionary<string, string> game = [], english = [];
@@ -52,7 +51,7 @@ public static partial class Loc
             var match = Setting().Match(File.ReadAllText(settings));
             return match.Success ? match.Groups[1].Value : "english";
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return "english"; } // a type initializer must not throw: no plugin would load
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return "english"; } // a type initializer must not throw
     }
 
     [GeneratedRegex("""^\s*([^\s:#]+):\d*\s*"(.*)"\s*$""")]

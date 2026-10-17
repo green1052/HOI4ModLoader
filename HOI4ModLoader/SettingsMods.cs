@@ -4,28 +4,26 @@ using System.Text;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
-// The ingame settings window's 4 tabs become 5 (narrower) and the Mods page goes in after its Back button.
+// The settings window gets a fifth tab, and the Mods page goes in after its Back button.
 [assembly: HOI4ModLoader.GuiPatch("interface/settings.gui", "gui/settings_mods.gui",
     Replace = @"(?s)(name = ""menu_settings_ingame"".*?)buttonType = \{\s*name = ""settings_tab_1"".*?name = ""settings_tab_4"".*?\n\t\t\t\}(.*?shortcut = ""ESCAPE""\s*\})")]
 
 namespace HOI4ModLoader;
 
 /// <summary>
-/// A "Mods" tab in the game's settings window: a checkbox per plugin to switch it on or off (hover for what it does), and
-/// an arrow to its settings (its config entries: checkboxes for true/false, arrows for numbers, ▶ to a list to pick from
-/// for text with choices; pages of 8, with arrows by the title when there are more). Changes are written to the plugin's
-/// config and every plugin reloads. The tab comes from the GuiPatch above (built from the installed game's
-/// interface\settings.gui at startup); without it nothing changes.
+/// A "Mods" tab in the game's settings window: a checkbox per plugin to turn it on or off, and an arrow to its settings
+/// (checkboxes, number arrows, or ▶ to a list of choices; 8 per page). Changes are saved to the plugin's config and all
+/// plugins reload. Needs the GuiPatch above.
 /// </summary>
 internal static unsafe class SettingsMods
 {
-    /// <summary>CSettingsScreen::Init(screen, window): stores the window and binds every button and checkbox (once per menu).</summary>
+    /// <summary>CSettingsScreen::Init(screen, window): stores the window and binds its buttons and checkboxes, once per menu.</summary>
     [Signature] public const string InitSig = "48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 4C 89 70 20 55 48 8D 68 A1 48 81 EC 90 00 00 00 0F 29 70 E8 4C 8B D2 48 8B F1 48 89 91 98 5E 00 00";
 
-    /// <summary>CSettingsScreen::UpdateTabButtons(screen): marks the tab button of the shown container selected, the others not.</summary>
+    /// <summary>CSettingsScreen::UpdateTabButtons(screen): selects the shown tab's button.</summary>
     [Signature] public const string UpdateTabsSig = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B F1 48 8D 1D ? ? ? ? 48 8D 2D ? ? ? ? 66 66 66 0F 1F 84 00 00 00 00 00 48 8B 8E 98 5E 00 00";
 
-    /// <summary>CSettingsScreen::OnOpen(screen): shows the window and re-shows the shown tab, if it is one of the four vanilla ones.</summary>
+    /// <summary>CSettingsScreen::OnOpen(screen): shows the window and the shown tab, if it is a vanilla one.</summary>
     [Signature] public const string OpenSig = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 48 8B EC 48 83 EC 40 48 8B F1 48 8B 89 98 5E 00 00 48 83 C1 30 48 8B 01 FF 50 78";
 
     /// <summary>CCheckBox::UpdateSprite(checkbox): shows the frame of its state.</summary>
@@ -58,7 +56,7 @@ internal static unsafe class SettingsMods
     private static readonly Logger Log = new("Settings");
     private static bool _reportedMissing, _tooMany;
 
-    /// <summary>The widgets of the last built Mods page (the settings screen is built once per menu).</summary>
+    /// <summary>Widgets of the last built Mods page.</summary>
     private static nint _screen, _page, _list, _settings, _tab, _title, _listTitle, _prev, _next, _pageText;
     private static readonly nint[] PluginBoxes = new nint[PluginRows], PluginTitles = new nint[PluginRows], PluginArrows = new nint[PluginRows];
     private static readonly nint[] Rows = new nint[SettingRows];
@@ -68,13 +66,13 @@ internal static unsafe class SettingsMods
     private static List<(string Section, string Key, string Value, string Description)> _entries = [];
     private static int _first; // the entry in the first row (pages of SettingRows)
 
-    /// <summary>A text setting whose choices the rows list instead (its list button), the one ticked; the first choice shown.</summary>
+    /// <summary>The text setting whose choices the rows show, if any; <c>_pickFirst</c> is the first choice shown.</summary>
     private static (string Section, string Key, string Description, IReadOnlyList<string> Choices)? _pick;
     private static int _pickFirst;
 
     internal static void Install()
     {
-        // Everything resolved before the first hook: a broken signature leaves no half-installed tab (the loader's hooks stay).
+        // Resolve everything before hooking, so a broken signature leaves no half-installed tab.
         _checkBoxSprite = (delegate* unmanaged<nint, void>)Sig.Find(CheckBoxSpriteSig);
         _ = Sig.VTable(CheckBoxGlue) + Sig.VTable(ButtonGlue) + Sig.VTable(MemberCall);
         var (init, open, updateTabs) = (Sig.Find(InitSig), Sig.Find(OpenSig), Sig.Find(UpdateTabsSig));
@@ -88,13 +86,13 @@ internal static unsafe class SettingsMods
         _open = Patches.Hook<OpenFn>(open, screen =>
         {
             var result = _open!.OriginalFunction(screen);
-            if (screen == _screen && _page != 0 && *(nint*)(screen + ShownTab) == _page) Guard(ShowPage); // reopened on the Mods tab
+            if (screen == _screen && _page != 0 && *(nint*)(screen + ShownTab) == _page) Guard(ShowPage); // reopened on our tab
             return result;
         });
         _updateTabs = Patches.Hook<TabsFn>(updateTabs, screen =>
         {
             var result = _updateTabs!.OriginalFunction(screen);
-            if (screen == _screen && _tab != 0) // the vanilla table knows 4 tabs: ours is selected when its page is shown
+            if (screen == _screen && _tab != 0) // vanilla only knows its 4 tabs
                 Guard(() => ((delegate* unmanaged<nint, int, void>)(*(nint**)_tab)[SetFrameSlot])(_tab, *(nint*)(screen + ShownTab) == _page ? 1 : 2));
             return result;
         });
@@ -161,7 +159,7 @@ internal static unsafe class SettingsMods
         var shown = *(nint*)(_screen + ShownTab);
         if (shown != 0 && shown != _page) Visible(shown, false);
         Visible(_page, true);
-        *(nint*)(_screen + ShownTab) = _page; // a vanilla tab's click hides it again
+        *(nint*)(_screen + ShownTab) = _page; // so a vanilla tab's click hides it
         ShowList();
         _updateTabs!.OriginalFunction(_screen);
         ((delegate* unmanaged<nint, int, void>)(*(nint**)_tab)[SetFrameSlot])(_tab, 1);
@@ -191,7 +189,7 @@ internal static unsafe class SettingsMods
         }
         if (plugins.Count > PluginRows && !_tooMany)
         {
-            _tooMany = true; // once: the list is shown on every visit
+            _tooMany = true; // log once
             Log.Error($"{plugins.Count} plugins, but the Mods tab has {PluginRows} rows");
         }
     }
@@ -203,7 +201,7 @@ internal static unsafe class SettingsMods
         if (row >= plugins.Count) return;
         var on = (*(int*)(PluginBoxes[row] + CheckState) & 1) != 0;
         var id = plugins[(int)row].Id;
-        if (Loader.IsEnabled(id) == on) return; // called once per observer slot of a click
+        if (Loader.IsEnabled(id) == on) return; // called once per observer slot
         Loader.SetEnabled(id, on);
         Log.Info($"{id} {(on ? "enabled" : "disabled")}: reloading plugins");
         Loader.RequestReload();
@@ -218,7 +216,7 @@ internal static unsafe class SettingsMods
         text.Append("\n\n").Append(
             Loader.IsLoaded(plugin.Id) ? Loc.Get("HOIMOD_STATUS_RUNNING", "Running.") :
             !Loader.IsEnabled(plugin.Id) ? Loc.Get("HOIMOD_STATUS_OFF", "Off.") :
-            plugin.AffectsGameState && Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_OFF_MP", "Enabled: it changes game rules, so it rests in multiplayer and starts again in single player.") :
+            plugin.AffectsGameState && Loader.Multiplayer ? Loc.Get("HOIMOD_STATUS_OFF_MP", "On, but paused in multiplayer because it changes game rules.") :
             Loc.Get("HOIMOD_STATUS_FAILED", "Failed to load: see HOI4ModLoader/LogOutput.log."));
         if (plugin.AffectsGameState && !Loader.Multiplayer) text.Append(' ').Append(Loc.Get("HOIMOD_SP_ONLY", "Single player only: it changes game rules."));
         return text.ToString();
@@ -226,11 +224,11 @@ internal static unsafe class SettingsMods
 
     // ---- one plugin's settings ----
 
-    /// <summary>A setting's name, value and what it does (its translation, else the config file's comment).</summary>
+    /// <summary>A setting's name, value and description (translated, else the config comment).</summary>
     private static string SettingTooltip((string Section, string Key, string Value, string Description) entry) =>
         $"{Loc.Get($"{_plugin}.{entry.Key}", entry.Key)} = {entry.Value}\n{Loc.Get($"{_plugin}.{entry.Key}.desc", entry.Description)}";
 
-    /// <summary>A plugin's editable config entries: everything but [General] (Enabled is the list's checkbox).</summary>
+    /// <summary>A plugin's editable config entries: all but [General].</summary>
     private static List<(string Section, string Key, string Value, string Description)> Settings(string id) =>
         [.. Loader.Config(id).Entries().Where(e => e.Section != "General")];
 
@@ -251,7 +249,7 @@ internal static unsafe class SettingsMods
     private static void OnBack(nint unused) => Guard(() =>
     {
         if (_pick == null) ShowList();
-        else ShowSettings(); // from a setting's choices back to the settings
+        else ShowSettings(); // from a choice list
     });
 
     [UnmanagedCallersOnly]
@@ -296,7 +294,7 @@ internal static unsafe class SettingsMods
             Shown(Gui.Find(container, ButtonSlot, "hoimod_setting_increase"), stepped || listed); // listed: opens the choices
             var shownValue = Gui.FindTextBox(container, "hoimod_setting_value");
             Shown(shownValue, !isBool);
-            if (!isBool) Gui.SetText(shownValue, Display(value)); // the tooltip has it whole
+            if (!isBool) Gui.SetText(shownValue, Display(value)); // the tooltip shows it whole
         }
     }
 
@@ -313,8 +311,7 @@ internal static unsafe class SettingsMods
     private static string Display(string value) => value == "" ? Loc.Get("HOIMOD_SETTING_NONE", "(none)") : Gui.Literal(Fit(value));
 
     /// <summary>
-    /// A text setting with choices (its ▶): the choices in the rows, a page at a time, starting at the current one's page.
-    /// False: the row's setting has none.
+    /// Shows the row's choices, starting at the current value's page. False if the setting has none.
     /// </summary>
     private static bool OpenChoices(nint row)
     {
@@ -327,7 +324,7 @@ internal static unsafe class SettingsMods
         return true;
     }
 
-    /// <summary>The picked setting's choices: one a row, the current one ticked; ticking another sets it.</summary>
+    /// <summary>The picked setting's choices, one per row, the current one ticked.</summary>
     private static void ShowChoices()
     {
         var (section, key, _, choices) = _pick!.Value;
@@ -376,7 +373,7 @@ internal static unsafe class SettingsMods
         }
     }
 
-    /// <summary>A value cut to fit its box (about 15 Latin letters; a Hangul or CJK one counts double).</summary>
+    /// <summary>A value cut to fit its box: about 15 Latin letters, CJK counting double.</summary>
     internal static string Fit(string value)
     {
         var width = 0;
@@ -391,7 +388,7 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnSettingToggle(nint row) => Guard(() =>
     {
-        if (_pick is { } pick) // a choice ticked: it is the setting's value now (ShowSettings, and so the later calls of this click, see the settings again)
+        if (_pick is { } pick) // a choice ticked: save it (Save shows the settings again)
         {
             if (_pickFirst + row < pick.Choices.Count) Save(pick.Section, pick.Key, pick.Choices[_pickFirst + (int)row], pick.Description);
             return;
@@ -399,7 +396,7 @@ internal static unsafe class SettingsMods
         if (_plugin == null || _first + row >= _entries.Count) return;
         var (section, key, value, description) = _entries[_first + (int)row];
         var on = (*(int*)(Gui.Find(Rows[row], CheckBoxSlot, "hoimod_setting_check") + CheckState) & 1) != 0;
-        if (!bool.TryParse(value, out var was) || was == on) return; // called once per observer slot of a click
+        if (!bool.TryParse(value, out var was) || was == on) return; // called once per observer slot
         Save(section, key, on ? "True" : "False", description);
     });
 
@@ -442,7 +439,7 @@ internal static unsafe class SettingsMods
     {
         var glue = Allocator.AllocZeroed(8 + 20 * 64);
         *(nint*)glue = Sig.VTable(ButtonGlue);
-        *(nint*)(glue + 8) = Sig.VTable(MemberCall); // slot 0 (click): an inline std::function calling handler(cookie)
+        *(nint*)(glue + 8) = Sig.VTable(MemberCall); // slot 0 (click): std::function calling handler(cookie)
         *(nint*)(glue + 16) = (nint)handler;
         *(nint*)(glue + 24) = cookie;
         *(nint*)(glue + 64) = glue + 8;

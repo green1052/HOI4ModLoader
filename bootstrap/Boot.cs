@@ -4,15 +4,14 @@ using System.Text;
 namespace HOI4ModLoader.Bootstrap;
 
 /// <summary>
-/// version.dll, the proxy the game loads from its folder (like BepInEx's Doorstop), compiled ahead of time (Native AOT): no
-/// .NET install is needed to run it. native.c forwards the real version.dll's exports and hooks hoi4.exe's entry point,
-/// which calls <see cref="Start"/> before any game code runs: the profiler, the start-up prefetch and the crash log first,
-/// then the installed .NET 10 runtime boots through hostfxr and HOI4ModLoader.Loader.Init (core\HOI4ModLoader.dll) runs.
+/// version.dll, the proxy the game loads from its folder (like BepInEx's Doorstop), built with Native AOT. native.c
+/// forwards the real version.dll's exports and calls <see cref="Start"/> at hoi4.exe's entry point. It starts the profiler,
+/// prefetch and crash log, then boots .NET 10 through hostfxr and runs HOI4ModLoader.Loader.Init.
 /// </summary>
 internal static unsafe class Boot
 {
     private const int LoadAssemblyAndGetFunctionPointer = 5; // hostfxr_delegate_type.hdt_load_assembly_and_get_function_pointer
-    private static readonly StringBuilder HostError = new(); // what hostfxr reported (it writes to stderr, which the game doesn't have)
+    private static readonly StringBuilder HostError = new(); // hostfxr errors (the game has no stderr)
 
     [StructLayout(LayoutKind.Sequential)]
     private struct InitializeParameters // hostfxr_initialize_parameters
@@ -29,15 +28,15 @@ internal static unsafe class Boot
         try
         {
             var mods = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath)!, "HOI4ModLoader");
-            Optional(() => Profiler.Start(mods)); // before anything else, so it sees the whole start-up
-            Optional(() => Prefetch.Start(mods)); // the game's files into the file cache while .NET and the game start
+            Optional(() => Profiler.Start(mods)); // first, to see the whole start-up
+            Optional(() => Prefetch.Start(mods));
             Optional(() => OpenCrashLog(mods));
             return StartDotnet(Path.Combine(mods, "core"));
         }
         catch (Exception e) { return Fail($"HOI4ModLoader failed to start: {e.Message}"); } // never into native code
     }
 
-    /// <summary>A diagnostic or speed-up that fails doesn't keep the mods off.</summary>
+    /// <summary>Runs an optional part; its failure doesn't stop the mods.</summary>
     private static void Optional(Action start)
     {
         try { start(); }
@@ -46,7 +45,7 @@ internal static unsafe class Boot
 
     private static nint StartDotnet(string core)
     {
-        // The .NET 10 Runtime (x64) the player installed, where its installer puts it.
+        // The installed .NET 10 Runtime (x64), at its default location.
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet");
         var fxrPath = FindHostFxr(root);
         if (fxrPath == null || !NativeLibrary.TryLoad(fxrPath, out var fxr))
@@ -98,8 +97,8 @@ internal static unsafe class Boot
     private static void OnHostError(char* message) => HostError.Append(new string(message)).Append('\n');
 
     /// <summary>
-    /// HOI4ModLoader\crash.log, kept across starts (a crash must survive the restart) and deleted once it passes 1 MB.
-    /// native.c's fault handler writes to it, and .NET's fatal errors with their managed stack go there as stderr.
+    /// Opens HOI4ModLoader\crash.log, kept across starts and deleted past 1 MB. native.c's fault handler writes to it, and
+    /// it is stderr for .NET's fatal errors.
     /// </summary>
     private static void OpenCrashLog(string mods)
     {
@@ -108,7 +107,7 @@ internal static unsafe class Boot
         {
             if (new FileInfo(path) is { Exists: true, Length: > 1 << 20 }) File.Delete(path);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // kept a while longer
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         nint file;
         fixed (char* name = path)
             file = CreateFileW(name, FileAppendData, 7 /* share read, write, delete */, 0, 4 /* OPEN_ALWAYS */, 0x80 /* normal */, 0);

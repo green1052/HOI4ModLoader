@@ -1,5 +1,5 @@
-// The prefetch's file recorder (Prefetch.cs does the rest): hoi4.exe's import of CreateFileW goes through here, and the
-// files it opens for reading are appended to a list. Native: it runs on whatever game thread opens a file.
+// The prefetch's file recorder (Prefetch.cs does the rest): hooks hoi4.exe's CreateFileW import and lists the files
+// opened for reading. Native, since it runs on game threads.
 #include <windows.h>
 #include <string.h>
 
@@ -15,7 +15,7 @@ static size_t g_length, g_capacity; // in wchar_t
 static HANDLE WINAPI RecordingCreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disposition, DWORD flags, HANDLE templ) {
     HANDLE h = g_createFile(name, access, share, sa, disposition, flags, templ);
     if (h == INVALID_HANDLE_VALUE || !name || !g_recording || !(access & GENERIC_READ) || disposition != OPEN_EXISTING
-        || (flags & FILE_FLAG_BACKUP_SEMANTICS)) return h; // a file read, not a directory or a new file
+        || (flags & FILE_FLAG_BACKUP_SEMANTICS)) return h; // only existing files opened for reading
     size_t n = wcslen(name) + 1;
     AcquireSRWLockExclusive(&g_lock);
     if (g_recording && g_length + n > g_capacity && (g_capacity + n) * 2 * sizeof(wchar_t) <= RECORD_CAP) {
@@ -53,7 +53,7 @@ int hm_record_start(void) {
     return 0;
 }
 
-// Stops recording and hands the list over (the caller frees it with hm_record_free); the hook stays, passing calls through.
+// Stops recording and returns the list (free it with hm_record_free). The hook stays, passing calls through.
 wchar_t* hm_record_stop(size_t* length) {
     AcquireSRWLockExclusive(&g_lock);
     g_recording = 0;

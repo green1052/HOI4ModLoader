@@ -4,26 +4,24 @@ namespace HOI4ModLoader;
 [AttributeUsage(AttributeTargets.Class)]
 public sealed class PluginAttribute(string id, string name, string version) : Attribute
 {
-    /// <summary>Unique id, e.g. "com.example.myplugin": its config is config\&lt;Id&gt;.cfg and its patches are reverted by it.</summary>
+    /// <summary>Unique id, e.g. "com.example.myplugin". Names its config, config\&lt;Id&gt;.cfg.</summary>
     public string Id { get; } = id;
-    /// <summary>English name; other languages from "&lt;id&gt;.name" in the plugin's localisation, its description from "&lt;id&gt;.desc".</summary>
+    /// <summary>English name. Localisation keys: "&lt;id&gt;.name" for the name, "&lt;id&gt;.desc" for the description.</summary>
     public string Name { get; } = name;
 
     /// <summary>The plugin's version, shown in the log, the Mods tab and the main menu tooltip.</summary>
     public string Version { get; } = version;
 
     /// <summary>
-    /// Game version the plugin was reverse engineered against, matched as a prefix of launcher-settings.json's rawVersion
-    /// (e.g. "1.19.3"). Struct offsets are only known good for it: a signature can still match after an update while a field
-    /// moved. On mismatch the plugin is skipped unless its config sets IgnoreGameVersion.
+    /// Game version the plugin's offsets are for, a prefix of launcher-settings.json's rawVersion (e.g. "1.19.3"). On a
+    /// mismatch the plugin is skipped unless its config sets IgnoreGameVersion.
     /// </summary>
     public string? GameVersion { get; init; }
 
     /// <summary>
-    /// The plugin changes game rules (simulation results), not just what one player sees or clicks. Multiplayer runs every
-    /// player's simulation in lockstep, so it would desync anyone without the plugin: it is off in multiplayer and works in
-    /// single player only. Everything else (UI, sending the player's own commands) works in multiplayer too. A plugin that
-    /// has a multiplayer-safe way of doing its job leaves this off and picks its behaviour by <see cref="Plugin.Multiplayer"/>.
+    /// The plugin changes game rules, not just UI or the player's own commands. It would desync lockstep multiplayer, so
+    /// it runs in single player only. A plugin with a multiplayer-safe mode leaves this off and checks
+    /// <see cref="Plugin.Multiplayer"/> instead.
     /// </summary>
     public bool AffectsGameState { get; init; }
 }
@@ -36,7 +34,7 @@ public sealed class DependencyAttribute(string id) : Attribute
     public string Id { get; } = id;
 }
 
-/// <summary>Base class for plugins. Every subclass in HOI4ModLoader\plugins\*.dll is loaded before the game's entry point, and anew on hot reload.</summary>
+/// <summary>Base class for plugins. Subclasses in HOI4ModLoader\plugins\*.dll load before the game's entry point and again on hot reload.</summary>
 public abstract class Plugin
 {
     /// <summary>This plugin's [Plugin] attribute.</summary>
@@ -49,8 +47,8 @@ public abstract class Plugin
     public Logger Log { get; internal set; } = null!;
 
     /// <summary>
-    /// Whether this load is for a multiplayer game. Every plugin reloads when that changes, so <see cref="Load"/> can pick
-    /// between changing game rules (single player) and sending only vanilla commands (multiplayer).
+    /// Whether this load is for multiplayer. Plugins reload when it changes, so <see cref="Load"/> can choose between
+    /// changing game rules and sending only vanilla commands.
     /// </summary>
     public static bool Multiplayer => Loader.Multiplayer;
 

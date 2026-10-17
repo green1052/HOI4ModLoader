@@ -3,8 +3,7 @@ using System.Runtime.InteropServices;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Writes to HOI4ModLoader\LogOutput.log (truncated every launch). Past MaxBytes it rolls over to LogOutput.old.log: a long
-/// game wrote 40 MB, most of it the AI plugins' per-division moves (now DEBUG lines).
+/// Writes to HOI4ModLoader\LogOutput.log, cleared every launch. Past MaxBytes it rolls over to LogOutput.old.log.
 /// </summary>
 public sealed class Logger(string source)
 {
@@ -15,16 +14,16 @@ public sealed class Logger(string source)
     /// <summary>[Debug] VerboseLog: <see cref="Debug"/> lines are written too.</summary>
     public static bool Verbose { get; internal set; }
     private static readonly Lock Gate = new();
-    private static StreamWriter? _writer; // kept open: opening the file per line cost every logged AI move a file open and close
+    private static StreamWriter? _writer; // kept open: AI plugins log many lines
 
     private readonly HashSet<string> _failed = [];
 
-    /// <summary>Writes an INFO line: what happened, for reading back what a plugin did.</summary>
+    /// <summary>Writes an INFO line: what a plugin did.</summary>
     public void Info(string message) => Write("INFO ", message);
 
     /// <summary>
-    /// Writes a DEBUG line, only with [Debug] VerboseLog on: what a plugin does many times a game day (each division moved,
-    /// each front's numbers), for tracing its decisions rather than reading back what it did.
+    /// Writes a DEBUG line, only with [Debug] VerboseLog on: frequent detail (each division moved, each front's numbers)
+    /// for tracing decisions.
     /// </summary>
     public void Debug(string message)
     {
@@ -35,8 +34,8 @@ public sealed class Logger(string source)
     public void Error(string message) => Write("ERROR", message);
 
     /// <summary>
-    /// Runs <paramref name="action"/>, logging its first exception (per <paramref name="what"/>) instead of throwing: for
-    /// code after a hook's original (the hook guard would run the original again), timers and UI callbacks.
+    /// Runs <paramref name="action"/>, logging its first exception per <paramref name="what"/> instead of throwing. For code
+    /// after a hook's original (the hook guard would run the original again), timers and UI callbacks.
     /// </summary>
     public void Guard(string what, Action action)
     {
@@ -44,7 +43,7 @@ public sealed class Logger(string source)
         catch (Exception e)
         {
             bool first;
-            lock (_failed) first = _failed.Add(what); // hooks on AI threads guard too
+            lock (_failed) first = _failed.Add(what); // AI threads guard too
             if (first) Error($"{what}: {e}");
         }
     }
@@ -59,13 +58,13 @@ public sealed class Logger(string source)
                 {
                     _writer.Dispose();
                     _writer = null;
-                    File.Move(Path, OldPath, true); // a viewer holding it open without sharing: the next line tries again
+                    File.Move(Path, OldPath, true); // if locked, the next line tries again
                 }
                 _writer ??= new StreamWriter(new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { AutoFlush = true };
                 _writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {level} [{source}] {message}");
             }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // a locked or read-only log must not take the game down
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // a locked log must not crash the game
     }
 
     internal static void Reset()
@@ -77,7 +76,7 @@ public sealed class Logger(string source)
                 _writer?.Dispose();
                 _writer = null;
                 File.WriteAllText(Path, "");
-                File.Delete(OldPath); // the last launch's
+                File.Delete(OldPath);
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
@@ -85,10 +84,9 @@ public sealed class Logger(string source)
 }
 
 /// <summary>
-/// What loader or plugin code the current thread is in, kept natively (version.dll), where its crash handler reads it: a
-/// native fault on the thread then names the hook or timer in HOI4ModLoader\crash.log. <see cref="Patches.Hook"/> and
-/// <see cref="MainThread.Every"/> set it themselves; wrap any other code a game thread enters (an UnmanagedCallersOnly
-/// thunk called from a <see cref="Patches.Asm"/> hook) in <see cref="Enter"/> / <see cref="Leave"/>.
+/// Which loader or plugin code the current thread is in, kept in version.dll so its crash handler can name the hook or
+/// timer in HOI4ModLoader\crash.log. <see cref="Patches.Hook"/> and <see cref="MainThread.Every"/> set it; wrap other code
+/// a game thread enters (e.g. a thunk called from a <see cref="Patches.Asm"/> hook) in <see cref="Enter"/> / <see cref="Leave"/>.
 /// </summary>
 public static unsafe class Breadcrumb
 {
@@ -97,10 +95,10 @@ public static unsafe class Breadcrumb
     private static readonly nint Exe = NativeLibrary.GetMainProgramHandle();
     private static readonly int ExeSize = *(int*)(Exe + *(int*)(Exe + 0x3C) + 0x50); // IMAGE_NT_HEADERS64.OptionalHeader.SizeOfImage
 
-    /// <summary>A label for <see cref="Enter"/>: a native copy, never freed (a thread may still be inside).</summary>
+    /// <summary>A label for <see cref="Enter"/>: a native copy, never freed.</summary>
     public static nint Label(string text) => Marshal.StringToHGlobalAnsi(text);
 
-    /// <summary>"hoi4.exe+0x1A2B3C" (as the crash log and IDA name it), else the absolute address.</summary>
+    /// <summary>"hoi4.exe+0x1A2B3C" for an address in the exe, else the absolute address.</summary>
     public static string Where(nint at) => at >= Exe && at - Exe < ExeSize ? $"hoi4.exe+0x{at - Exe:X}" : $"0x{at:X}";
 
     /// <summary>Marks this thread as in <paramref name="label"/>; returns what to pass to <see cref="Leave"/> (in a finally).</summary>
@@ -114,5 +112,5 @@ public static unsafe class Breadcrumb
 
     private static nint Export(string name) =>
         NativeLibrary.TryLoad(Path.Combine(Loader.GameDir, "version.dll"), out var version)
-        && NativeLibrary.TryGetExport(version, name, out var function) ? function : 0; // an older version.dll: no breadcrumbs
+        && NativeLibrary.TryGetExport(version, name, out var function) ? function : 0; // older version.dll: no breadcrumbs
 }

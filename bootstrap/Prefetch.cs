@@ -4,11 +4,9 @@ using System.Text;
 namespace HOI4ModLoader.Bootstrap;
 
 /// <summary>
-/// Start-up prefetch. A cold start of the game is mostly waiting on the disk (24 s warm against 62 s cold; the start-up
-/// profile shows its threads idle in waits, little CPU): so each start records the files the game opens for reading in its
-/// first two minutes (prefetch.c, into HOI4ModLoader\cache\prefetch.txt), and the next start reads that list, in order, on
-/// four threads right at the entry point, into the system's file cache before the game asks for them.
-/// HOI4ModLoader\no-prefetch turns both off.
+/// Start-up prefetch, since a cold start mostly waits on the disk. Each start records the files the game reads in its first
+/// two minutes (prefetch.c, into HOI4ModLoader\cache\prefetch.txt). The next start reads them into the file cache on four
+/// threads before the game asks. HOI4ModLoader\no-prefetch turns it off.
 /// </summary>
 internal static unsafe class Prefetch
 {
@@ -23,7 +21,7 @@ internal static unsafe class Prefetch
         if (File.Exists(Path.Combine(mods, "no-prefetch"))) return;
         var list = Path.Combine(Directory.CreateDirectory(Path.Combine(mods, "cache")).FullName, "prefetch.txt");
         try { _files = File.ReadAllLines(list).Where(line => line.Length > 0).ToArray(); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // the first start: nothing to read yet
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // first start: no list yet
         _deadline = Environment.TickCount64 + PrefetchMs;
         for (var i = 0; i < Readers && _files.Length > 0; i++) new Thread(Read) { IsBackground = true, Name = "HOI4ModLoader prefetch" }.Start();
         if (hm_record_start() != 0) new Thread(() => Save(list)) { IsBackground = true, Name = "HOI4ModLoader prefetch list" }.Start();
@@ -39,7 +37,7 @@ internal static unsafe class Prefetch
                 using var file = File.OpenHandle(_files[i], FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.SequentialScan);
                 for (long at = 0, got; (got = RandomAccess.Read(file, buffer, at)) > 0; at += got) { }
             }
-            catch (Exception) { } // gone, locked or a bad line: the game opens it itself (an exception here would end the game)
+            catch (Exception) { } // an exception here would end the game
         }
     }
 
@@ -58,7 +56,7 @@ internal static unsafe class Prefetch
             File.WriteAllText(list + ".tmp", text.ToString());
             File.Move(list + ".tmp", list, true);
         }
-        catch (Exception) { } // the old list stays (an exception here would end the game)
+        catch (Exception) { } // keep the old list; an exception here would end the game
         finally { hm_record_free(recorded); }
     }
 

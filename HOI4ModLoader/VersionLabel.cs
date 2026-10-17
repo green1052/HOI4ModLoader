@@ -2,22 +2,20 @@ using System.Text;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
-// The main menu panel 20 px taller (it grows from its centre: 10 px each way) and its version label two lines tall, 10 px
-// lower so the first line stays where it was, under the social buttons: room for the loader's line.
+// Makes the main menu panel 20 px taller and its version label two lines tall, 10 px lower, to fit the loader's line.
 [assembly: HOI4ModLoader.GuiPatch("interface/frontendmainview.gui", "gui/main_menu_version.gui",
     Replace = @"(?s)(name =""mainmenu_panel_bottom""\s*position = \{ x=0 y =0\}\s*size = \{ width = 320 height = )450(.*?name =""version_label""\s*position = \{ x = 0 y = )411(.*?maxHeight = )20")]
 
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Adds the loader to the main menu's version label: a second line "HOI4ModLoader 1.0.0" when the GuiPatch above made the
-/// panel and label two lines tall, else " +" on the version's line (a second line would run out of the menu frame); and a
-/// tooltip with the loader's version, an update waiting for the next start and the loaded plugins. Only that label
-/// changes: the game's version string (saves, multiplayer) is untouched.
+/// Adds the loader to the main menu's version label: a second line "HOI4ModLoader 1.0.0" if the GuiPatch above applied,
+/// else " +". Its tooltip lists the loader version, a pending update and the loaded plugins. The game's own version
+/// string is untouched.
 /// </summary>
 public static unsafe class VersionLabel
 {
-    /// <summary>Main menu view: writes the "version_label" text into a std::string (view, out), adding " (D)" in debug mode etc.</summary>
+    /// <summary>Main menu view (view, std::string* out): writes the "version_label" text.</summary>
     [Signature] public const string TextSig = "48 89 54 24 ? 53 48 83 EC 40 48 8B DA C7 44 24";
 
     private const int WindowOfView = 18144;    // main menu view: its window
@@ -43,7 +41,7 @@ public static unsafe class VersionLabel
             {
                 var box = Gui.FindTextBox(*(nint*)(view + WindowOfView), "version_label");
                 var added = box != 0 && *(int*)(box + MaxHeight) >= 40 ? $"\nHOI4ModLoader {Loader.Version}" : " +";
-                Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // appended as bytes: the label is in the game's encoding
+                Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // as bytes: the label is in the game's encoding
                 Gui.SetTooltip(box, Tooltip);
             });
             return result;

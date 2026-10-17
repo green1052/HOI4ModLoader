@@ -4,11 +4,9 @@ using System.Text;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Reading and writing the game's GUI widgets (elements defined in interface\*.gui). Widget text is handled as the bytes
-/// the game holds: the string overloads write UTF-8 (Korean text shows as such), while in text held in the game's own
-/// encoding the markup is single bytes that aren't valid UTF-8, £ (0xA3) before an inline icon and § (0xA7) before a
-/// colour code; in UTF-8 text (a CJK game's) they are UTF-8 too. Decoding text read from a widget and encoding it again
-/// would change one form into the other and break it, so it is edited as bytes.
+/// Reads and writes the game's GUI widgets (interface\*.gui). Widget text is edited as raw bytes. The string overloads
+/// write UTF-8, but text in the game's own encoding has single-byte markup (£ 0xA3 before an icon, § 0xA7 before a colour)
+/// that decoding and re-encoding would break.
 /// </summary>
 public static unsafe partial class Gui
 {
@@ -21,7 +19,7 @@ public static unsafe partial class Gui
     private const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
     private const int ShowSlot = 15, HideSlot = 16, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), Hide(), flags byte
     private const int TextOffset = 0x110; // CInstantTextBox: std::string text
-    private const int SetTooltipHandlerSlot = 69; // GUI object: SetTooltipHandler(CTooltipHandler*), used when the .gui has no tooltip
+    private const int SetTooltipHandlerSlot = 69; // GUI object: SetTooltipHandler(CTooltipHandler*)
 
     private static delegate* unmanaged<nint, nint, void> _setText;
     private static delegate* unmanaged<nint, nint, byte> _hasTextBox;
@@ -32,21 +30,21 @@ public static unsafe partial class Gui
     /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none (or no window).</summary>
     public static nint FindTextBox(nint window, string name)
     {
-        if (window == 0) return 0; // a native null read can't be caught: it ends the game
+        if (window == 0) return 0; // a native null read would crash the game
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, byte>)Sig.Find(HasTextBoxSig);
         var str = Name(name);
         return _hasTextBox(window, str) == 0 ? 0 : Find(window, FindTextBoxSlot, str);
     }
 
-    // Names looked up as game strings, made once and kept: per-frame lookups (queues, trade, construction) made and freed one each time.
+    // Lookup names as game strings, made once and kept, since many lookups run every frame.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, nint> Names = new();
 
     private static nint Name(string name) => Names.GetOrAdd(name, n => NewString(Encoding.ASCII.GetBytes(n)));
 
     /// <summary>
-    /// A child of <paramref name="window"/> by name through one of CContainerWindow's lookups (vtable slot: 13 button,
-    /// 15 instantTextBox, 21 checkbox, 55 window). Like the game's own calls, only for children the .gui defines. 0 for no window.
+    /// A child of <paramref name="window"/> by name, through a CContainerWindow lookup (vtable slot: 13 button,
+    /// 15 instantTextBox, 21 checkbox, 55 window). Only for children the .gui defines. 0 for no window.
     /// </summary>
     public static nint Find(nint window, int slot, string name) => window == 0 ? 0 : Find(window, slot, Name(name));
 
@@ -61,25 +59,25 @@ public static unsafe partial class Gui
     /// <summary>Sets the text box's text to these bytes (see the class summary); nothing for box 0.</summary>
     public static void SetText(nint textBox, ReadOnlySpan<byte> text)
     {
-        if (textBox == 0) return; // FindTextBox found none
+        if (textBox == 0) return;
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
         if (_setText == null) _setText = (delegate* unmanaged<nint, nint, void>)Sig.Find(SetTextSig);
         var str = NewString(text);
         try { _setText(textBox, str); }
-        finally { Allocator.Free(str); } // SetText already took (and freed) any heap buffer
+        finally { Allocator.Free(str); } // SetText took the heap buffer, if any
     }
 
-    /// <summary>Whether the widget is hidden (its hidden flag).</summary>
+    /// <summary>Whether the widget is hidden.</summary>
     public static bool IsHidden(nint widget) => (*(byte*)(widget + Flags) & HiddenFlag) != 0;
 
-    /// <summary>Shows a widget the code hid (what the game does: clear the hidden flag, then Show()).</summary>
+    /// <summary>Shows a widget, as the game does: clear the hidden flag, then Show().</summary>
     public static void Show(nint widget)
     {
         *(byte*)(widget + Flags) &= unchecked((byte)~HiddenFlag);
         ((delegate* unmanaged<nint, void>)(*(nint**)widget)[ShowSlot])(widget);
     }
 
-    /// <summary>Hides a widget (what the game does: set the hidden flag, then Hide()).</summary>
+    /// <summary>Hides a widget, as the game does: set the hidden flag, then Hide().</summary>
     public static void Hide(nint widget)
     {
         *(byte*)(widget + Flags) |= HiddenFlag;
@@ -87,9 +85,9 @@ public static unsafe partial class Gui
     }
 
     /// <summary>
-    /// Puts <paramref name="position"/> in front of the text box's text as a numbered badge (an inline text icon, see
-    /// <see cref="WriteNumberIcons"/>; "[N] " past the last one and in UTF-8 text), replacing an earlier one, or takes it off for position 0.
-    /// Idempotent; sets the text only when it changes.
+    /// Puts a numbered badge for <paramref name="position"/> in front of the text box's text, replacing any earlier one;
+    /// 0 removes it. The badge is an inline icon (<see cref="WriteNumberIcons"/>), or "[N] " for UTF-8 text and past the
+    /// last icon. Sets the text only when it changes.
     /// </summary>
     public static void Number(nint box, int position)
     {
@@ -99,13 +97,13 @@ public static unsafe partial class Gui
     }
 
     /// <summary>
-    /// <paramref name="text"/> with its badge (if any) replaced by <paramref name="position"/>'s (none for 0); <paramref name="utf8"/>:
-    /// the text is UTF-8 (null: judged from the text and the game's language, see <see cref="Utf8Text"/>).
+    /// <paramref name="text"/> with its badge replaced by <paramref name="position"/>'s (none for 0). <paramref name="utf8"/>:
+    /// whether the text is UTF-8; null guesses (<see cref="Utf8Text"/>).
     /// </summary>
     internal static byte[] Numbered(ReadOnlySpan<byte> text, int position, bool? utf8 = null)
     {
         var rest = text;
-        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith(NumberIconUtf8) ? NumberIconUtf8.Length : text.StartsWith("["u8) ? 1 : 0; // the UTF-8 icon: badges of an older version
+        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith(NumberIconUtf8) ? NumberIconUtf8.Length : text.StartsWith("["u8) ? 1 : 0; // the UTF-8 icon: older versions' badges
         if (open > 0)
         {
             var end = open;
@@ -118,20 +116,19 @@ public static unsafe partial class Gui
             : [.. Encoding.ASCII.GetBytes($"[{position}] "), .. rest];
     }
 
-    // "£hoimod_numbers|": the game's inline sprite syntax (£name|frame, as in vanilla's £resources_strip|3), £ in the game's own
-    // encoding. UTF-8 text (Korean focus names) gets "[N] " instead: a lone 0xA3 failed its conversion and blanked the whole
-    // name, and a UTF-8 £ isn't read as markup there (it showed as "£hoimod_numbers|3").
+    // "£hoimod_numbers|N": the game's inline sprite syntax, £ in the game's own encoding. UTF-8 text gets "[N] " instead:
+    // a lone 0xA3 blanks it, and a UTF-8 £ isn't read as markup.
     private static readonly byte[] NumberIcon = [0xA3, .. "hoimod_numbers|"u8], NumberIconUtf8 = [0xC2, 0xA3, .. "hoimod_numbers|"u8];
 
-    /// <summary>The game holds this text as UTF-8: it is valid UTF-8 with characters past ASCII, or the game runs in a CJK language.</summary>
+    /// <summary>The text is UTF-8: valid UTF-8 with non-ASCII characters, or the game runs in a CJK language.</summary>
     private static bool Utf8Text(ReadOnlySpan<byte> text) =>
         System.Text.Unicode.Utf8.IsValid(text) && (text.IndexOfAnyInRange((byte)0x80, (byte)0xFF) >= 0 || Loc.Language.Contains("korean")
                                                    || Loc.Language.Contains("chinese") || Loc.Language.Contains("japanese"));
     private const int NumberIcons = 30, NumberIconSize = 18, NumberIconWidth = 24; // 24 wide: two digits get a pill
 
     /// <summary>
-    /// interface/hoimod_numbers.gfx and its texture under <paramref name="dir"/> (the game files we mount): frame N is N in
-    /// dark digits on a gold disc, like a circled number; the game's fonts have no ① .. ㉚.
+    /// Writes interface/hoimod_numbers.gfx and its texture under <paramref name="dir"/>: frame N is N in dark digits on a
+    /// gold disc, since the game's fonts have no ① .. ㉚.
     /// </summary>
     internal static void WriteNumberIcons(string dir)
     {
@@ -146,12 +143,12 @@ public static unsafe partial class Gui
             var digits = (frame + 1).ToString();
             var text = digits.Length * 8 - 2; // 6 px a digit, 2 between
             var left = frame * w + (w - text) / 2;
-            var stretch = Math.Max(0, (text + 8 - s) / 2.0); // two digits: a pill, its round ends clear of the digits
+            var stretch = Math.Max(0, (text + 8 - s) / 2.0); // two digits: stretch the disc into a pill
             const int top = (s - 10) / 2;
             for (var y = 0; y < s; y++)
             for (var x = 0; x < w; x++)
             {
-                var inside = 0; // 4x4 samples: an anti-aliased disc (or pill)
+                var inside = 0; // 4x4 samples for anti-aliasing
                 var rim = 0;
                 for (var sy = 0; sy < 4; sy++)
                 for (var sx = 0; sx < 4; sx++)
@@ -193,12 +190,12 @@ public static unsafe partial class Gui
         else if (!on && has) SetText(box, [.. text[prefix.Length..]]);
     }
 
-    /// <summary>Text the GUI shows as written: it expands $KEY$, [..] and § codes otherwise.</summary>
+    /// <summary>The text without $, [, ] and §, so the GUI shows it as written.</summary>
     public static string Literal(string text) => string.Concat(text.Where(c => c is not ('$' or '[' or ']' or '§')));
 
     /// <summary>
-    /// Gives <paramref name="widget"/> a tooltip (for widgets whose .gui has none): <paramref name="text"/> makes it each time
-    /// it shows, every frame while hovered, so it stays current. Shown as written (<see cref="Literal"/>). UI thread only.
+    /// Gives <paramref name="widget"/> a tooltip whose .gui has none. <paramref name="text"/> runs every frame while hovered,
+    /// and its result is shown as written (<see cref="Literal"/>). UI thread only.
     /// </summary>
     public static void SetTooltip(nint widget, Func<string> text)
     {
@@ -236,7 +233,7 @@ public static unsafe partial class Gui
     [UnmanagedCallersOnly]
     private static void DestroyTooltip(nint handler, int flags) { }
 
-    /// <summary>Shift is down (anywhere: check <see cref="GameFocused"/> for a hotkey).</summary>
+    /// <summary>Shift is down, in any window (see <see cref="GameFocused"/>).</summary>
     public static bool ShiftHeld => KeyHeld(0x10); // VK_SHIFT
 
     /// <summary>Ctrl is down.</summary>
@@ -245,19 +242,18 @@ public static unsafe partial class Gui
     /// <summary>Alt is down.</summary>
     public static bool AltHeld => KeyHeld(0x12);   // VK_MENU
 
-    /// <summary>Whether the key (a virtual-key code, e.g. 'S') is down right now, wherever the focus is.</summary>
+    /// <summary>Whether the key (a virtual-key code, e.g. 'S') is down now, in any window.</summary>
     public static bool KeyHeld(int key) => (GetAsyncKeyState(key) & 0x8000) != 0;
 
     /// <summary>
-    /// The game window has the focus: key state is global, so a hotkey must check this or it fires while the player types
-    /// in another program (and AltGr is Ctrl+Alt on many layouts).
+    /// The game window has the focus. Key state is global, so hotkeys check this to not fire while typing in other programs.
     /// </summary>
     public static bool GameFocused => GetForegroundWindow() is var window && window != 0
         && GetWindowThreadProcessId(window, out var process) != 0 && process == (uint)Environment.ProcessId;
 
     /// <summary>
-    /// Ctrl+Alt+<paramref name="key"/> was just pressed with the game focused: once per press, for a timer polling it
-    /// (<paramref name="down"/>: the key's state at the last poll; a key held across a modifier change does not fire).
+    /// Ctrl+Alt+<paramref name="key"/> was just pressed with the game focused, once per press. For polling;
+    /// <paramref name="down"/> keeps the key's state from the last poll.
     /// </summary>
     public static bool HotkeyPressed(int key, ref bool down)
     {
@@ -268,9 +264,8 @@ public static unsafe partial class Gui
     }
 
     /// <summary>
-    /// UI_AreAirWingsSelected: `mov rcx,[rip+ui]; test rcx,rcx; jz; add rcx,538h`: the player's selection list (CSelectionList)
-    /// inside the UI object. List +0x30 first node {item, ?, next at +0x10}, +0x40 count; an item's kind at +8 (0 = a land
-    /// division, the CArmy itself; 1 ship, 2 air wing).
+    /// UI_AreAirWingsSelected: `mov rcx,[rip+ui]; test rcx,rcx; jz; add rcx,538h` gives the player's CSelectionList.
+    /// List: +0x30 first node {item, ?, next at +0x10}, +0x40 count. Item kind at +8: 0 land division (the CArmy), 1 ship, 2 air wing.
     /// </summary>
     [Signature] public const string AirWingsSelectedSig = "48 83 EC 28 48 8B 0D ? ? ? ? 48 85 C9 74 ? 48 81 C1 38 05 00 00";
 
@@ -278,7 +273,7 @@ public static unsafe partial class Gui
     private static nint* _selectionUi;
     private static int _selectionOffset;
 
-    /// <summary>The selected items (divisions, ships, air wings), unchecked: compare them with live objects before reading them. UI thread.</summary>
+    /// <summary>The selected divisions, ships and air wings, unchecked: match them to live objects before reading. UI thread.</summary>
     public static List<nint> Selection()
     {
         if (_selectionUi == null)

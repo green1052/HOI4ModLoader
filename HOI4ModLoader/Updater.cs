@@ -4,10 +4,9 @@ using System.Text.Json;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Auto-update from the GitHub releases: checks the latest release at startup (and every few hours) and installs a newer
-/// one for the next start. Loaded files (version.dll, core\*.dll) can't be overwritten but can be renamed, so each file
-/// is swapped in and the old one renamed to *.old, deleted at the next start. Plugins are staged in update\plugins and
-/// moved in at the next start, before they load: a reload this session must not pair new plugins with the running core.
+/// Auto-update from GitHub releases: checks at startup and every few hours, and installs a newer release for the next
+/// start. Loaded files are renamed to *.old (deleted next start) and replaced. Plugins are staged in update\plugins and
+/// moved in next start, so a reload can't pair new plugins with the old core.
 /// </summary>
 internal static class Updater
 {
@@ -21,8 +20,8 @@ internal static class Updater
     internal static string? Installed { get; private set; }
 
     /// <summary>
-    /// Plugins later releases merged into others or dropped. Deleted at every start, before plugins load: a manual install over
-    /// an old one (or a first update, with no plugins.txt yet) would otherwise run them next to their replacements.
+    /// Plugins merged into others or dropped. Deleted at every start, so a manual install over an old one doesn't run them
+    /// next to their replacements.
     /// </summary>
     private static readonly string[] Retired =
         ["AirWingFieldMarshal", "AirbaseCapacity", "RailwayGuns", "AutoProduction", "NoTelemetry", "PlanTools", "SupplyOverlay", "WarStats"];
@@ -47,19 +46,19 @@ internal static class Updater
         foreach (var file in leftovers.Where(f => !f.EndsWith("version.dll", StringComparison.OrdinalIgnoreCase)).ToList())
         {
             try { File.Delete(file); }
-            catch (Exception) { } // still loaded (e.g. version.dll by the launcher): next start
+            catch (Exception) { } // still loaded: next start
         }
 
         if (!Directory.Exists(Staged)) return;
         var names = Directory.GetFiles(Staged).Select(f => Path.GetFileName(f)).ToArray();
         if (names.Length > 0)
         {
-            // Plugins get merged or renamed between versions: the previous release's go, ones the player added stay.
+            // Replace the previous release's plugins; keep ones the player added.
             if (File.Exists(Shipped))
                 foreach (var name in File.ReadAllLines(Shipped).Select(Path.GetFileName).Where(n => !string.IsNullOrWhiteSpace(n)))
                 {
                     try { File.Delete(Path.Combine(pluginsDir, name!)); }
-                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"update: {name} stays: {e.Message}"); } // one locked file must not leave the rest half moved
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"update: {name} stays: {e.Message}"); }
                 }
             Directory.CreateDirectory(pluginsDir);
             foreach (var name in names) File.Move(Path.Combine(Staged, name), Path.Combine(pluginsDir, name), true);
@@ -107,7 +106,7 @@ internal static class Updater
             throw new InvalidDataException("zip is not a HOI4ModLoader release");
 
         var files = new List<string>();
-        foreach (var (entry, path) in entries) // everything written first: a failed download or a full disk changes nothing
+        foreach (var (entry, path) in entries) // write everything first, so a failure changes nothing
         {
             var target = Path.GetFullPath(path.StartsWith(PluginsPrefix, StringComparison.OrdinalIgnoreCase)
                 ? Path.Combine(Staged, path[PluginsPrefix.Length..])
@@ -118,7 +117,7 @@ internal static class Updater
             entry.ExtractToFile(target + ".new", true);
             files.Add(target);
         }
-        var stamp = DateTime.UtcNow.Ticks; // a unique .old: an earlier one may still be loaded
+        var stamp = DateTime.UtcNow.Ticks; // unique .old: an earlier one may still be loaded
         var swapped = new List<string>();
         try
         {
@@ -131,7 +130,7 @@ internal static class Updater
         }
         catch
         {
-            // Half a release next to half of another may not start at all: put the swapped files back (.new: deleted at the next start).
+            // Half of two releases may not start: put the swapped files back (.new files go next start).
             foreach (var file in Enumerable.Reverse(swapped))
             {
                 try

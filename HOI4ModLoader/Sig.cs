@@ -4,8 +4,8 @@ using System.Text;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Marks a `const string` IDA-style pattern a mod uses, so the signature tests can check it against the
-/// installed hoi4.exe without starting the game. Arguments mirror <see cref="Image.FindAll"/>.
+/// Marks a `const string` IDA-style pattern, so the signature tests check it against the installed hoi4.exe.
+/// Arguments mirror <see cref="Image.FindAll"/>.
 /// </summary>
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class SignatureAttribute(int count = 1) : Attribute
@@ -13,21 +13,21 @@ public sealed class SignatureAttribute(int count = 1) : Attribute
     /// <summary>How many matches the pattern must have.</summary>
     public int Count { get; } = count;
 
-    /// <summary>A second pattern the match must be near (see <see cref="Image.FindAll"/>), for one too short to be unique alone.</summary>
+    /// <summary>A string the matching function must reference (see <see cref="Image.FindAll"/>), for patterns not unique alone.</summary>
     public string? Anchor { get; init; }
 }
 
-/// <summary>Marks a `const string` C++ class name whose vtable a mod looks up with <see cref="Sig.VTable"/>, so the tests check it too.</summary>
+/// <summary>Marks a `const string` C++ class name for <see cref="Sig.VTable"/>, so the tests check it too.</summary>
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class VTableAttribute : Attribute;
 
-/// <summary>Finds code in hoi4.exe by IDA-style byte patterns ("48 8B ?? 05"). No symbols ship with the game, so this is how a target is named.</summary>
+/// <summary>Finds code in hoi4.exe by IDA-style byte patterns ("48 8B ?? 05"), since the game ships no symbols.</summary>
 public static class Sig
 {
-    /// <summary>The unique match in the running game; throws if it matches 0 or 2+ times (e.g. after a game update).</summary>
+    /// <summary>The unique match in the running game; throws on 0 or 2+ matches.</summary>
     public static nint Find(string pattern, string? anchor = null) => Image.Game.FindAll(pattern, 1, anchor)[0];
 
-    /// <summary>All matches; throws unless there are exactly <paramref name="count"/> (e.g. the same code inlined twice).</summary>
+    /// <summary>All matches; throws unless there are exactly <paramref name="count"/>.</summary>
     public static nint[] FindAll(string pattern, int count, string? anchor = null) => Image.Game.FindAll(pattern, count, anchor);
 
     /// <summary>vtable of the C++ class <paramref name="className"/> (e.g. "CSetResearchCommand"), found through its RTTI.</summary>
@@ -41,19 +41,18 @@ public sealed unsafe partial class Image
     public static readonly Image Game = new(NativeLibrary.GetMainProgramHandle());
 
     /// <summary>
-    /// Guards the lookup caches and <see cref="Patches.Originals"/>: plugins look up lazily from game threads (an AI hook's
-    /// Commands.New) while a reload on the main thread adds to them.
+    /// Guards the lookup caches and <see cref="Patches.Originals"/>: game threads look up lazily while a reload adds to them.
     /// </summary>
     internal static readonly Lock Gate = new();
 
     private readonly nint _base;
-    private readonly long _pointerBase; // what absolute pointers in the image are relative to: actual base when loaded, preferred base when mapped as data
+    private readonly long _pointerBase; // base for absolute pointers: actual when loaded, preferred when mapped as data
     private readonly List<(nint Start, int Size, bool Code)> _sections = [];
     private readonly (int Begin, int End)[] _functions;
-    private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = []; // code sections with patched bytes put back
-    private readonly Dictionary<object, object> _lookups = [];                        // FindAll and VTable results, or what they threw
-    private readonly string _version;                                                  // the exe's link time and size: a game update changes it
-    private Dictionary<string, string>? _stored;                                       // the running game's results from earlier starts (Stored)
+    private readonly Dictionary<nint, (int Version, byte[] Bytes)> _pristine = []; // code sections with original bytes restored
+    private readonly Dictionary<object, object> _lookups = [];                        // FindAll and VTable results or exceptions
+    private readonly string _version;                                                  // the exe's link time and size
+    private Dictionary<string, string>? _stored;                                       // results from earlier starts
 
     private Image(nint b, bool relocated = true)
     {
@@ -84,15 +83,14 @@ public sealed unsafe partial class Image
     }
 
     /// <summary>
-    /// Every match of <paramref name="pattern"/> in code. With <paramref name="anchor"/>, only matches inside functions that
-    /// reference that exact string (engine strings survive updates better than code). Throws unless exactly <paramref name="count"/> match.
+    /// Every match of <paramref name="pattern"/> in code. With <paramref name="anchor"/>, only matches in functions that
+    /// reference that exact string. Throws unless exactly <paramref name="count"/> match.
     /// </summary>
     public nint[] FindAll(string pattern, int count = 1, string? anchor = null) =>
         [.. Cached((pattern, count, anchor), () => Search(pattern, count, anchor))];
 
     /// <summary>
-    /// Code never moves and scans see it unpatched, so a result holds for the whole run (plugin reloads look it up again),
-    /// and so does a failure: a broken signature resolved lazily (every frame) must not rescan the exe each time.
+    /// Caches a lookup for the whole run, failures too, so a broken signature resolved every frame doesn't rescan the exe.
     /// </summary>
     private T Cached<T>(object key, Func<T> find) where T : notnull
     {
@@ -107,7 +105,7 @@ public sealed unsafe partial class Image
                     try
                     {
                         result = find();
-                        Store(name, result); // only hits: a failure is looked for again next start (a loader update may find it)
+                        Store(name, result); // only hits: failures are retried next start
                     }
                     catch (InvalidOperationException e) { result = e; }
                 }
@@ -117,11 +115,11 @@ public sealed unsafe partial class Image
         }
     }
 
-    // ---- Lookups of the running game saved per exe version: a scan gives the same answer for the same exe (about 3 s a start) ----
+    // ---- Lookups saved per exe version, saving about 3 s a start ----
 
     private string StoreFile => Path.Combine(Loader.ModsDir, "cache", $"signatures-{_version}.txt");
 
-    /// <summary>Earlier starts' results for this exe ("key, tab, result" lines), or null for an image mapped as data (tests scan).</summary>
+    /// <summary>Earlier starts' results for this exe ("key\tresult" lines), or null for an image mapped as data.</summary>
     private Dictionary<string, string>? Stored()
     {
         if (this != Game) return null;
@@ -130,7 +128,7 @@ public sealed unsafe partial class Image
         try
         {
             foreach (var line in File.Exists(StoreFile) ? File.ReadAllLines(StoreFile) : [])
-                if (line.IndexOf('\t') is var tab and > 0 && !line.AsSpan(tab + 1).StartsWith('!')) // "!": a failure an older loader stored, looked for again
+                if (line.IndexOf('\t') is var tab and > 0 && !line.AsSpan(tab + 1).StartsWith('!')) // "!": an old stored failure, retried
                     _stored[line[..tab]] = line[(tab + 1)..];
         }
         catch (IOException) { _stored.Clear(); } // unreadable: scan
@@ -148,7 +146,7 @@ public sealed unsafe partial class Image
             Directory.CreateDirectory(Path.GetDirectoryName(StoreFile)!);
             File.AppendAllText(StoreFile, $"{name}\t{value}\n");
         }
-        catch (IOException) { } // read-only folder: scan again next start
+        catch (IOException) { } // read-only folder: scan next start
         catch (UnauthorizedAccessException) { }
     }
 
@@ -175,8 +173,7 @@ public sealed unsafe partial class Image
     {
         var pat = pattern.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Select(t => t.StartsWith('?') ? -1 : Convert.ToInt32(t, 16)).ToArray();
-        // The longest run of concrete bytes is searched for (vectorized IndexOf of a span), then the rest compared: a lone first
-        // byte like 48 occurs millions of times in .text, a run of several rarely.
+        // Search for the longest run of concrete bytes (vectorized IndexOf), then compare the rest.
         var (first, length) = (-1, 0);
         for (int i = 0, run = 0; i < pat.Length; i++)
         {
@@ -203,15 +200,15 @@ public sealed unsafe partial class Image
         return hits;
     }
 
-    /// <summary>A code section as the game shipped it: bytes our patches and hooks changed are read from before they did.</summary>
+    /// <summary>A code section as the game shipped it, with patched bytes restored.</summary>
     private ReadOnlySpan<byte> Unpatched(nint start, int size)
     {
         var live = new ReadOnlySpan<byte>((void*)start, size);
         if (this != Game || !Patches.Originals.Keys.Any(a => a >= start && a < start + size)) return live;
         if (_pristine.TryGetValue(start, out var copy) && copy.Version == Patches.OriginalsVersion) return copy.Bytes;
-        // Code only changes through Patches, which records the original first: a copy stays valid once its overlays are redone.
+        // Code only changes through Patches, which records originals first, so the copy only needs its overlays redone.
         var bytes = copy.Bytes ?? [.. live];
-        foreach (var (at, original) in Patches.Originals.Reverse()) // earliest last: its bytes are the game's own
+        foreach (var (at, original) in Patches.Originals.Reverse()) // earliest last: it has the game's bytes
         {
             var offset = (int)(at - start);
             if (offset >= 0 && offset < size) original.AsSpan(0, Math.Min(original.Length, size - offset)).CopyTo(bytes.AsSpan(offset));
@@ -221,8 +218,8 @@ public sealed unsafe partial class Image
     }
 
     /// <summary>
-    /// vtable of <paramref name="className"/> via MSVC RTTI: the type descriptor holds ".?AV&lt;name&gt;@@", the complete
-    /// object locator (signature 1, offset 0) points at it by RVA, and the vtable's slot -1 points at the locator.
+    /// vtable of <paramref name="className"/> via MSVC RTTI: type descriptor ".?AV&lt;name&gt;@@" &lt;- complete object
+    /// locator (signature 1, offset 0, by RVA) &lt;- vtable slot -1.
     /// </summary>
     public nint VTable(string className) => Cached(className, () => FindVTable(className));
 
@@ -239,8 +236,8 @@ public sealed unsafe partial class Image
     }
 
     /// <summary>
-    /// Whether the C++ object at <paramref name="obj"/> is a <paramref name="className"/> or derives from one, like
-    /// dynamic_cast: its vtable's slot -1 is the complete object locator, whose class hierarchy lists every base's type descriptor.
+    /// Whether the C++ object at <paramref name="obj"/> is or derives from <paramref name="className"/>, like dynamic_cast,
+    /// via the RTTI class hierarchy.
     /// </summary>
     public bool IsA(nint obj, string className)
     {
@@ -283,14 +280,13 @@ public sealed unsafe partial class Image
     /// <summary>Functions that take the address of the null-terminated ASCII string <paramref name="text"/> (lea/mov reg,[rip+disp32]).</summary>
     private HashSet<int> FunctionsReferencing(string text)
     {
-        // whole string, not the tail of a longer one
-        var strings = FindData(Encoding.ASCII.GetBytes(text + "\0")).Where(a => *(byte*)(a - 1) == 0).ToHashSet();
+        var strings = FindData(Encoding.ASCII.GetBytes(text + "\0")).Where(a => *(byte*)(a - 1) == 0).ToHashSet(); // not a longer string's tail
 
         var funcs = new HashSet<int>();
         foreach (var (start, size, code) in _sections)
         {
             if (!code) continue;
-            var span = Unpatched(start, size); // a hook over the lea must not hide the function
+            var span = Unpatched(start, size); // a hook over the lea must not hide it
             for (var i = 0; i + 7 <= size; i++)
             {
                 // REX.W (48/4C) + 8D (lea) or 8B (mov), ModRM mod=00 rm=101: [rip+disp32]

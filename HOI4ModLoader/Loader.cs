@@ -49,15 +49,15 @@ public static class Loader
             if (config.Bind("Debug", "WaitForDebugger", false, "Pause startup until a debugger attaches to hoi4.exe."))
                 while (!Debugger.IsAttached) Thread.Sleep(100);
             var hotReload = config.Bind("Debug", "HotReload", true,
-                "Reload all plugins when a DLL in HOI4ModLoader\\plugins changes, e.g. rebuilt while the game runs. Plugin state is lost.");
+                "Reload all plugins when a DLL in HOI4ModLoader\\plugins changes. Plugin state is lost.");
             Logger.Verbose = config.Bind("Debug", "VerboseLog", false,
-                "Also write DEBUG lines to LogOutput.log: every division FrontLine moves and every front AI Assist adjusts (tens of thousands in a long game). Off: what was done for you, summaries and errors.");
+                "Also write DEBUG lines to LogOutput.log: every unit move and front change the plugins make. Off: only actions, summaries and errors.");
             MapArrows.Enabled = config.Bind("Debug", "AiActionArrows", false,
-                "Flash an arrow on the map for each front line action the AI plugins take (encirclements, breakouts, assaults, holes filled), to see what they do.");
+                "Flash a map arrow for each front line action the AI plugins take (encirclements, breakouts, assaults, filling holes).");
             if (config.Bind("Performance", "Mimalloc", true,
-                "Use mimalloc for the game's memory allocations instead of the Windows heap (takes effect at the next start)."))
+                "Use mimalloc instead of the Windows heap for the game's memory. Takes effect at the next start."))
             {
-                Patches.Owner = "HOI4ModLoader"; // never reverted: mimalloc's blocks can't go back to the Windows heap
+                Patches.Owner = "HOI4ModLoader"; // never reverted
                 try
                 {
                     Allocator.UseMimalloc();
@@ -68,21 +68,20 @@ public static class Loader
             }
 
             Log.Info($"HOI4 {Game.Version}, .NET {Environment.Version}");
-            try { Updater.Finish(PluginsDir); } // before the plugins load: an update staged last session moves in now
+            try { Updater.Finish(PluginsDir); } // installs an update staged last session, before plugins load
             catch (Exception e) { Log.Error($"update: {e.Message}"); }
             var updateHours = config.Bind("Update", "CheckHours", 6,
-                "Check GitHub for a newer HOI4ModLoader at startup and then every this many hours, and install it for the next start. 0: only at startup, -1: never.");
+                "Check GitHub for a new HOI4ModLoader at startup and every this many hours; it installs at the next start. 0: startup only, -1: never.");
             if (updateHours >= 0) Updater.Start(TimeSpan.FromHours(updateHours));
             var followMultiplayer = true;
-            try { _ = Game.IsMultiplayer; _ = Game.State; } // resolve their signatures now, on this thread: plugins read them from game threads
+            try { _ = Game.IsMultiplayer; _ = Game.State; } // resolve now: plugins read them from game threads
             catch (Exception e)
             {
                 followMultiplayer = false;
-                Multiplayer = true; // fail closed: unable to tell, game rule plugins could desync a multiplayer game
+                Multiplayer = true; // fail closed: game rule plugins could desync multiplayer
                 Log.Error($"multiplayer check unavailable, game rule plugins stay off: {e.Message}");
             }
-            // Every signature of the core (most resolve on first use, many on AI threads): a broken one (game update) is
-            // reported here, once, not in play. The same walk as tests\Signatures.Tests; cached per exe after the first start.
+            // Check every core signature now, so one broken by a game update is reported once at startup, not in play.
             foreach (var field in typeof(Loader).Assembly.GetTypes().SelectMany(type => type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)))
             {
                 if (!field.IsLiteral || field.GetRawConstantValue() is not string value) continue;
@@ -94,7 +93,7 @@ public static class Loader
                 catch (Exception e) { Log.Error($"core signature {field.DeclaringType?.Name}.{field.Name}: {e.Message}"); }
             }
 
-            // The loader's own hooks first: a plugin hooking the same function then stacks on top, and reloads cleanly.
+            // The loader's hooks first, so plugin hooks on the same function stack on top and reload cleanly.
             Patches.Owner = "HOI4ModLoader";
             try { GameFiles.Install(); }
             catch (Exception e) { Log.Error($"game files: {e.Message}"); }
@@ -117,7 +116,7 @@ public static class Loader
             MainThread.Every(TimeSpan.FromMilliseconds(100), () =>
             {
                 if (Environment.TickCount64 < _reloadAt) return;
-                if (Multiplayer) return; // a settings change in a multiplayer session: FollowMultiplayer reloads back in single player
+                if (Multiplayer) return; // FollowMultiplayer reloads on return to single player
                 _reloadAt = long.MaxValue;
                 Reload();
             });
@@ -125,7 +124,7 @@ public static class Loader
             RemoveDroppedSettings(config, "", Log); // every setting is bound by now
             if (crashTest is 1 or 2)
             {
-                config.Set("Debug", "CrashTest", 0, CrashTestDescription); // once: the next start runs normally
+                config.Set("Debug", "CrashTest", 0, CrashTestDescription); // once
                 var at = Environment.TickCount64 + 30_000;
                 MainThread.Every(TimeSpan.FromSeconds(1), () => { if (Environment.TickCount64 >= at) CrashTest(crashTest); });
             }
@@ -141,18 +140,17 @@ public static class Loader
     }
 
     private const string CrashTestDescription =
-        "Crash the game on purpose 30 seconds after start, once (resets to 0), to check HOI4ModLoader\\crash.log: 1 = a native fault in a timer, 2 = a wild memory write in managed code.";
+        "Crash the game once, 30 seconds after start, to test HOI4ModLoader\\crash.log. 1: native fault in a timer, 2: wild memory write in managed code. Resets to 0.";
 
     private static unsafe void CrashTest(int kind)
     {
-        if (kind == 1) ((delegate* unmanaged<void>)0x10)(); // executes address 0x10: a native access violation
-        *(int*)unchecked((nint)0x7FFF_FFFF_0000) = 0;       // a wild write in managed code: .NET's fatal error
+        if (kind == 1) ((delegate* unmanaged<void>)0x10)(); // native access violation
+        *(int*)unchecked((nint)0x7FFF_FFFF_0000) = 0;       // wild write: .NET fatal error
     }
 
     // Reloads once the plugin DLLs changed and then stayed the same for a tick (a build may still be copying them).
-    // ponytail: patches are rewritten while game threads run; one executing a hooked prologue at that instant could crash.
-    // Pause the game first if a plugin hooks simulation code; suspending the other threads is the upgrade if that bites.
-    // Never in a multiplayer session: a host rewriting hooks mid-simulation crashes for every player at once.
+    // Never in multiplayer. ponytail: hooks are rewritten while game threads run, which can crash a thread inside a hooked
+    // prologue; suspend the other threads if that bites.
     private static void ReloadIfChanged()
     {
         if (Multiplayer) return;
@@ -166,8 +164,8 @@ public static class Loader
         Reload();
     }
 
-    // Multiplayer runs every player's simulation in lockstep, so a plugin changing game rules would desync anyone without it.
-    // Those plugins are off from the multiplayer lobby on (vanilla to the other players) and back on in single player.
+    // Multiplayer is lockstep, so game rule plugins would desync other players. They are off from the multiplayer lobby on
+    // and back on in single player.
     private static void FollowMultiplayer()
     {
         bool multiplayer;
@@ -180,13 +178,12 @@ public static class Loader
         if (multiplayer == Multiplayer) return;
         Multiplayer = multiplayer;
         Log.Info(Multiplayer ? "multiplayer: game rule plugins off" : "single player: game rule plugins on");
-        _reloadAt = long.MaxValue; // a reload deferred in the session happens now, not once more after it
+        _reloadAt = long.MaxValue; // this reload covers any deferred one
         Reload();
     }
 
     /// <summary>
-    /// Reloads every plugin shortly (e.g. after a plugin was switched on or off): once no further request came for half a
-    /// second, so a burst of clicks costs one reload.
+    /// Reloads every plugin once no further request came for half a second, so a burst of clicks costs one reload.
     /// </summary>
     internal static void RequestReload() => _reloadAt = Environment.TickCount64 + 500;
 
@@ -199,10 +196,10 @@ public static class Loader
     /// <summary>Whether the plugin is loaded now.</summary>
     internal static bool IsLoaded(string id) => Loaded.Any(p => p.Info.Id == id);
 
-    /// <summary>Enabled but waiting for single player: a rule-changing plugin in multiplayer. It starts by itself when the mode changes.</summary>
+    /// <summary>Enabled but waiting for single player: a game rule plugin in multiplayer.</summary>
     internal static bool IsWaiting(PluginAttribute plugin) => !IsLoaded(plugin.Id) && IsEnabled(plugin.Id) && plugin.AffectsGameState && Multiplayer;
 
-    /// <summary>Whether the game is a multiplayer one (as the plugins were last loaded for).</summary>
+    /// <summary>Whether the plugins were last loaded for multiplayer.</summary>
     internal static bool Multiplayer { get; private set; }
 
     /// <summary>Whether the plugin's config lets it load ([General] Enabled).</summary>
@@ -210,7 +207,7 @@ public static class Loader
 
     private static bool IsEnabled(ConfigFile config) => config.Bind("General", "Enabled", true, EnabledDescription);
 
-    /// <summary>Switches the plugin on or off in its config (takes effect at the next reload).</summary>
+    /// <summary>Switches the plugin on or off in its config, from the next reload.</summary>
     internal static void SetEnabled(string id, bool on) => Config(id).Set("General", "Enabled", on, EnabledDescription);
 
     private const string EnabledDescription = "Load this plugin.";
@@ -219,7 +216,7 @@ public static class Loader
     {
         for (var i = Loaded.Count - 1; i >= 0; i--) Patches.Revert(Loaded[i].Info.Id);
         Loaded.Clear();
-        Jobs.Reset(); // the reloaded plugins start over
+        Jobs.Reset();
         LoadPlugins();
     }
 
@@ -228,10 +225,10 @@ public static class Loader
 
     private static void LoadPlugins()
     {
-        _loadedFiles = PluginFiles(); // before reading them: a change during the load reloads again
+        _loadedFiles = PluginFiles(); // before reading, so a change during the load reloads again
         var folder = Directory.Exists(PluginsDir);
-        var allRead = folder; // every DLL there read: the plugins found are all there are
-        var files = new Dictionary<string, string>(); // assembly name -> file (a file may be named differently)
+        var allRead = folder; // every DLL was read, so the plugins found are all there are
+        var files = new Dictionary<string, string>(); // assembly name -> file
         foreach (var file in folder ? Directory.EnumerateFiles(PluginsDir, "*.dll") : [])
         {
             try { files[AssemblyName.GetAssemblyName(file).Name!] = file; }
@@ -268,13 +265,13 @@ public static class Loader
         }
 
         Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
-        Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins' names too
-        if (AtStartup) // once: the game reads its interface files at startup, after this and before its main menu
+        Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins too, for their names
+        if (AtStartup) // the game reads its interface files once, after this
         {
             GameFiles.Build([typeof(Loader).Assembly, .. found.Values.Where(f => IsEnabled(f.Info.Id)).Select(f => f.Type.Assembly).Distinct()]);
-            if (allRead) RemoveOrphanConfigs(found.Keys); // at startup only: a hot reload may catch a DLL mid-copy
+            if (allRead) RemoveOrphanConfigs(found.Keys); // not on hot reload: a DLL may be mid-copy
         }
-        var state = new Dictionary<string, bool?>(); // null while loading: a dependency cycle reads as failed
+        var state = new Dictionary<string, bool?>(); // null while loading, so a dependency cycle fails
         foreach (var id in found.Keys.Order()) Load(id);
 
         bool Load(string id)
@@ -296,7 +293,7 @@ public static class Loader
             }
 
             Patches.Owner = info.Id;
-            try // anything a plugin brings (constructor, config file, Load) only skips that plugin
+            try // a plugin that throws is skipped alone
             {
                 var config = Config(info.Id);
                 if (!IsEnabled(config))
@@ -310,7 +307,7 @@ public static class Loader
                     return false;
                 }
                 if (info.GameVersion is { } want
-                    && !config.Bind("General", "IgnoreGameVersion", false, $"Load even if the game is not HOI4 {want}, which this plugin was made for (may crash).")
+                    && !config.Bind("General", "IgnoreGameVersion", false, $"Load even if the game is not HOI4 {want}, the version this plugin was made for. May crash.")
                     && !Game.Version.StartsWith(want, StringComparison.Ordinal))
                 {
                     log.Error($"skipped: made for HOI4 {want}, game is {Game.Version}");
@@ -341,10 +338,8 @@ public static class Loader
     }
 
     /// <summary>
-    /// Deletes the settings the loader or a plugin that just loaded didn't bind (except in <paramref name="keep"/>): ones a
-    /// newer version dropped, which the Mods tab would list unnamed. A plugin's [General] is the loader's (Enabled,
-    /// IgnoreGameVersion). A plugin binds every setting in Load, even for a feature switched off, or switching it off loses
-    /// its values.
+    /// Deletes settings that weren't bound on this load (outside <paramref name="keep"/>), e.g. ones a newer version dropped.
+    /// A plugin's [General] belongs to the loader. Plugins must bind every setting in Load, even for features turned off.
     /// </summary>
     private static void RemoveDroppedSettings(ConfigFile config, string keep, Logger log)
     {
@@ -357,8 +352,7 @@ public static class Loader
     }
 
     /// <summary>
-    /// Deletes config\com.green1052.*.cfg of our plugins no longer in the plugins folder (merged into others or dropped).
-    /// Only when every DLL there was read: one that failed to load may be the config's plugin. Others' configs are kept.
+    /// Deletes config\com.green1052.*.cfg files whose plugin is gone. Other authors' configs are kept.
     /// </summary>
     private static void RemoveOrphanConfigs(IEnumerable<string> ids)
     {
@@ -378,11 +372,9 @@ public static class Loader
     }
 
     /// <summary>
-    /// One load of the plugins folder. Plugins are read into memory, so their files stay unlocked and can be rebuilt while
-    /// the game runs; each reload needs a new context, as a context loads an assembly name only once. Old contexts stay
-    /// loaded: hooks marshal plugin delegates to native code, which collectible (unloadable) contexts don't support.
-    /// Whatever the loader's context has (HOI4ModLoader, Reloaded.Hooks, .NET) comes from there, even if a copy sits in the
-    /// folder, so types are shared.
+    /// One load of the plugins folder. Plugins are read into memory, so their files stay unlocked for rebuilds. Each reload
+    /// needs a new context; old ones stay loaded, since hooks marshal plugin delegates to native code. Assemblies the
+    /// loader has (HOI4ModLoader, Reloaded.Hooks, .NET) come from its context, so types are shared.
     /// </summary>
     private sealed class PluginContext(Dictionary<string, string> files, int generation) : AssemblyLoadContext($"plugins #{generation}")
     {

@@ -4,12 +4,11 @@ using System.Text;
 namespace HOI4ModLoader.Bootstrap;
 
 /// <summary>
-/// Profiler. HOI4ModLoader\profile-startup present: the first 150 s from the exe's entry point go to startup-profile.txt;
-/// afterwards, creating HOI4ModLoader\profile-now profiles the next 60 s (in game, at the speed to look at) into
-/// profile-&lt;tick&gt;.txt. profiler.c samples every game thread in turn, a pass about every millisecond; the report lists,
-/// per thread, how much of the time it ran, the hoi4.exe functions on the stacks of running samples (inclusive: a
-/// function and what it calls), and, for the main thread, the hoi4.exe function each wait is called from (what the frame
-/// or the load waits for).
+/// Sampling profiler (profiler.c, a pass about every millisecond).
+/// - HOI4ModLoader\profile-startup: profiles the first 150 s into startup-profile.txt.
+/// - Creating HOI4ModLoader\profile-now: profiles the next 60 s into profile-&lt;tick&gt;.txt.
+/// The report lists each thread's running time, the hoi4.exe functions on running stacks (inclusive), and where the main
+/// thread waits.
 /// </summary>
 internal static unsafe class Profiler
 {
@@ -42,10 +41,10 @@ internal static unsafe class Profiler
 
     private static void Run(bool startup)
     {
-        // An exception on this thread would end the game: a failed profile (the trigger locked, the report unwritable) is skipped.
+        // An exception on this thread would end the game, so a failed profile is skipped.
         try { if (startup) Profile(StartupMs, Path.Combine(_mods, "startup-profile.txt")); }
         catch (Exception) { }
-        for (var trigger = Path.Combine(_mods, "profile-now");; Thread.Sleep(1000)) // on demand, for the rest of the run
+        for (var trigger = Path.Combine(_mods, "profile-now");; Thread.Sleep(1000))
         {
             try
             {
@@ -59,14 +58,14 @@ internal static unsafe class Profiler
 
     private static void Profile(int ms, string output)
     {
-        timeBeginPeriod(1); // 1 ms samples; the game keeps its own timer resolution otherwise
+        timeBeginPeriod(1); // 1 ms samples
         hm_profile((uint)ms, _main);
         timeEndPeriod(1);
 
         int count;
         ulong samples;
         var threads = new ReadOnlySpan<ThreadStats>(hm_profile_threads(&count, &samples), count).ToArray();
-        var most = threads.Length == 0 ? 0 : threads.Max(t => t.Samples); // a thread there the whole time: one per pass
+        var most = threads.Length == 0 ? 0 : threads.Max(t => t.Samples); // a thread alive throughout: one per pass
         var text = new StringBuilder($"samples {samples} over {ms} ms; a thread alive throughout was sampled {most} times (every {(most == 0 ? 0 : (double)ms / most):0.0} ms)\r\n");
         text.Append("== threads (id: running / sampled)\r\n");
         foreach (var t in threads.OrderByDescending(t => t.Samples - t.Waiting))

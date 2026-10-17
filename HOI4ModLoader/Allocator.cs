@@ -5,10 +5,9 @@ using Reloaded.Hooks.Definitions.X64;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// The game's own heap: hoi4.exe's statically linked CRT allocation functions. Memory the game frees (commands, string
-/// buffers) or that we free for it must come from and go back to here. Optionally swaps in mimalloc (Microsoft's release
-/// build, HOI4ModLoader\core\mimalloc.dll) underneath them, through native shims in version.dll (bootstrap\allocator.c),
-/// with small frees quarantined: the game reads some blocks right after freeing them.
+/// The game's own heap (hoi4.exe's statically linked CRT). Memory the game frees, or that we free for it, must come from
+/// here. Can put mimalloc (core\mimalloc.dll) under it through shims in version.dll (bootstrap\allocator.c); small frees
+/// are quarantined because the game reads some blocks right after freeing them.
 /// </summary>
 public static unsafe class Allocator
 {
@@ -19,8 +18,8 @@ public static unsafe class Allocator
     [Signature] public const string MsizeSig = "48 83 EC 28 48 85 C9 75 ? E8 ? ? ? ? C7 00 16 00 00 00 E8 ? ? ? ? 48 83 C8 FF 48 83 C4 28 C3 4C 8B C1 33 D2 48 8B 0D"; // _msize
 
     /// <summary>
-    /// ActivateDecision (decision.cpp; rcx, r8 = country, rdx unused, no stack args): runs a decision's effect, then calls
-    /// a virtual on the country's targeted-decision instance, which the effect may have freed (CSelectTargetedDecisionCommand).
+    /// ActivateDecision(rcx, rdx unused, r8 = country) (decision.cpp): runs a decision's effect, then calls a virtual on the
+    /// country's targeted-decision instance, which the effect may have freed.
     /// </summary>
     [Signature] public const string ActivateDecisionSig = "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 FF FF FF 48 81 EC B0 01 00 00 49 8B F8 4C 8B F1 41 80 B8 01 0B 00 00 00";
 
@@ -63,16 +62,14 @@ public static unsafe class Allocator
     }
 
     /// <summary>
-    /// Points the game's CRT allocation functions at mimalloc. Must run before the game's CRT starts (the loader runs right
-    /// before hoi4.exe's entry point), and is never undone: blocks from mimalloc can't go back to the Windows heap.
+    /// Points the game's CRT allocation functions at mimalloc. Must run before the game's CRT starts, and is never undone:
+    /// mimalloc blocks can't go back to the Windows heap.
     /// </summary>
     internal static void UseMimalloc()
     {
-        // The release build overrides the whole process's (ucrtbase) malloc when loaded unless told not to: only the
-        // game's own CRT is meant to change. (Loaded this late it doesn't take over anyway; this makes sure.)
+        // Only the game's CRT should change, not the process's ucrtbase malloc.
         Environment.SetEnvironmentVariable("MIMALLOC_DISABLE_REDIRECT", "1");
-        // Unused pages go back to the OS reset (MEM_RESET), not decommitted: the game reads through stale pointers into
-        // freed memory (a window's clip rect after the air wings panel was rebuilt), which a decommitted page turns into a crash.
+        // Reset unused pages instead of decommitting them: the game reads freed memory through stale pointers.
         Environment.SetEnvironmentVariable("MIMALLOC_PURGE_DECOMMITS", "0");
         var mimalloc = NativeLibrary.Load(Path.Combine(Path.GetDirectoryName(typeof(Allocator).Assembly.Location)!, "mimalloc.dll"));
         nint Mi(string name) => NativeLibrary.GetExport(mimalloc, name);
@@ -89,15 +86,15 @@ public static unsafe class Allocator
         ((delegate* unmanaged<nint, nint, nint, nint, nint, nint, nint, void>)Shim("hm_init"))(heap,
             Mi("mi_malloc"), Mi("mi_calloc"), Mi("mi_realloc"), Mi("mi_free"), Mi("mi_usable_size"), Mi("mi_is_in_heap_region"));
 
-        // Free and size first: once the others hand out mimalloc blocks, these must already recognise them.
+        // Free and size first, so they recognise mimalloc blocks before anything hands them out.
         Redirect(free, Shim("hm_free"));
         Redirect(Sig.Find(MsizeSig), Shim("hm_msize"));
         Redirect(Sig.Find(ReallocSig), Shim("hm_realloc"));
         Redirect(Sig.Find(CallocSig), Shim("hm_calloc"));
         Redirect(Sig.Find(MallocSig), Shim("hm_malloc"));
 
-        // The Windows heap leaves a freed block as it was, so vanilla gets away with using the targeted-decision instance
-        // after the effect freed it; mimalloc overwrites its first qword (the vtable). Its frees wait until the call returns.
+        // ActivateDecision uses the targeted-decision instance after the effect freed it. The Windows heap leaves the block
+        // intact; mimalloc overwrites its vtable. So frees during the call wait until it returns.
         _defer = (delegate* unmanaged<int, void>)Shim("hm_defer");
         try
         {

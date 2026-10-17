@@ -18,13 +18,13 @@ public static unsafe class Game
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            return "unknown"; // a type initializer that throws would take every Game member (and the loader's startup) down with it
+            return "unknown"; // a throwing type initializer would break every Game member
         }
     }
 
     /// <summary>
     /// Country by tag: `mov rdi,[rip+GameState]; ...; call TagIndex; ...; mov rax,[rdi+Countries]; mov rax,[rax+rcx*8]`.
-    /// Twice: the const and non-const getter, both identical.
+    /// Matches twice (identical const and non-const getters).
     /// </summary>
     [Signature(2)] public const string CountryLookupSig = "83 3B 00 48 8B 3D ?? ?? ?? ?? 75 04 33 C0 EB 08 48 8B CB E8 ?? ?? ?? ?? 48 8B 5C 24 48 48 63 C8 48 8B 87 ?? ?? ?? ?? 48 8B 04 C8";
 
@@ -44,14 +44,14 @@ public static unsafe class Game
         _state = (nint*)(at + 10 + *(int*)(at + 6));
     }
 
-    /// <summary>CGameState, or 0 before the game application is up. One object for the whole process: loading a save
-    /// refills it, so it says nothing about which game runs (see <see cref="Generation"/>).</summary>
+    /// <summary>CGameState, or 0 before the game is up. One object per process, refilled by each load: use
+    /// <see cref="Generation"/> to tell games apart.</summary>
     public static nint State
     {
         get { Resolve(); return *_state; }
     }
 
-    private const int StartedOfGameState = 0xA39; // byte: a game runs (SetGameStarted 0x1401EDFF0 clears it in menus and while loading)
+    private const int StartedOfGameState = 0xA39; // byte, set by SetGameStarted (0x1401EDFF0)
 
     /// <summary>A game is running: false in the menus, the lobby and while a save loads.</summary>
     public static bool HasStarted => State is var gs && gs != 0 && *(byte*)(gs + StartedOfGameState) != 0;
@@ -59,12 +59,12 @@ public static unsafe class Game
     private static (bool Started, int Tag) _seen;
 
     /// <summary>
-    /// Counts game changes: a start (a save loaded, a new game) or a change of the controlled country. State caches of
-    /// game objects belong to one generation (<see cref="PerGame"/>). Advanced on the main thread every frame.
+    /// Counts game starts and changes of the controlled country. Caches of game objects belong to one generation
+    /// (<see cref="PerGame"/>). Updated on the main thread every frame.
     /// </summary>
     public static int Generation { get; private set; }
 
-    /// <summary>Counts game starts (a save loaded, a new game): each has a new map.</summary>
+    /// <summary>Counts game starts (a save loaded, a new game).</summary>
     internal static int Starts { get; private set; }
 
     internal static void Track()
@@ -74,13 +74,13 @@ public static unsafe class Game
         if (now.HasStarted && !_seen.Started)
         {
             Starts++;
-            Jobs.Forget(); // the last game's division pointers: a new world's division may reuse one
+            Jobs.Forget(); // the old game's division pointers may be reused
         }
         _seen = now;
         Generation++;
     }
 
-    /// <summary>The player's country tag, or 0 (main menu, no country).</summary>
+    /// <summary>The player's country tag (an observer's too), or 0.</summary>
     public static int PlayerTag
     {
         get
@@ -93,8 +93,8 @@ public static unsafe class Game
     }
 
     /// <summary>
-    /// In a multiplayer lobby or game: the session's server is a network one (host) or a proxy of one (client). The game's
-    /// own telemetry tells "multiplayer" from single player the same way.
+    /// In a multiplayer lobby or game: the session's server is a CNetworkServer (host) or CProxyServer (client), the same
+    /// test the game's telemetry uses.
     /// </summary>
     public static bool IsMultiplayer
     {
@@ -107,8 +107,7 @@ public static unsafe class Game
     }
 
     /// <summary>
-    /// The country the player controls, or 0 (main menu, observer): what commands must be sent for. <see cref="PlayerTag"/>
-    /// also gives an observer's country, for showing things.
+    /// The country the player controls, or 0 (main menu, observer). Send commands for this one, not <see cref="PlayerTag"/>.
     /// </summary>
     public static int ControlledTag
     {
@@ -124,11 +123,11 @@ public static unsafe class Game
     {
         if (tag <= 0) return 0;
         var countries = Countries;
-        var index = countries.IsEmpty ? -1 : TagIndex(tag); // a tag from another game (a stale cache) may index past the end
+        var index = countries.IsEmpty ? -1 : TagIndex(tag); // a stale tag from another game may index past the end
         return (uint)index < (uint)countries.Length ? countries[index] : 0;
     }
 
-    /// <summary>Index of <paramref name="tag"/> into the game's per-country arrays (what the game pairs with a tag as a TagIdx).</summary>
+    /// <summary>Index of <paramref name="tag"/> into the game's per-country arrays.</summary>
     public static int TagIndex(int tag)
     {
         Resolve();
@@ -143,12 +142,12 @@ public static unsafe class Game
     /// <summary>The game's clock in hours since its start date (0 without a game).</summary>
     public static int Hour => State is var gs && gs != 0 ? *(int*)(gs + HourOfGameState) : 0;
 
-    /// <summary>CRef::Resolve(int* ref) -> object (ref: {int type, int id}, as saved in the save game).</summary>
+    /// <summary>CRef::Resolve(int* ref {type, id}) -> object.</summary>
     [Signature] public const string ResolveRefSig = "48 83 EC 28 8B 01 3D 68 12 00 00 76";
 
     private static delegate* unmanaged<long*, nint> _resolveRef;
 
-    /// <summary>The object a CRef (a unit's or an army's <c>Ref</c>) names now, or 0: refs outlive a save and load, pointers don't.</summary>
+    /// <summary>The object a CRef names now, or 0. Refs survive a save and load; pointers don't.</summary>
     public static nint Resolve(long reference)
     {
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
@@ -156,25 +155,25 @@ public static unsafe class Game
         return reference == 0 ? 0 : _resolveRef(&reference);
     }
 
-    /// <summary>The game's year: its date counts hours in 365-day years from 5000 years before year 0 (1936 reads 6936).</summary>
+    /// <summary>The game's year. The clock counts hours in 365-day years from year -5000.</summary>
     public static int Year => Hour / (365 * 24) - 5000;
 
     /// <summary>The country's tag.</summary>
     public static int Tag(nint country) => *(int*)(country + TagOfCountry);
 
-    /// <summary>The country's units (CArmy*: land divisions are <see cref="Division.IsLand"/>; there may be nulls).</summary>
+    /// <summary>The country's units (CArmy*, may hold nulls; see <see cref="Division.IsLand"/>).</summary>
     public static ReadOnlySpan<nint> Units(nint country) => Native.PdxArray(country + UnitsOfCountry);
 
-    /// <summary>{tag, <see cref="TagIndex"/>} as the game's TagIdx pair (int[2]) that many game functions take by pointer.</summary>
+    /// <summary>The game's TagIdx pair {tag, <see cref="TagIndex"/>} (int[2]), which many game functions take by pointer.</summary>
     public static long TagIdx(int tag) => (uint)tag | (long)TagIndex(tag) << 32;
 
     /// <summary>CCountry::IsAtWarWith(country, int* {tag, tag index}) -> bool.</summary>
     [Signature] public const string IsAtWarWithSig = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 08 48 8B FA 8B 12 48 8B F1 3B D0 74 ? 85 D2 74 ? 85 C0 74 ? 48 83 C1 08 E8 ? ? ? ? 39 47 04 74 ? 83 7E 08 00 7E ? 48 8B 86 ? ? ? ?";
 
-    /// <summary>CCountry: the same country or an ally (country, int* {tag, tag index}, 0, 0) -> bool.</summary>
+    /// <summary>CCountry, same country or an ally (country, int* {tag, tag index}, 0, 0) -> bool.</summary>
     [Signature] public const string SameOrAlliedSig = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 08 48 8B F9 48 83 C1 08 48 8B DA 8B 12 41 0F B6 F1";
 
-    /// <summary>Game functions resolved on first use: type initialisation runs once even when AI threads race to it.</summary>
+    /// <summary>Resolved on first use; type initialisation is thread safe for racing AI threads.</summary>
     private static class Relations
     {
         public static readonly delegate* unmanaged<nint, int*, byte> AtWar = (delegate* unmanaged<nint, int*, byte>)Sig.Find(IsAtWarWithSig);
@@ -198,8 +197,8 @@ public static unsafe class Game
     }
 
     /// <summary>
-    /// GetStrategicAirForCountry (twice, identical): `mov rbx,[rax+690h]; ...; cmp dword [rbx+3Ch],0; ...; mov rax,[rbx+30h];
-    /// mov rax,[rax+rcx*8]`: the per-country air (+0x10 usable airbases, +0x58 wing pools, region records) by tag index.
+    /// GetStrategicAirForCountry (matches twice, identical): `mov rbx,[rax+690h]; ...; mov rax,[rbx+30h]; mov rax,[rax+rcx*8]`.
+    /// Per-country air by tag index: +0x10 usable airbases, +0x58 wing pools, region records.
     /// </summary>
     [Signature(2)] public const string StrategicAirSig = "48 8B 98 90 06 00 00 48 85 DB 74 ? 83 7B ? ? 74 ? 83 7F ? ? 48 8D 4F ? 75 ? 33 C0 48 63 C8 48 8B 43 ? 48 8B 04 C8";
 
@@ -215,12 +214,12 @@ public static unsafe class Game
         var gs = State;
         var holder = tag <= 0 || gs == 0 ? 0 : *(nint*)(gs + AirHolder.Holder);
         var index = holder == 0 ? -1 : TagIndex(tag);
-        if (index < 0 || index >= *(int*)(holder + AirHolder.Count)) return 0; // a tag from another game (a stale cache), as Country checks
+        if (index < 0 || index >= *(int*)(holder + AirHolder.Count)) return 0; // stale tag, as in Country
         return *(nint*)(*(nint*)(holder + AirHolder.Array) + 8 * index);
     }
 
-    // CSupplySystem (gamestate+0x3D8): per-province records by id at +0x138 (0xD8 bytes, count at +0x144), zeroed and rebuilt
-    // each UpdateSupply (main thread, hourly, before the AI pass): +0 need left after local nodes, +8 supply flowing in,
+    // CSupplySystem (gamestate+0x3D8): per-province records by id at +0x138 (0xD8 bytes each, count at +0x144), rebuilt by
+    // UpdateSupply hourly on the main thread before the AI. Record: +0 need left after local nodes, +8 supply flowing in,
     // +0x30 flow entries {u16 node, u16 country tag index, pad, i64 amount}.
     private const int SupplyOfGameState = 0x3D8, FlowOfSupply = 0x138, FlowSize = 0xD8;
     /// <summary>A province's supply flow (<see cref="SupplyFlow"/>): what its divisions need and what reaches it (long, fixed point).</summary>
@@ -230,7 +229,7 @@ public static unsafe class Game
     /// <summary>CSupplySystem, or 0.</summary>
     public static nint Supply => State is var gs && gs != 0 ? *(nint*)(gs + SupplyOfGameState) : 0;
 
-    /// <summary>The supply record of province <paramref name="id"/>: +0 need, +8 supply flowing in, <see cref="EntriesOfFlow"/>; or 0.</summary>
+    /// <summary>The supply record of province <paramref name="id"/>, or 0.</summary>
     public static nint SupplyFlow(int id)
     {
         var supply = Supply;
@@ -252,7 +251,7 @@ public static unsafe class Game
 
     public const int IdOfProvince = 0xA4;
 
-    /// <summary>The province's id (what <see cref="Province"/> and <see cref="Neighbours"/> take and give).</summary>
+    /// <summary>The province's id.</summary>
     public static int Id(nint province) => *(int*)(province + IdOfProvince);
 
     /// <summary>The adjacency from <paramref name="from"/> to its neighbour <paramref name="to"/> (an id): 0 normal, 1 strait,
@@ -266,8 +265,8 @@ public static unsafe class Game
     }
 
     /// <summary>
-    /// Ids of the provinces next to <paramref name="province"/> (land and sea). The map's adjacency never changes, so each
-    /// province's list is read once and shared: callers must not change it. Any thread (a race fills a slot twice, alike).
+    /// Ids of the land and sea provinces next to <paramref name="province"/>. Cached and shared, since adjacency never
+    /// changes: don't modify the array. Any thread.
     /// </summary>
     public static int[] Neighbours(nint province)
     {
@@ -287,7 +286,7 @@ public static unsafe class Game
 
     private static volatile int[]?[] _neighbours = new int[]?[16384];
 
-    /// <summary>The province's adjacency entries (AdjacencySize bytes each), none when it has no adjacency data.</summary>
+    /// <summary>The province's adjacency entries (AdjacencySize bytes each).</summary>
     private static (nint Data, int Count) AdjacencyList(nint province)
     {
         var adjacency = *(nint*)(province + AdjacencyOfProvince);
@@ -311,8 +310,7 @@ public static unsafe class Native
     public static void SetPdxArraySize(nint at, int size) => *(int*)(at + 0xC) = size;
 
     /// <summary>
-    /// Calls <paramref name="use"/> with a CPdxArray header viewing <paramref name="items"/> (data +0, capacity +8, size +0xC),
-    /// for game functions that only read the array passed to them.
+    /// Calls <paramref name="use"/> with a CPdxArray header over <paramref name="items"/>, for game functions that only read it.
     /// </summary>
     public static T WithPdxArray<T>(nint[] items, Func<nint, T> use) => WithArray(items, use);
 
@@ -339,8 +337,7 @@ public static unsafe class Native
     }
 
     /// <summary>
-    /// Replaces the contents of the MSVC std::string at <paramref name="at"/>. Heap buffers come from and go back to the
-    /// game's own heap (<see cref="Allocator"/>), like the game's strings.
+    /// Replaces the contents of the MSVC std::string at <paramref name="at"/>, using the game's heap (<see cref="Allocator"/>).
     /// </summary>
     public static void SetMsvcString(nint at, string value) => SetMsvcString(at, Encoding.UTF8.GetBytes(value));
 
@@ -361,7 +358,7 @@ public static unsafe class Native
     /// <summary>The game's text bytes (a name, a token's string) as a string.</summary>
     public static string Utf8(ReadOnlySpan<byte> bytes) => Encoding.UTF8.GetString(bytes);
 
-    private const int BigBuffer = 0x1000; // MSVC allocates std::string buffers this big 32-byte aligned, the real block's pointer just before
+    private const int BigBuffer = 0x1000; // from this size MSVC aligns the buffer to 32 and stores the real block pointer before it
 
     /// <summary>Frees the heap buffer of the MSVC std::string at <paramref name="at"/> (none when inline), leaving it dangling.</summary>
     internal static void FreeMsvcString(nint at)
@@ -392,7 +389,7 @@ public readonly unsafe struct OrdersGroup(nint ptr)
     public int AttachedWingCount => *(int*)(Ptr + AttachedWingsOffset + 0xC);
     public ReadOnlySpan<nint> Armies => Native.PdxArray(Ptr + ArmiesOffset);
 
-    /// <summary>Every army and army group of the country (a snapshot of each list: commands sent meanwhile may change them).</summary>
+    /// <summary>Every army and army group of the country, from snapshots of the lists.</summary>
     public static IEnumerable<nint> OfCountry(nint country)
     {
         foreach (var provider in Native.PdxArray(country + ProvidersOfCountry).ToArray())
@@ -404,9 +401,8 @@ public readonly unsafe struct OrdersGroup(nint ptr)
     }
 
     /// <summary>
-    /// Runs <paramref name="action"/> while this army group's member list also holds its armies' divisions. Army groups own
-    /// no divisions themselves, so game logic that looks at a group's members finds nothing for them; this lets it see the
-    /// whole army group for one call. Keeps the game's order (multiplayer is lockstep: every client must see the same sequence).
+    /// Runs <paramref name="action"/> while this army group's member list also holds its armies' divisions (army groups own
+    /// none themselves). Keeps the game's order, so lockstep multiplayer stays in sync.
     /// </summary>
     public void WithArmiesMembers(Action action)
     {
@@ -426,14 +422,12 @@ public readonly unsafe struct OrdersGroup(nint ptr)
 }
 
 /// <summary>
-/// A plugin's state that belongs to one game and country (queued items, targets, pointers into game data):
-/// <see cref="Check"/> runs the reset when either changed since the last check. Call it before using that state.
+/// Plugin state tied to one game and country. Call <see cref="Check"/> before using it: it resets the state when either changed.
 /// </summary>
 public sealed class PerGame(Action reset)
 {
     private int _generation = -1;
 
-    /// <summary>Runs the reset if the game or the controlled country changed since the last call.</summary>
     public void Check()
     {
         if (Game.Generation == _generation) return;
@@ -453,12 +447,12 @@ public static unsafe class ArmyCard
 
     private static int _isArmyGroup;
 
-    /// <summary>Offset of the card's "this card is an army group's" byte, as the slot refresh instruction names it.</summary>
+    /// <summary>Offset of the card's is-army-group byte, read from the slot refresh code.</summary>
     public static int IsArmyGroupOffset => _isArmyGroup != 0 ? _isArmyGroup : _isArmyGroup = *(int*)(Sig.Find(RefreshWingSlotsSig) + 12);
 
     /// <summary>
-    /// Runs <paramref name="original"/> with the card treated as an army card when <paramref name="when"/>: the card UI skips
-    /// army-group cards for attached wings and railway guns. UI thread only, so nothing else sees the flip.
+    /// Runs <paramref name="original"/> with the card treated as an army card when <paramref name="when"/>, since the card UI
+    /// skips army-group cards for attached wings and railway guns. UI thread only.
     /// </summary>
     public static void AsArmyCard(nint card, bool when, Action original)
     {
@@ -470,8 +464,7 @@ public static unsafe class ArmyCard
     }
 
     /// <summary>
-    /// <paramref name="items"/> dealt round-robin into <paramref name="groups"/> shares (fewer if there are fewer items), in
-    /// order: share i gets items i, i + groups, ...
+    /// <paramref name="items"/> dealt round-robin into at most <paramref name="groups"/> shares: share i gets items i, i + groups, ...
     /// </summary>
     // ponytail: equal shares, not weighted by army size or front; weigh them if that matters in play.
     public static nint[][] Spread(nint[] items, int groups) =>

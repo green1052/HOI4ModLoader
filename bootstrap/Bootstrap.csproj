@@ -1,9 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <!--
-      version.dll: C# compiled ahead of time (Native AOT) plus the C in native.c, profiler.c, prefetch.c and allocator.c,
-      linked into one DLL. `dotnet publish` builds it (HOI4ModLoader.csproj does when these sources change); it needs the
-      Visual Studio C++ build tools, for the linker and the C compiler. Not in the .slnx: a plain build doesn't make it.
+      version.dll: Native AOT C# plus the *.c files, linked into one DLL. Built by `dotnet publish` (HOI4ModLoader.csproj
+      runs it when these sources change); needs the Visual Studio C++ build tools. Not in the .slnx.
     -->
     <PropertyGroup>
         <AssemblyName>version</AssemblyName>
@@ -28,8 +27,8 @@
     </ItemGroup>
 
     <!--
-      VS 18's vcvarsall runs vswhere.exe from PATH, and where the Installer folder isn't on it the error it prints lands in
-      front of the linker's folder NativeAOT reads from its output ("...;C:\...\x64\"): keep only the folder.
+      Without vswhere.exe on PATH, VS 18's vcvarsall prints an error before the linker folder NativeAOT reads
+      ("...;C:\...\x64\"): keep only the folder.
     -->
     <Target Name="FixCppToolsDirectory" AfterTargets="SetupOSSpecificProps" Condition="$(_CppToolsDirectory.Contains(';'))">
         <PropertyGroup>

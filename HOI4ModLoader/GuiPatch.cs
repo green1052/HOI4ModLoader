@@ -8,10 +8,9 @@ using CallingConventions = Reloaded.Hooks.Definitions.X64.CallingConventions;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// A game file the assembly changes, built at startup from the installed game's vanilla <see cref="File"/> plus
-/// <see cref="Snippet"/> (an embedded gui\*.gui file): inserted after the <see cref="After"/> match, or replacing the
-/// <see cref="Replace"/> match (the snippet can put back groups with ${1} etc.). Built from the game the player has, it
-/// follows game updates without a new release; <see cref="GameFiles"/> shows it to the game.
+/// A game file the assembly changes. At startup, <see cref="Snippet"/> (an embedded gui\*.gui) goes into the installed
+/// game's <see cref="File"/>, after each <see cref="After"/> match or in place of each <see cref="Replace"/> match (${1}
+/// etc. work). Built from the installed game, so it follows game updates. <see cref="GameFiles"/> serves it.
 /// </summary>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class GuiPatchAttribute(string file, string snippet) : Attribute
@@ -19,7 +18,7 @@ public sealed class GuiPatchAttribute(string file, string snippet) : Attribute
     /// <summary>Path in the game folder, e.g. "interface/settings.gui".</summary>
     public string File { get; } = file;
 
-    /// <summary>Embedded resource name, e.g. "gui/settings_mods.gui" (every project embeds its gui\*.gui so).</summary>
+    /// <summary>Embedded resource name, e.g. "gui/settings_mods.gui".</summary>
     public string Snippet { get; } = snippet;
 
     /// <summary>Regex: the snippet goes in after each match.</summary>
@@ -44,9 +43,8 @@ public sealed class GuiPatchAttribute(string file, string snippet) : Attribute
 }
 
 /// <summary>
-/// The <see cref="GuiPatchAttribute"/> files, written to HOI4ModLoader\ui and put in front of the game's virtual file system
-/// (its PhysFS search path, which hoi4.exe exports): the game reads them instead of its own and mods' copies, with no mod
-/// to install or enable. Only interface files: the checksum (common, events, history, map) stays vanilla.
+/// Files written to HOI4ModLoader\ui and mounted first in the game's PhysFS search path, so the game reads them over its
+/// own and mods' copies. Interface files only, so the checksum stays vanilla.
 /// </summary>
 public static class GameFiles
 {
@@ -64,7 +62,7 @@ public static class GameFiles
     private static UnmountFn? _unmount;
     private static nint _dir; // Dir in UTF-8, for PhysFS; never freed
 
-    /// <summary>Before the game starts: every directory it mounts goes in behind ours (PhysFS mounts in front by default).</summary>
+    /// <summary>Before the game starts: keeps our directory in front of every directory the game mounts.</summary>
     internal static void Install()
     {
         var exe = NativeLibrary.GetMainProgramHandle();
@@ -86,9 +84,8 @@ public static class GameFiles
     public static void Add(string path, byte[] contents) => File.WriteAllBytes(Target(path), contents);
 
     /// <summary>
-    /// Puts <paramref name="source"/> where the game reads <paramref name="path"/> (e.g. "gfx/fonts/korean/hoi_18mbs.dds"), in
-    /// front of its own and mods' copies. From a plugin's Load: the game reads most files once, at startup. A hard link where
-    /// it can (the same volume), else a copy.
+    /// Serves <paramref name="source"/> as game file <paramref name="path"/> (e.g. "gfx/fonts/korean/hoi_18mbs.dds"), over its
+    /// own and mods' copies. Call from Load: the game reads most files once at startup. Hard link if possible, else a copy.
     /// </summary>
     public static void Add(string path, string source)
     {
@@ -97,8 +94,8 @@ public static class GameFiles
     }
 
     /// <summary>
-    /// Where <paramref name="path"/> goes, its folder made and any earlier file gone: a hot reload's second add, or a hard
-    /// link <see cref="Add(string, string)"/> left there, which writing would write into its source (a cached font).
+    /// Where <paramref name="path"/> goes, with its folder made and any old file deleted (writing into an old hard link
+    /// would change its source).
     /// </summary>
     private static string Target(string path)
     {
@@ -108,12 +105,12 @@ public static class GameFiles
         return target;
     }
 
-    /// <summary>Writes the files of <paramref name="assemblies"/> anew (left out: vanilla). Before the game reads its interface.</summary>
+    /// <summary>Rewrites the patched files of <paramref name="assemblies"/>, before the game reads its interface.</summary>
     internal static void Build(IEnumerable<Assembly> assemblies)
     {
         try
         {
-            if (Directory.Exists(Dir)) Directory.Delete(Dir, true); // a disabled plugin's or a game update's leftovers
+            if (Directory.Exists(Dir)) Directory.Delete(Dir, true); // stale files
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -121,7 +118,7 @@ public static class GameFiles
         }
         try { Gui.WriteNumberIcons(Dir); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"number icons: {e.Message}"); }
-        var built = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // file -> text so far: patches of one file stack
+        var built = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // file -> text so far, so patches stack
         foreach (var assembly in assemblies)
         foreach (var patch in assembly.GetCustomAttributes<GuiPatchAttribute>())
         {

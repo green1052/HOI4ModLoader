@@ -3,15 +3,15 @@ using System.Globalization;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// INI-style settings file, like BepInEx's ConfigFile. <see cref="Bind{T}"/> returns the stored value,
-/// writing the default (with its description) the first time so players can find and edit it.
+/// INI-style settings file, like BepInEx's ConfigFile. <see cref="Bind{T}"/> returns the stored value and writes the
+/// default with its description the first time.
 /// </summary>
 public sealed class ConfigFile
 {
     private readonly string _path;
     private readonly List<string> _lines;
     private readonly HashSet<(string Section, string Key)> _bound = []; // bound through this instance
-    // Settings with a list of values, by file: the settings menu reads its own ConfigFile of the same file.
+    // Static, keyed by file: the settings menu opens its own ConfigFile of the same file.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, string Section, string Key), Func<IReadOnlyList<string>>> ChoiceLists = new();
 
     /// <summary>The settings file at <paramref name="path"/>, read now (created on the first <see cref="Bind{T}"/> that writes).</summary>
@@ -27,9 +27,9 @@ public sealed class ConfigFile
     internal IReadOnlyList<string>? ChoicesOf(string section, string key) => ChoiceLists.TryGetValue((_path, section, key), out var choices) ? choices() : null;
 
     /// <summary>
-    /// The setting's stored value (read with the invariant culture), or <paramref name="defaultValue"/> when it is missing (then
-    /// written with <paramref name="description"/> as its comment) or unreadable. Every setting a plugin has must be bound
-    /// on each load: the ones not bound are deleted.
+    /// The setting's stored value (invariant culture), or <paramref name="defaultValue"/> when it is unreadable or missing;
+    /// a missing one is written with <paramref name="description"/> as its comment. Bind every setting on each load:
+    /// unbound ones are deleted.
     /// </summary>
     public T Bind<T>(string section, string key, T defaultValue, string description) where T : IConvertible
     {
@@ -54,7 +54,7 @@ public sealed class ConfigFile
         }
         else
         {
-            var end = sectionAt + 1; // after the section's last entry: the file lists settings in the order they're bound
+            var end = sectionAt + 1; // after the section's last entry, so settings stay in bind order
             while (end < _lines.Count && !IsHeader(_lines[end].Trim())) end++;
             _lines.InsertRange(end, entry);
         }
@@ -94,8 +94,8 @@ public sealed class ConfigFile
     }
 
     /// <summary>
-    /// Deletes the entries this instance never bound (settings a plugin no longer has), with their description, except in
-    /// section <paramref name="keep"/>; a section that loses all its entries goes too. Returns the "section.key"s deleted.
+    /// Deletes entries this instance never bound, with their descriptions, outside section <paramref name="keep"/>.
+    /// A section left empty goes too. Returns the deleted "section.key"s.
     /// </summary>
     internal List<string> RemoveUnbound(string keep)
     {
@@ -142,13 +142,11 @@ public sealed class ConfigFile
         return removed;
     }
 
-    // One reading of the file for every path (Bind, Entries, Set, RemoveUnbound): a trimmed line is a [section] header, a
-    // # comment or a `key = value` entry; anything else is ignored.
+    // A trimmed line is a [section] header, a # comment or a `key = value` entry; anything else is ignored.
     private static bool IsHeader(string line) => line.StartsWith('[') && line.EndsWith(']');
 
     private static string ValueOf(string line) => line[(line.IndexOf('=') + 1)..].Trim();
 
-    /// <summary>A `key = value` line (trimmed), as <see cref="Entries"/> reads them.</summary>
     private static bool IsEntry(string line, out string key)
     {
         key = line.Split('=', 2) is [var k, _] && !line.StartsWith('#') && !IsHeader(line) ? k.Trim() : "";

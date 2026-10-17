@@ -14,13 +14,13 @@ public static unsafe class AirRegions
     private const int CombatData = 0x170, OwnWings = 0x08, OtherWings = 0x20, WingDataSize = 0x98, HourOfWingData = 0x0C, DamageTaken = 0x38;
     private const int SuperiorityIdOfRegion = 0x60, CombatIdOfRegion = 0x58;
 
-    /// <summary>Every CStrategicRegion by id (what commands name a region by; id 0 is none), empty without a game.</summary>
+    /// <summary>Every CStrategicRegion by id (id 0 is none), empty without a game.</summary>
     public static ReadOnlySpan<nint> All => Game.State is var gs && gs != 0 ? Native.PdxArray(gs + RegionsOfGameState) : default;
 
     /// <summary>
-    /// Region id -> planes <paramref name="tag"/> lost there and planes it shot down since <paramref name="since"/> (game
-    /// hour), for the regions where it fought in the air; <paramref name="contested"/>: only where the enemy still has air
-    /// superiority (its planes are active there). Any thread that may read the game state.
+    /// Region id -> planes <paramref name="tag"/> lost and shot down there since game hour <paramref name="since"/>, for
+    /// regions with air combat. <paramref name="contested"/>: only regions where the enemy has air superiority. Any thread
+    /// that may read the game state.
     /// </summary>
     public static Dictionary<int, (long Lost, long Kills)> Combat(int tag, int since, bool contested)
     {
@@ -50,7 +50,7 @@ public static unsafe class AirRegions
         return fights;
     }
 
-    /// <summary>Planes shot down (by planes, AA or trains) in a region's wing records (combat data +8 own, +0x20 others) since the hour, newest first.</summary>
+    /// <summary>Planes shot down (by planes, AA or trains) since the hour, from a region's wing records (combat data +8 own, +0x20 others).</summary>
     public static long PlanesLost(nint wings, int since)
     {
         long planes = 0;
@@ -68,29 +68,28 @@ public static unsafe class AirRegions
 }
 
 /// <summary>
-/// More Ground Crews: a country spends NAir.AIR_MORE_GROUND_CREWS_COST command power to get AIR_MORE_GROUND_CREWS_BOOST air
-/// efficiency in one strategic region. Turning it on takes the cost from its command power and lowers its command power cap by
-/// as much while on; turning it off gives the cost back (country.cpp's command power allocator). Offsets for HOI4 1.19.3.
+/// More Ground Crews: NAir.AIR_MORE_GROUND_CREWS_COST command power buys AIR_MORE_GROUND_CREWS_BOOST air efficiency in one
+/// strategic region. While on, the cost is spent and the command power cap is lower by as much; turning it off refunds it.
+/// Offsets for HOI4 1.19.3.
 /// </summary>
 public static unsafe class GroundCrews
 {
     /// <summary>
-    /// The air region view's button: 0x38 bytes, ctor (mem, int* tag, int region id, bool on) at 0x141940880:
-    /// tag +0x28 (<see cref="Commands.New"/>'s), region id +0x2C, on +0x30 (a byte, where Commands.New puts the target).
+    /// The air region view's button: 0x38 bytes, ctor (mem, int* tag, int region id, bool on) at 0x141940880.
+    /// Tag +0x28, region id +0x2C, on +0x30 (byte; Commands.New's target).
     /// </summary>
     [VTable] public const string CommandClass = "CMoreGroundCrewsCommand";
 
     /// <summary>
-    /// CMoreGroundCrewsCommand::CanExecute (vtable slot 9, 0x141948200), after the country check: region id (+0x2C) in
-    /// [1, gamestate+0x2EC), the region from gamestate+0x2E0; turning on (+0x30) needs country+0x1F0 command power &gt;= the cost
-    /// (`mov r8,[rip+AIR_MORE_GROUND_CREWS_COST]` at +58); then `call IsOn(country, region)` (+89) must differ from it.
+    /// CMoreGroundCrewsCommand::CanExecute (vtable slot 9, 0x141948200), after the country check: region id in
+    /// [1, gamestate+0x2EC) from gamestate+0x2E0; turning on needs command power (country+0x1F0) &gt;= the cost
+    /// (`mov r8,[rip+AIR_MORE_GROUND_CREWS_COST]` at +58); `call IsOn(country, region)` at +89 must differ from "on".
     /// </summary>
     [Signature] public const string CanExecuteSig = "48 63 43 2C 83 F8 01 7C ? 48 8B 15 ? ? ? ? 3B 82 EC 02 00 00 7D ? 48 8B C8 48 8B 82 E0 02 00 00 48 8B 3C C8 48 85 FF 74 ? 80 7B 30 00 74 ? 48 8D 4B 28 E8 ? ? ? ? 4C 8B 05 ? ? ? ? 4C 39 80 F0 01 00 00 7C ? 48 8D 4B 28 E8 ? ? ? ? 48 8B D7 48 8B C8 E8 ? ? ? ? 3A 43 30 0F 95 C0";
 
     private const int CommandSize = 0x38, RegionOfCommand = 0x2C;
     private const int CommandPowerOfCountry = 0x1F0; // long, fixed point
 
-    /// <summary>Resolved on first use: type initialisation runs once.</summary>
     private static class Resolved
     {
         private static readonly nint At = Sig.Find(CanExecuteSig);
@@ -98,13 +97,13 @@ public static unsafe class GroundCrews
         public static readonly delegate* unmanaged<nint, nint, byte> IsOn = (delegate* unmanaged<nint, nint, byte>)IsOnAt(At);
     }
 
-    /// <summary>The cost define, from a <see cref="CanExecuteSig"/> match (`mov r8,[rip+disp]` at +58).</summary>
+    /// <summary>The cost define's address, from a <see cref="CanExecuteSig"/> match.</summary>
     internal static nint CostAt(nint at) => at + 65 + *(int*)(at + 61);
 
-    /// <summary>CCountry: ground crews on in the region (country, CStrategicRegion*) -> bool (country+0x4D8: region -> its state, on at +0x38), from the call at +89.</summary>
+    /// <summary>IsOn(country, CStrategicRegion*) -> bool, from the call at +89 (reads country+0x4D8: region -> state, on at +0x38).</summary>
     internal static nint IsOnAt(nint at) => at + 94 + *(int*)(at + 90);
 
-    /// <summary>Command power it costs to turn on (fixed point; the define, so mods may change it).</summary>
+    /// <summary>Command power it costs to turn on (fixed point; read from the define, which mods may change).</summary>
     public static long Cost => *Resolved.Cost;
 
     /// <summary>The country's command power (fixed point).</summary>
@@ -121,9 +120,8 @@ public static unsafe class GroundCrews
     }
 
     /// <summary>
-    /// Turns them on or off in region <paramref name="id"/> for <paramref name="tag"/> if the game accepts it (the region
-    /// exists, enough command power to turn on, not already so). <paramref name="force"/>: see <see cref="Commands.Post(nint, bool)"/>
-    /// (AI countries); the player's own command without. Main thread.
+    /// Turns them on or off in region <paramref name="id"/> for <paramref name="tag"/>, if the game accepts it.
+    /// <paramref name="force"/> for AI countries (see <see cref="Commands.Post(nint, bool)"/>). Main thread.
     /// </summary>
     public static bool Set(int tag, int id, bool on, bool force)
     {
@@ -133,13 +131,12 @@ public static unsafe class GroundCrews
     }
 
     /// <summary>
-    /// One pass for the country: off first in the regions where its wings no longer fought since <paramref name="quietSince"/>,
-    /// then (one per pass) while its command power is under <paramref name="reserve"/>; then on in the regions where it fought hardest since
-    /// <paramref name="fightSince"/> (planes lost and shot down where the enemy's planes are active, <paramref name="minPlanes"/>
-    /// at least), up to <paramref name="max"/> regions on, while the command power left after the cost stays at the reserve or more.
-    /// <paramref name="ours"/>: the regions this caller turned on, the only ones it turns off (null: any); <paramref name="handsOff"/>:
-    /// regions never turned on, to which those of <paramref name="ours"/> found off are added (turned off by hand). Returns the
-    /// regions turned on and off. Main thread.
+    /// One pass for the country. Main thread. Returns the regions turned on and off.
+    /// - Off: regions with no air combat since <paramref name="quietSince"/>, and one more if command power is under <paramref name="reserve"/>.
+    /// - On: regions with the most planes lost and shot down since <paramref name="fightSince"/> where the enemy has air
+    ///   superiority (at least <paramref name="minPlanes"/>), up to <paramref name="max"/>, keeping command power at the reserve.
+    /// <paramref name="ours"/>: the regions this caller turned on, the only ones it turns off (null: any).
+    /// <paramref name="handsOff"/>: regions never turned on; regions of <paramref name="ours"/> turned off by hand are added.
     /// </summary>
     public static (List<int> On, List<int> Off) Manage(nint country, long reserve, int max, int fightSince, int quietSince, int minPlanes,
         bool force, HashSet<int>? ours = null, HashSet<int>? handsOff = null)

@@ -1,8 +1,8 @@
 namespace HOI4ModLoader;
 
 /// <summary>
-/// CProvince: fields, terrain, buildings, and how it stands to a country (enemy, friendly, supply). Offsets for HOI4 1.19.3.
-/// Readers only: safe from AI threads where the game itself reads the same data there.
+/// CProvince: fields, terrain, buildings, and its relation to a country (enemy, friendly, supply). Offsets for HOI4 1.19.3.
+/// Read only, so safe on AI threads.
 /// </summary>
 public static unsafe class Province
 {
@@ -28,7 +28,7 @@ public static unsafe class Province
     /// <summary>Its CState, or 0 (sea).</summary>
     public static nint State(nint province) => *(nint*)(province + StateOffset);
 
-    /// <summary>Its building container (what <see cref="HOI4ModLoader.Buildings.Find"/> takes).</summary>
+    /// <summary>Its building container, for <see cref="HOI4ModLoader.Buildings.Find"/>.</summary>
     public static nint Buildings(nint province) => province + BuildingsOffset;
 
     /// <summary>Its CTerrainType, or 0.</summary>
@@ -45,14 +45,14 @@ public static unsafe class Province
         return terrain == 0 ? 0 : *(int*)(terrain + CategoryOfTerrain);
     }
 
-    /// <summary>Units may enter it (its static data's land flag).</summary>
+    /// <summary>Units may enter it (static data land flag).</summary>
     public static bool Enterable(nint province)
     {
         var info = *(nint*)(province + StaticOffset);
         return info != 0 && (*(byte*)(info + FlagsOfStatic) & 1) != 0;
     }
 
-    /// <summary>FortLevel(CProvince*) -> int: land forts, as the AI's micro attacks weigh them.</summary>
+    /// <summary>FortLevel(CProvince*) -> int: land fort level.</summary>
     [Signature] public const string FortLevelSig = "4C 63 91 EC 01 00 00 33 C0 4D 85 D2 7E ? 4C 8B 99 E0 01 00 00 44 8B C8 0F 1F 84 00 00 00 00 00 4B 8B 0C CB 49 FF C1 48 8B 91 E0 01 00 00 44 0F BF 41 42 44 0F AF 82 08 03 00 00";
 
     private static class Forts
@@ -63,7 +63,7 @@ public static unsafe class Province
     /// <summary>Land fort level. Any thread.</summary>
     public static int FortLevel(nint province) => Forts.Level(province);
 
-    /// <summary>Building level by its type's slot in the building database (<see cref="HOI4ModLoader.Buildings.NavalBaseSlot"/>...), 0: none.</summary>
+    /// <summary>Building level by building database slot (<see cref="HOI4ModLoader.Buildings.NavalBaseSlot"/>...), 0: none.</summary>
     public static int BuildingLevel(nint province, int slot) => HOI4ModLoader.Buildings.Level(Buildings(province), HOI4ModLoader.Buildings.Type(slot));
 
     /// <summary>Held by a country at war with <paramref name="country"/> (tag <paramref name="tag"/>); never sea.</summary>
@@ -80,7 +80,7 @@ public static unsafe class Province
         return controller == tag || Game.Allied(country, controller);
     }
 
-    // Loops, not LINQ: the AI plugins ask these for every front province on AI threads, and a capturing lambda allocates per call.
+    // Loops, not LINQ: these run for every front province, and capturing lambdas allocate.
 
     /// <summary>Next to enemy-held ground.</summary>
     public static bool NextToEnemy(nint country, int tag, nint province)
@@ -109,8 +109,8 @@ public static unsafe class Province
     private const int MaxPocket = 12; // enemy provinces a pocket may span
 
     /// <summary>
-    /// Enemy divisions that taking <paramref name="target"/> cuts off: in the enemy ground next to it that no longer reaches
-    /// the rest of the enemy's without it (a salient whose neck it is), up to <see cref="MaxPocket"/> provinces.
+    /// Enemy divisions cut off by taking <paramref name="target"/>: those in neighbouring enemy regions of at most
+    /// <see cref="MaxPocket"/> provinces that it closes.
     /// </summary>
     public static int Pocket(nint country, int tag, nint target)
     {
@@ -118,19 +118,18 @@ public static unsafe class Province
         var seen = new HashSet<int> { Game.Id(target) };
         foreach (var id in Game.Neighbours(target))
             if (!seen.Contains(id) && Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)
-                && Region(e, MaxPocket, p => Enemy(country, tag, p), seen) is { } region) // the enemy ground beyond, closed and small: cut off
+                && Region(e, MaxPocket, p => Enemy(country, tag, p), seen) is { } region) // closed and small: cut off
                 cut += region.Sum(Divisions);
         return cut;
     }
 
-    /// <summary>The enemy province is in a pocket already: its enemy ground, up to <see cref="MaxPocket"/> provinces, is closed.</summary>
+    /// <summary>The enemy province is already in a pocket of at most <see cref="MaxPocket"/> provinces.</summary>
     public static bool Encircled(nint country, int tag, nint province) =>
         Enemy(country, tag, province) && Region(province, MaxPocket, p => Enemy(country, tag, p)) != null;
 
     /// <summary>
-    /// The land provinces connected to <paramref name="start"/> through ones <paramref name="inside"/> accepts, if they are no
-    /// more than <paramref name="max"/>; null when the region is bigger (open). <paramref name="seen"/>: ids to leave out, and
-    /// it gets the ones walked.
+    /// The provinces connected to <paramref name="start"/> through ones <paramref name="inside"/> accepts, or null if more
+    /// than <paramref name="max"/>. <paramref name="seen"/>: ids to skip; walked ids are added.
     /// </summary>
     public static List<nint>? Region(nint start, int max, Func<nint, bool> inside, HashSet<int>? seen = null)
     {
@@ -148,8 +147,8 @@ public static unsafe class Province
     }
 
     /// <summary>
-    /// How the front's length changes when <paramref name="target"/> is taken: its enemy neighbours become new front, its
-    /// neighbours of ours stop being front. Negative = shorter.
+    /// How the front's length changes when <paramref name="target"/> is taken: +1 per enemy neighbour, -1 per friendly one.
+    /// Negative = shorter.
     /// </summary>
     public static int FrontChange(nint country, int tag, nint target)
     {
@@ -164,7 +163,7 @@ public static unsafe class Province
         return change;
     }
 
-    /// <summary>How hard the enemy province is to take from <paramref name="from"/>: its divisions and forts, more for harsh terrain or a river in front of it.</summary>
+    /// <summary>How hard the enemy province is to take from <paramref name="from"/>: divisions and forts, plus harsh terrain or a river.</summary>
     public static int AttackWeight(nint target, nint from)
     {
         var weight = 2 * Divisions(target) + FortLevel(target);
@@ -174,16 +173,15 @@ public static unsafe class Province
     }
 
     /// <summary>
-    /// Supply only flows through our side's provinces, so once <paramref name="to"/> is taken its supply comes over its land
-    /// neighbours held by us or allies. Starved: <paramref name="from"/> gets less than <paramref name="sharePercent"/> % of what
-    /// it needs and no other friendly neighbour of the target has that much spare (flow in minus its own need). Any thread, read
-    /// only: the game rebuilds the flow on the main thread each hour, before the AI pass.
+    /// Whether <paramref name="to"/> would be short of supply once taken: <paramref name="from"/> gets under
+    /// <paramref name="sharePercent"/> % of its need, and no other friendly neighbour of the target has that much spare.
+    /// Any thread, read only.
     /// </summary>
     public static bool Starved(nint country, int tag, nint from, nint to, int sharePercent)
     {
         var at = Game.SupplyFlow(Game.Id(from));
         if (at == 0) return false;
-        var need = *(long*)(at + Game.NeedOfFlow); // the attackers and whatever else draws supply there
+        var need = *(long*)(at + Game.NeedOfFlow);
         var wanted = need * sharePercent / 100;
         if (need <= 0 || *(long*)(at + Game.SuppliedOfFlow) >= wanted) return false;
         foreach (var id in Game.Neighbours(to))
@@ -219,26 +217,26 @@ public static unsafe class State
     }
 }
 
-/// <summary>Buildings: the CBuildingDatabase's types and a container's CBuilding of a type. Offsets for HOI4 1.19.3.</summary>
+/// <summary>Building types (CBuildingDatabase) and buildings in a container. Offsets for HOI4 1.19.3.</summary>
 public static unsafe class Buildings
 {
     /// <summary>BuildingContainer::Find(container, CBuildingType*) -> CBuilding* or null (+0x40 level, +0x42 working level).</summary>
     [Signature] public const string FindSig = "80 7A 20 00 74 ? 83 79 2C 00 74 ? 48 63 92 E0 02 00 00 48 8B 41 20";
 
-    /// <summary>A call of the building database getter, `call Get; mov rcx,[rax+3B8h]` (naval base type); the getter reads [rip+db].</summary>
+    /// <summary>A call of the building database getter: `call Get; mov rcx,[rax+3B8h]` (naval base type). Get reads [rip+db].</summary>
     [Signature] public const string DbCallSig = "E8 ? ? ? ? 48 8B 88 B8 03 00 00 E8 ? ? ? ? 8B D8";
 
-    // CBuildingDatabase (0x3F0 bytes): 0x3A0 supply_node, 0x3A8 rail_way, 0x3B0 infrastructure, 0x3B8 naval_base (the slot
-    // DbCallSig reads), 0x3C0 arms_factory, 0x3C8 industrial_complex; 0x298 CPdxArray<CBuildingType*> the air base types.
+    // CBuildingDatabase (0x3F0 bytes): 0x3A0 supply_node, 0x3A8 rail_way, 0x3B0 infrastructure, 0x3B8 naval_base,
+    // 0x3C0 arms_factory, 0x3C8 industrial_complex; 0x298 CPdxArray<CBuildingType*> air base types.
     public const int SupplyNodeSlot = 0x3A0, InfrastructureSlot = 0x3B0, CivilianFactorySlot = 0x3C8, AirBaseTypesOffset = 0x298;
-    private const int LevelOfBuilding = 0x40, WorkingLevelOfBuilding = 0x42; // short levels, built and working (bombed-out ones don't count)
+    private const int LevelOfBuilding = 0x40, WorkingLevelOfBuilding = 0x42; // short: built, working
 
     private static class Resolved
     {
         private static readonly nint Call = Sig.Find(DbCallSig);
         private static readonly nint Getter = Call + 5 + *(int*)(Call + 1);
-        public static readonly nint* Db = (nint*)(Getter + 18 + *(int*)(Getter + 14)); // the global; the database is made after the plugins load
-        public static readonly int NavalBase = *(int*)(Call + 8);                      // `mov rcx,[rax+3B8h]`: as the game reads it
+        public static readonly nint* Db = (nint*)(Getter + 18 + *(int*)(Getter + 14)); // set after plugins load
+        public static readonly int NavalBase = *(int*)(Call + 8);                      // from `mov rcx,[rax+3B8h]`
         public static readonly delegate* unmanaged<nint, nint, nint> Find = (delegate* unmanaged<nint, nint, nint>)Sig.Find(FindSig);
     }
 
@@ -255,10 +253,10 @@ public static unsafe class Buildings
         return db == 0 ? 0 : *(nint*)(db + slot);
     }
 
-    /// <summary>The air base types (airfields, carriers' too).</summary>
+    /// <summary>The air base types, carriers included.</summary>
     public static ReadOnlySpan<nint> AirBaseTypes => Db is var db && db != 0 ? Native.PdxArray(db + AirBaseTypesOffset) : default;
 
-    /// <summary>The container's CBuilding of <paramref name="type"/> (non-null: Find reads it at once), or 0. Any thread.</summary>
+    /// <summary>The container's CBuilding of <paramref name="type"/> (must be non-null), or 0. Any thread.</summary>
     public static nint Find(nint container, nint type) => Resolved.Find(container, type);
 
     /// <summary>Built level of <paramref name="type"/> in the container (0: none, or no type).</summary>
@@ -281,13 +279,13 @@ public static unsafe class Division
 {
     public const int KindOffset = 0x08, RefOffset = 0x18, GroupOffset = 0xC0, StatsOffset = 0x138, CombatsOffset = 0x1A8;
     public const int CommanderOffset = 0x1D8, OwnerOffset = 0x1E0, LocationOffset = 0x1F0, PathOffset = 0x200, RetreatingOffset = 0x24C, BusyOffset = 0x2F8;
-    private const int StrengthSlot = 34, OrganisationSlot = 39; // vtable: (unit, long* out) -> out, what has_unit_organization reads
+    private const int StrengthSlot = 34, OrganisationSlot = 39; // vtable: (unit, long* out) -> out
     private const int Hardness = 0xB8, Armor = 0x298;          // stats
     private const long Armored = 40_000;                       // hardness 0.4
 
     public static bool IsLand(nint unit) => *(int*)(unit + KindOffset) == 0;
 
-    /// <summary>Its CRef id (what commands name it by).</summary>
+    /// <summary>Its CRef id, which commands use.</summary>
     public static long Ref(nint unit) => *(long*)(unit + RefOffset);
 
     /// <summary>Its army (COrdersGroup), or 0.</summary>
@@ -298,13 +296,13 @@ public static unsafe class Division
 
     public static int Owner(nint unit) => *(int*)(unit + OwnerOffset);
 
-    /// <summary>The CProvince it stands in, or 0 (embarked...).</summary>
+    /// <summary>The CProvince it stands in, or 0 (e.g. embarked).</summary>
     public static nint Location(nint unit) => *(nint*)(unit + LocationOffset);
 
     /// <summary>Its stats (template), or 0.</summary>
     public static nint Stats(nint unit) => *(nint*)(unit + StatsOffset);
 
-    /// <summary>It has a path: on its way somewhere.</summary>
+    /// <summary>It is moving.</summary>
     public static bool Walking(nint unit) => *(int*)(unit + PathOffset + 0xC) != 0;
 
     /// <summary>In combat.</summary>
@@ -316,16 +314,16 @@ public static unsafe class Division
     public static bool Busy(nint unit) => *(nint*)(unit + BusyOffset) != 0;
 
     /// <summary>
-    /// A land division of <paramref name="tag"/> (not lent) that can take orders now: not fighting (a defender can only retreat),
-    /// retreating or embarked. Not an Army HQ either (it stays behind the line), unless <paramref name="headquarters"/>.
+    /// A land division of <paramref name="tag"/>, not lent, that can take orders now: not fighting, retreating or embarked.
+    /// Army HQs only with <paramref name="headquarters"/>.
     /// </summary>
     public static bool Ready(nint unit, int tag, bool headquarters = false) =>
         IsLand(unit) && Commander(unit) == tag && Owner(unit) == tag && !Fighting(unit) && !Retreating(unit) && !Busy(unit)
         && (headquarters || !IsHeadquarters(unit));
 
     /// <summary>
-    /// The AI's micro attacks skipping Army HQs: `mov rcx,rax; call TemplateData(CArmy*); cmp byte [rax+1B4h],0` (is_army_hq of
-    /// CDivisionTemplateData, what the save writes). TemplateData: [unit+3B8h] (CDivisionTemplate) + 18h, or 0.
+    /// The AI skipping Army HQs: `mov rcx,rax; call TemplateData(CArmy*); cmp byte [rax+1B4h],0` (is_army_hq).
+    /// TemplateData: [unit+3B8h] (CDivisionTemplate) + 18h, or 0.
     /// </summary>
     [Signature] public const string HeadquartersSig = "48 8B C8 E8 ? ? ? ? 80 B8 B4 01 00 00 00 0F 85";
 
@@ -339,7 +337,7 @@ public static unsafe class Division
     /// <summary>The template data getter, from a <see cref="HeadquartersSig"/> match (call at +3).</summary>
     internal static nint TemplateDataAt(nint at) => at + 8 + *(int*)(at + 4);
 
-    /// <summary>An Army HQ (Thunder at Our Gates): a division of an army HQ template, which buffs its army from behind the line. Any thread.</summary>
+    /// <summary>An Army HQ division (buffs its army from behind the line). Any thread.</summary>
     public static bool IsHeadquarters(nint unit)
     {
         var data = Hq.TemplateData(unit);
@@ -378,7 +376,7 @@ public static unsafe class Order
 
     public static int Type(nint order) => *(int*)(order + TypeOffset);
 
-    /// <summary>Its id within its group (what order commands take).</summary>
+    /// <summary>Its id within its group, which order commands use.</summary>
     public static int Id(nint order) => *(int*)(order + IdOffset);
 
     /// <summary>Its divisions (COrdersGroupMember*).</summary>
@@ -406,9 +404,8 @@ public static unsafe class ProductionLine
 }
 
 /// <summary>
-/// Divisions a plugin took for a job of its own (rest, reserve, counterattack...), by plugin id: other plugins leave them, and
-/// AiAssist keeps the AI's regrouping off them. Also which plugin runs the AI's front line micro, if any. Keys only, never
-/// dereferenced; AI threads read it.
+/// Divisions a plugin took for its own job (rest, reserve, counterattack...), by plugin id; other plugins leave them alone.
+/// Also which plugin runs the AI's front line micro. Keys only, never dereferenced; AI threads read it.
 /// </summary>
 public static class Jobs
 {
@@ -432,7 +429,7 @@ public static class Jobs
         AiMicro = null;
     }
 
-    /// <summary>A new game: the divisions held are gone (the owners publish their new ones again).</summary>
+    /// <summary>A new game: forget the held divisions.</summary>
     internal static void Forget() => Held.Clear();
 
     /// <summary>A plugin other than <paramref name="except"/> has a job for the division.</summary>

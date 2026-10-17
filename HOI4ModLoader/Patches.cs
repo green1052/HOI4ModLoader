@@ -7,24 +7,23 @@ using Reloaded.Hooks.Definitions.Enums;
 namespace HOI4ModLoader;
 
 /// <summary>
-/// Every way a plugin changes the game. Each patch is recorded against the plugin being loaded, so a failing
-/// <see cref="Plugin.Load"/> is rolled back entirely, and two plugins can't silently overwrite the same bytes.
-/// Hooking itself is Reloaded.Hooks (https://github.com/Reloaded-Project/Reloaded.Hooks).
+/// Every way a plugin changes the game. Each patch is recorded against the loading plugin, so a failed
+/// <see cref="Plugin.Load"/> is rolled back and two plugins can't overwrite the same bytes. Hooks use Reloaded.Hooks.
 /// </summary>
 public static unsafe partial class Patches
 {
-    /// <summary>Plugin id patches are recorded against (set by the loader around <see cref="Plugin.Load"/>).</summary>
+    /// <summary>Plugin id patches are recorded against, set around <see cref="Plugin.Load"/>.</summary>
     internal static string? Owner;
 
     private static readonly Dictionary<long, string> Claims = [];
     private static readonly Dictionary<string, List<Action>> Undo = [];
-    // Holding them is the point: a thread may still be inside a reverted hook.
+    // Kept alive: a thread may still be inside a reverted hook.
     // ReSharper disable once CollectionNeverQueried.Local
     private static readonly List<object> KeepAlive = [];
 
     /// <summary>
-    /// The game's own bytes at every address a patch or hook changed (first one wins: a hook over a hook keeps the game's),
-    /// so signature scans still find functions another plugin already hooked.
+    /// The game's original bytes at every patched address (the first patch wins), so signature scans still find hooked
+    /// functions.
     /// </summary>
     internal static readonly Dictionary<nint, byte[]> Originals = [];
     internal static int OriginalsVersion;
@@ -34,7 +33,7 @@ public static unsafe partial class Patches
 
     /// <summary>
     /// Writes <paramref name="replace"/> over <paramref name="expect"/> (hex, same length) at <paramref name="at"/>.
-    /// Throws if the bytes there aren't <paramref name="expect"/>: a game update, or another plugin's patch/hook.
+    /// Throws if the bytes there aren't <paramref name="expect"/> (a game update or another patch).
     /// </summary>
     public static void Bytes(nint at, string expect, string replace)
     {
@@ -52,9 +51,8 @@ public static unsafe partial class Patches
     }
 
     /// <summary>
-    /// Function hook, i.e. Harmony prefix/postfix: the detour runs instead of the function and calls
-    /// <c>hook.OriginalFunction</c> when it wants. A managed exception in the detour is logged once and the
-    /// original runs instead, so a plugin bug can't crash the game (call the original last, or it may run twice).
+    /// Function hook, like a Harmony prefix/postfix: the detour runs instead and calls <c>hook.OriginalFunction</c> when it
+    /// wants. If the detour throws, it is logged once and the original runs, so call the original last or it may run twice.
     /// </summary>
     public static IHook<T> Hook<T>(nint at, T detour) where T : Delegate
     {
@@ -73,10 +71,10 @@ public static unsafe partial class Patches
         IEnumerable<Expression> argValues = args;
         var ex = Expression.Parameter(typeof(Exception), "e");
         // ReSharper disable once AccessToModifiedClosure
-        Expression<Func<T>> original = () => hook!.OriginalFunction; // reads `hook` when called, i.e. after it's assigned below
+        Expression<Func<T>> original = () => hook!.OriginalFunction; // reads `hook` after it is assigned below
         var crumb = Expression.Variable(typeof(nint), "crumb");
         var label = Breadcrumb.Label($"{owner} hook {Breadcrumb.Where(at)}");
-        // The crash handler reads the breadcrumb: a native fault in the detour or in the original it calls names this hook.
+        // The breadcrumb lets the crash log name this hook.
         var guarded = Expression.Lambda<T>(Expression.Block([crumb],
             Expression.Assign(crumb, Expression.Call(typeof(Breadcrumb).GetMethod(nameof(Breadcrumb.Enter))!, Expression.Constant(label))),
             Expression.TryFinally(
@@ -93,8 +91,8 @@ public static unsafe partial class Patches
     }
 
     /// <summary>
-    /// Mid-function assembly hook, i.e. Harmony transpiler: replaces the instructions in [at, +length) with
-    /// <paramref name="asm"/> (FASM syntax, "use64" first), then continues after them.
+    /// Mid-function assembly hook, like a Harmony transpiler: replaces the instructions in [at, +length) with
+    /// <paramref name="asm"/> (FASM, "use64" first), then continues after them.
     /// </summary>
     public static IAsmHook Asm(nint at, int length, params string[] asm)
     {
@@ -102,8 +100,7 @@ public static unsafe partial class Patches
         Claim(at, length);
         var hook = Hooks.CreateAsmHook(asm, at, AsmHookBehaviour.DoNotExecuteOriginal, length);
         var written = Restorable(at, () => hook.Activate(), hook.Disable, hook);
-        // The jump may need more bytes than given; then it cuts into the next instruction, which runs broken when the hook
-        // returns there. Fail the load (reverting it) instead: give a length covering whole instructions past the jump.
+        // A jump longer than length cuts into the next instruction: fail the load instead.
         if (written > length) throw new InvalidOperationException($"asm hook at 0x{at:X} needs {written} bytes, {length} given");
         return hook;
     }
@@ -121,13 +118,12 @@ public static unsafe partial class Patches
     }
 
     /// <summary>
-    /// Activates a hook and records how to take it out again: disable it (a thread already past the jump then runs the
-    /// original), then put back the bytes it overwrote, so the code reads as never hooked and signatures match again
-    /// (hot reload loads the plugin anew). Unless something hooked over it since: then it stays in the chain, disabled.
+    /// Activates a hook and records its undo: disable it, then restore the original bytes so signatures match again on
+    /// hot reload. If something hooked over it since, it stays in the chain, disabled.
     /// </summary>
     private static int Restorable(nint at, Action activate, Action disable, object hook)
     {
-        const int window = 64; // a hook's jump plus the instructions it cut through
+        const int window = 64; // the jump plus the instructions it cut
         var before = new ReadOnlySpan<byte>((void*)at, window).ToArray();
         activate();
         var after = new ReadOnlySpan<byte>((void*)at, window).ToArray();
@@ -138,7 +134,7 @@ public static unsafe partial class Patches
         {
             disable();
             if (new ReadOnlySpan<byte>((void*)at, changed).SequenceEqual(after.AsSpan(0, changed))) WriteCode(at, before[..changed]);
-        }, hook); // also keeps the hook's delegates alive: a thread may still be inside it
+        }, hook); // keeps the hook alive
         return changed;
     }
 
@@ -151,7 +147,7 @@ public static unsafe partial class Patches
         }
     }
 
-    /// <summary>Throws unless a plugin (or the loader) is being loaded: a patch nobody owns would never be reverted.</summary>
+    /// <summary>Throws unless a plugin or the loader is loading: a patch nobody owns would never be reverted.</summary>
     internal static void RequireOwner()
     {
         if (Owner == null) throw new InvalidOperationException("patches belong to a plugin: make them in Plugin.Load");
@@ -173,7 +169,7 @@ public static unsafe partial class Patches
         for (var i = list.Count - 1; i >= 0; i--)
         {
             try { list[i](); }
-            catch (Exception e) { Log.Error($"{owner}: revert: {e.Message}"); } // the rest still go: they are already off the list
+            catch (Exception e) { Log.Error($"{owner}: revert: {e.Message}"); } // keep reverting the rest
         }
         foreach (var a in Claims.Where(c => c.Value == owner).Select(c => c.Key).ToList()) Claims.Remove(a);
     }
