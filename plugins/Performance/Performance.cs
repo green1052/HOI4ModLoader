@@ -8,14 +8,14 @@ namespace Performance;
 public static class Signatures
 {
     /// <summary>
-    /// CCountryDecisions hourly build (decisions, bool force): on the country's slot hour of each day (vanilla's gate) it looks
-    /// for new targets of every targeted decision, checking each state and country against it. Called for every country every
-    /// hour on the AI threads, with force only on load and on the game's own refreshes.
+    /// CCountryDecisions hourly build (decisions, bool force): once a day, on the country's slot hour, checks every state and
+    /// country as a new target of every targeted decision. Called hourly for every country on the AI threads; force only on
+    /// load and the game's own refreshes.
     /// </summary>
     [Signature] public const string DecisionTargets = "40 53 48 83 EC 20 48 8B D9 E8 72 1E 00 00 84 C0 74 0D 48 8B CB 48 83 C4 20 5B E9";
 
     /// <summary>
-    /// Idler render (idler): map, interface and Present, called once per frame near the end of Idle, after the game's tick.
+    /// Idler render (idler): draws map and interface and presents, once per frame after the game's tick.
     /// Shared by seven idlers' vtables; the in-game one is <see cref="InGameIdler"/>.
     /// </summary>
     [Signature] public const string Render = "48 8B C4 56 48 83 EC 70 0F B6 15 ? ? ? ? 48 8B F1 0F 29 70 E8 48 89 58 08 48 89 68 10 48 89 78 18 4C 89 70 20 4C 8B B1 F0 04 00 00";
@@ -24,12 +24,10 @@ public static class Signatures
 }
 
 /// <summary>
-/// Game speed: lighter recurring work where nothing is lost but a short delay. Targeted decisions look for new targets every
-/// few days instead of daily (checking every state against every such decision, for every country, was the biggest
-/// single cost of a game day); targets that became invalid still drop out daily, and timers, missions and forced refreshes
-/// are untouched. Optionally (FastSpeedFrameMs, off by default) the screen is drawn at most every few tens of milliseconds
-/// at speeds 4 and 5: at speed 5 each frame advances an hour, so a frame not drawn is game time gained (input still runs
-/// every frame).
+/// Game speed. Targeted decisions look for new targets every few days instead of daily, the biggest single cost of a game
+/// day. Invalid targets still drop out daily; timers, missions and forced refreshes are untouched. Optionally
+/// (FastSpeedFrameMs, off by default) the screen is drawn less often at speeds 4 and 5: at speed 5 a frame is an hour, so a
+/// skipped frame is game time gained. Input still runs every frame.
 /// </summary>
 [Plugin("com.green1052.performance", "Performance", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class Performance : Plugin
@@ -49,7 +47,7 @@ public unsafe class Performance : Plugin
         var days = Config.Bind("Performance", "DecisionTargetDays", 3,
             "Targeted decisions look for new targets every this many days (1: daily, as vanilla). A newly valid target shows up that much later.");
         var frameMs = Config.Bind("Performance", "FastSpeedFrameMs", 0,
-            "At speeds 4 and 5, draw the screen at most every this many milliseconds (0: every frame, as vanilla). Game time runs faster; the map and numbers update less smoothly.");
+            "At speeds 4 and 5, draw the screen at most every this many milliseconds (0: every frame, as vanilla). Game time runs faster, but the map updates less smoothly.");
         if (frameMs > 0)
         {
             var inGame = Sig.VTable(Signatures.InGameIdler);

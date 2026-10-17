@@ -7,8 +7,8 @@ public static class SupplySignatures
 {
     /// <summary>
     /// The supply hub popup's "upgrade railway to capital" (BottleneckData* out[0x40], int* tag, CProvince* node, bool naval,
-    /// int maxLevel, void* ignore, bool skipIfQueued, bool allowForeign): +1 railway level on the weakest link from the
-    /// hub to the capital, or a naval base level where a sea link is it. The AI's own bottleneck fixer calls it too.
+    /// int maxLevel, void* ignore, bool skipIfQueued, bool allowForeign): queues +1 railway on the weakest link from the hub
+    /// to the capital, or a naval base level if that link is by sea.
     /// </summary>
     [Signature] public const string UpgradeRailToCapital = "48 89 5C 24 ? 48 89 54 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 70 0F 29 74 24 ? 45 0F B6 F9";
 
@@ -39,9 +39,8 @@ public unsafe partial class AutoConstruction
     private const int FlowEntrySize = 16, CountryOfEntry = 2, AmountOfEntry = 8;                         // Game.EntriesOfFlow: {u16 node, u16 country, pad, i64 amount}
     private const int RailwayPairs = 0x38;                                                                // railway info: {int neighbour, int level}
     private const int IsLowSupplySlot = 43;                                                               // CArmy vtable
-    // In game time: 60 s real at speed 5 was two months, so a fix still being built was queued again (47 hubs, 180 railway
-    // upgrades in one game). A shortage counts once it lasts a week (an advance outruns its supply for a few days), an area
-    // fixed waits a month, and a new hub (20000) comes once a month at most.
+    // In game time, so a fix still being built isn't queued again at high speed. A shortage counts after a week (an advance
+    // outruns its supply for a few days), a fixed area waits a month, and at most one new hub (cost 20000) is built a month.
     private const int SupplyCooldownHours = 30 * 24, StarvingHours = 7 * 24, HubEveryHours = 30 * 24;
     private readonly Dictionary<int, int> _starvingSince = []; // province id -> game hour its divisions first ran short
     private int _supplyDay = -1, _lastHub = int.MinValue;
@@ -103,7 +102,7 @@ public unsafe partial class AutoConstruction
             if (now - since < StarvingHours) continue; // not short long enough to build for
             if (_supplySent.TryGetValue(id, out var until) && now < until) continue;
             var acted = FixSupply(country, tag, network, province);
-            // Whether or not there was something to do, give it time: what was queued or is missing changes slowly.
+            // Wait either way: what is queued or missing changes slowly.
             _supplySent[id] = now + SupplyCooldownHours;
             if (!acted) continue;
             actions++;
@@ -121,7 +120,7 @@ public unsafe partial class AutoConstruction
             var supplied = *(long*)(node + SupplyIn);
             if (supplied > 0 && (supplied - *(long*)(node + SupplyLeft)) * 100 / supplied >= SaturationPercent)
             {
-                // A hub feeds many provinces: each starving one upgraded the same link again (three times in ten seconds).
+                // A hub feeds many provinces: upgrade its link once, not once per starving province.
                 var now = Game.Hour;
                 if (_hubUpgraded.TryGetValue(nodeProvince, out var until) && now < until) return false;
                 if (!UpgradeRail(tag, Game.Province(nodeProvince), *(int*)(node + KindOfNode) == NavalNode, nodeProvince)) return false;

@@ -16,10 +16,9 @@ public static class ProductionSignatures
 }
 
 /// <summary>
-/// Auto production: moves military factories the way a player tweaks the production screen, from a line whose equipment
-/// has a big surplus to a line whose equipment is short, one factory at a time, with the production screen's own command
-/// (multiplayer works). Paced by game days (MovesPerTurn a day), so a pause adds no moves; the day's unused ones can still
-/// go while paused. Land and air lines; ships are left alone. No line is created or emptied.
+/// Auto production: moves military factories one at a time from lines with a big equipment surplus to lines that are
+/// short, with the production screen's own command (multiplayer works). At most MovesPerTurn a game day, so pausing adds
+/// no moves. Land and air lines only; no line is created or emptied.
 /// </summary>
 public unsafe partial class AutoConstruction
 {
@@ -28,7 +27,7 @@ public unsafe partial class AutoConstruction
     private const int HandleOfLine = 8, CostOfLine = 40, OutputOfLine = 48, RequestedOfLine = 232, MaxFactoriesSlot = 11;
     private const int CostOfVariant = 976;
     private const int LineOfCommand = 40, DeltaOfCommand = 48;
-    private const int MinSurplus = 500;           // units: a small need's percentage alone would move factories over a handful of guns
+    private const int MinSurplus = 500;           // units: a share of a small need is only a handful of guns
     private const long ProductionPendingMs = 20_000; // a line we changed is left alone meanwhile (multiplayer: a round trip)
 
     private delegate* unmanaged<nint, long*, nint, long*> _balance;
@@ -89,8 +88,8 @@ public unsafe partial class AutoConstruction
         foreach (var (to, _) in receivers.OrderByDescending(r => r.Gap))
         {
             if (_movesToday == _movesPerDay || !from.MoveNext()) break;
-            // Refused either way: counted against the day and the lines left alone for a while, so a refusal isn't retried
-            // (or a factory taken and given back) every second. Refused at the receiver: the factory goes back.
+            // A refused move still counts and pauses the lines, so it isn't retried every second. If the receiver refuses,
+            // the factory goes back.
             if (!AddFactories(tag, from.Current, -1)) _pending[from.Current] = now + ProductionPendingMs;
             else
             {

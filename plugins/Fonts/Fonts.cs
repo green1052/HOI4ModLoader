@@ -11,11 +11,11 @@ using HOI4ModLoader;
 namespace Fonts;
 
 /// <summary>
-/// The game's text in a TrueType/OpenType font of the player's choice (installed, or a .ttf/.otf/.ttc file): at startup every
-/// bitmap font of the game's language (gfx\fonts\&lt;language&gt;\*.fnt with its .dds/.tga) is drawn anew with it, with the
-/// same characters, line height and baseline, and an outline where the original has one; characters the font lacks keep the
-/// original's glyph. The results are cached (HOI4ModLoader\cache\fonts) and put in front of the game's own files
-/// (<see cref="GameFiles.Add(string, string)"/>), so nothing is installed as a mod. Display only. Takes effect at the next start.
+/// The game's text in a TrueType/OpenType font of the player's choice (installed, or a .ttf/.otf/.ttc file). At startup each
+/// bitmap font of the game's language (gfx\fonts\&lt;language&gt;\*.fnt) is redrawn with it, keeping its characters, line
+/// height, baseline and outline; characters the font lacks keep the original glyph. Results are cached
+/// (HOI4ModLoader\cache\fonts) and served ahead of the game's files (<see cref="GameFiles.Add(string, string)"/>), not
+/// installed as a mod. Display only; takes effect at the next start.
 /// </summary>
 [Plugin("com.green1052.fonts", "Fonts", "1.0.0")]
 public sealed class Fonts : Plugin
@@ -25,7 +25,7 @@ public sealed class Fonts : Plugin
     public override void Load()
     {
         var font = Config.Bind("Fonts", "Font", "",
-            "An installed font's name (e.g. Malgun Gothic) or the path of a .ttf/.otf/.ttc file, for the game's text. Empty: the game's own fonts. Takes effect at the next start.").Trim();
+            "Font for the game's text: an installed font's name (e.g. Malgun Gothic) or a .ttf/.otf/.ttc path. Empty: the game's own fonts. Takes effect at the next start.").Trim();
         var header = Config.Bind("Fonts", "HeaderFont", "", "The same for titles (the fonts named *header*). Empty: Font.").Trim();
         var size = Math.Clamp(Config.Bind("Fonts", "SizePercent", 100,
             "Glyph size against the original font's line height (%): bigger or smaller text in the same lines."), 50, 150);
@@ -84,8 +84,7 @@ public sealed class Fonts : Plugin
             }
             else
             {
-                // Not cached: a failure (a full disk, a locked file) would otherwise leave those fonts vanilla for good. This
-                // start uses what was drawn; the next one draws again (and deletes this folder first).
+                // Not cached, or a failure (full disk, locked file) would stick. This start uses what was drawn; the next redraws.
                 cache = building;
                 Log.Error($"drew {drawn} of {fnts.Count} fonts, {failed} failed: not cached, drawn again at the next start");
             }
@@ -149,8 +148,8 @@ public sealed class Fonts : Plugin
 
     /// <summary>
     /// Draws <paramref name="fntPath"/>'s characters with <paramref name="face"/> into <paramref name="outDir"/> (a .fnt and its
-    /// texture, same names). False: the original texture isn't uncompressed 32-bit, so its glyphs can't be kept for characters
-    /// the face lacks; the font stays the game's.
+    /// texture, same names). False if the original texture isn't uncompressed 32-bit: its glyphs can't fill in for characters
+    /// the face lacks, so the font stays the game's.
     /// </summary>
     internal static bool Draw(string fntPath, string face, int sizePercent, string outDir)
     {
@@ -175,8 +174,8 @@ public sealed class Fonts : Plugin
         // b: bold, mbs: medium bold with a shadow, header: extra bold
         var weight = Regex.IsMatch(name, @"_bold|\d+bs?$|header", RegexOptions.IgnoreCase) ? 700 : Regex.IsMatch(name, @"\d+mbs$", RegexOptions.IgnoreCase) ? 600 : 400;
 
-        // The size whose sample glyph (Hangul when both the original and the chosen face have it, else H) is as tall as the
-        // original's: faces differ in how much of their em a letter takes, so a line height alone draws some far bigger or smaller.
+        // Size the em so a sample glyph (Hangul U+AC00 if both fonts have it, else H) is as tall as the original's: faces differ in how
+        // much of the em a letter fills.
         double em = lineHeight * 0.75;
         foreach (var sampleLine in new[] { "char id=44032 ", "char id=72 " }.Select(id => lines.FirstOrDefault(l => l.StartsWith(id))).OfType<string>())
         {
@@ -384,9 +383,8 @@ internal sealed unsafe class Gdi : IDisposable
     [DllImport("gdi32")] private static extern uint GetGlyphOutlineW(nint dc, uint glyph, uint format, GlyphMetrics* metrics, uint size, byte* buffer, int* matrix);
 
     private readonly nint _dc, _font;
-    // Glyphs are drawn this many times bigger in black and white and averaged down: smooth edges (64 levels), where GDI's
-    // hinting at the real size snaps strokes to whole pixels (blocky, uneven letters). GDI's own grey levels oversample
-    // 8 times again inside, many times the work.
+    // Glyphs are drawn this many times bigger in black and white and averaged down, for smooth edges. At the real size GDI's
+    // hinting snaps strokes to whole pixels, and its own grey levels are far slower.
     private const int Scale = 8;
     private const float Gamma = 0.8f; // averaged edges read thin and grey: denser coverage, as hinted or the game's own glyphs
     private readonly int _embolden;   // big pixels to thicken strokes by: the face has no weight as heavy as asked for
@@ -405,8 +403,8 @@ internal sealed unsafe class Gdi : IDisposable
         SelectObject(_dc, _font);
         var name = stackalloc char[64];
         Face = new string(name, 0, Math.Max(0, GetTextFaceW(_dc, 64, name) - 1));
-        // The face's own weight (OS/2 usWeightClass): Windows' stand-in bold for a face without one (a single weight, a
-        // variable font) is a hair thicker at most. A bold stroke is about 5% of the em wider than a regular one.
+        // The face's own weight (OS/2 usWeightClass). Windows' fake bold is barely thicker, so a lighter face is thickened
+        // here: a bold stroke is about 5% of the em wider than a regular one.
         var os2 = stackalloc byte[2];
         var own = GetFontData(_dc, 0x322F534F /* "OS/2" */, 4, os2, 2) == 2 ? os2[0] << 8 | os2[1] : weight;
         if (weight - own >= 100) _embolden = (int)Math.Round(0.05 * Math.Abs(height) * Scale * (weight - own) / 300.0);
@@ -452,8 +450,8 @@ internal sealed unsafe class Gdi : IDisposable
     /// <summary>A glyph's ink at the real size (0..255, gamma applied), where its box sits from the pen, and its advance; W 0: blank.</summary>
     private sealed record Shape(byte[] Ink, int W, int H, int Left, int Top, int Advance);
 
-    // Shapes by face, size, weight and character: many of the game's fonts come out the same, and drawing is GDI-bound
-    // (Windows draws glyphs nearly one at a time, whatever the threads). Emptied once all fonts are drawn.
+    // Shapes by face, size, weight and character: many game fonts share them, and GDI draws glyphs nearly one at a time
+    // whatever the threads. Emptied once all fonts are drawn.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, int, int, char), Shape?> Shapes = new();
 
     public static void ForgetShapes() => Shapes.Clear();
@@ -547,7 +545,7 @@ internal sealed unsafe class Gdi : IDisposable
 
     public void Dispose()
     {
-        DeleteDC(_dc); // first: GDI won't delete a font still selected into a DC, and every Gdi leaked one
+        DeleteDC(_dc); // first: GDI won't delete a font still selected into a DC
         DeleteObject(_font);
     }
 }

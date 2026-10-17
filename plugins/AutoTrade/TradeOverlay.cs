@@ -3,9 +3,8 @@ using HOI4ModLoader;
 namespace AutoTrade;
 
 /// <summary>
-/// Ctrl+Alt+C draws our trade routes (imports and exports, over land and sea) in gold, in any map mode, with the supply
-/// map's arrow style (<see cref="MapArrows"/>). Read-only, so other players need nothing. One arrow per route: an arrow is
-/// one polyline with a head at its last point, so routes sharing one would be joined into a zig-zag.
+/// Ctrl+Alt+C draws our trade routes (imports and exports, land and sea) as gold arrows in any map mode
+/// (<see cref="MapArrows"/>). Display only. One arrow per route: an arrow is a single polyline, so shared ones would zig-zag.
 /// </summary>
 public unsafe partial class AutoTrade
 {
@@ -23,8 +22,7 @@ public unsafe partial class AutoTrade
 
     private void LoadOverlay()
     {
-        // Another game (its map's arrows are new objects) or another country: the old routes go. Arrows made before a
-        // country switch stay with the map, hidden.
+        // Another game or country: hide the old arrows and forget them.
         _map = new PerGame(() =>
         {
             foreach (var arrow in _arrows) MapArrows.Hide(arrow);

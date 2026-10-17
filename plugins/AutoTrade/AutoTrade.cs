@@ -36,28 +36,28 @@ public static class Signatures
 
     /// <summary>
     /// AddFuelEffect::Execute: `mov rsi,[rax+1580h]` at +0x2B loads the country's CCountryFuelStatus (+0x08 fuel, +0x10 max
-    /// fuel, int64 2^15 fixed point; the save writes them as fuel and max_fuel). The offset is read from here, its disp32 at +0x2E.
+    /// fuel, int64 2^15 fixed point). The offset is read from its disp32 at +0x2E.
     /// </summary>
     [Signature] public const string FuelOfCountry = "40 53 56 57 48 83 EC 40 48 8B D9 48 8B FA 48 8D 4A 08 E8 ? ? ? ? 48 8D 4B 58 C6 44 24 20 00 45 33 C9 48 8D 54 24 60 4C 8B C7 48 8B B0 80 15 00 00";
 }
 
 /// <summary>
-/// Shift+click a resource's icon in the trade view to switch auto trade on or off for it ("Auto" shows under it). While on,
-/// a shortage of that resource is imported, and a surplus of at least one import step cut back, with the trade view's own
-/// command (so multiplayer stays in sync): bought from our subjects first, then our faction, then the country that can sell
-/// the most; cut from the other end. Oil follows the fuel stockpile instead (only oil the factories don't use becomes fuel,
-/// so its balance never shows a shortage). Ctrl+Alt+C draws our trade routes (TradeOverlay.cs).
+/// Shift+click a resource's icon in the trade view to toggle auto trade for it ("Auto" shows under it). While on, a
+/// shortage is imported and a surplus of a whole import step cut, with the trade view's own command, so multiplayer stays
+/// in sync. Bought from subjects first, then the faction, then whoever can sell the most; cut in reverse. Oil follows the
+/// fuel stockpile instead: only unused oil becomes fuel, so its balance never shows a shortage. Ctrl+Alt+C draws our trade
+/// routes (TradeOverlay.cs).
 /// </summary>
 [Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class AutoTrade : Plugin
 {
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.
-    private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484; // int: how many states it controls (0: gone or exiled), not AutoConstruction's state array
+    private const int ResourcesOfCountry = 0x11F8, StatesOfCountry = 0x484; // int: states it controls (0: gone or exiled)
     private const int Influence = 0xF0;                         // CCountry: CPdxArray<long> trade influence, by importer TagIndex
     private const int DiplomacyOfCountry = 0xF88, Overlord = 0x188, Faction = 0x290; // diplomacy block: overlord tag (0 = none), faction*
     private const int WindowOfItem = 0x10, ResourceOfItem = 0x20; // CTradeResourceInfoItem
     private const int Exporter = 44, Amount = 56;               // CCreateTradeCommand: exporter tag, total amount in whole units (0 cancels)
-    private const int PendingHours = 48;                        // a changed deal is waited for until the balance moves, two game days at most (10 s real at speed 5 cut twice)
+    private const int PendingHours = 48;                        // after a deal changes, wait until the balance moves, two game days at most
 
     [Function(CallingConventions.Microsoft)] public delegate void ItemFn(nint item);
     [Function(CallingConventions.Microsoft)] public delegate void UpdateFn(nint item, nint unused);
@@ -70,8 +70,7 @@ public unsafe partial class AutoTrade : Plugin
     private delegate* unmanaged<int, nint> _tokenToString;
     private const int KeyOfResource = 0x08;
 
-    // Kept for the session, by country tag. CStrategicResources are database objects made once at startup (the database
-    // init sets the global holding them, nothing else does), so a pointer names the same resource in every game loaded.
+    // By country tag. Resources are made once at startup, so a pointer names the same resource in every game loaded.
     private readonly HashSet<(int Tag, nint Resource)> _auto = [];
     private readonly Dictionary<nint, (int Balance, bool Up, int Until)> _sent = []; // by resource: balance when a deal was changed, game hour
     private PerGame _game = null!;
@@ -86,10 +85,10 @@ public unsafe partial class AutoTrade : Plugin
 
     public override void Load()
     {
-        _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, not just 0: a buffer for new factories and lost deals. Imports are cut once the balance is a whole import step above it."));
+        _surplus = Math.Max(0, Config.Bind("Trade", "Surplus", 0, "Import until the balance is at least this much, as a buffer for new factories and lost deals. Imports are cut once the balance is a whole import step above it."));
         _alliesFirst = Config.Bind("Sellers", "AlliesFirst", true, "Buy from your subjects first, then your faction, then whoever can sell the most (trade influence breaks ties).");
-        _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "Auto trade on oil: once a game week, import one more step of oil while the fuel stockpile is under this share of its maximum and not filling up on its own."), 0, 100);
-        _fuelHigh = Math.Clamp(Config.Bind("Fuel", "FuelHighPercent", 90, "Auto trade on oil: once a game week, cut oil imports by a step while the fuel stockpile is at or over this share of its maximum and not falling."), _fuelLow, 100);
+        _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "With auto trade on oil: each game week, import one more step while fuel is under this share (%) of its maximum and not filling up on its own."), 0, 100);
+        _fuelHigh = Math.Clamp(Config.Bind("Fuel", "FuelHighPercent", 90, "With auto trade on oil: each game week, cut oil imports by a step while fuel is at or over this share (%) of its maximum and not falling."), _fuelLow, 100);
         _fuelOfCountry = *(int*)(Sig.Find(Signatures.FuelOfCountry) + 0x2E);
         var database = *(nint*)(System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress + ItemDatabaseRva);
         _oil = database == 0 ? 0 : *(nint*)(database + OilOfDatabase);
@@ -131,8 +130,7 @@ public unsafe partial class AutoTrade : Plugin
         LoadOverlay();
     }
 
-    // The resources auto trade is on for, kept across a reload of the plugin (a new build, a setting changed in the menu) in
-    // the same game process: the resources are database objects made at startup, so their pointers hold until it exits.
+    // The auto list survives a plugin reload within one game process: resource pointers hold until it exits.
     private static readonly string AutoFile = Path.Combine(Loader.ModsDir, "cache", "autotrade_auto.txt");
 
     private void SaveAuto()
@@ -205,10 +203,9 @@ public unsafe partial class AutoTrade : Plugin
     private const int RecoveringPercent = 2; // a week's fuel gain (% of the maximum) that counts as filling up on its own
 
     /// <summary>
-    /// Oil by the fuel stockpile, once a game week and by its trend: a step more while fuel is under FuelLowPercent of its
-    /// maximum and not filling up on its own (gaining under RecoveringPercent of it a week), a step less while at or over
-    /// FuelHighPercent and not falling. The stockpile is large and fills slowly: a step a day while it was low piled imports
-    /// up long before it filled (and at speed 5 a day is a second). The first week, before there is a trend, by level only.
+    /// Oil by the fuel stockpile, once a game week: a step more while fuel is under FuelLowPercent of its maximum and gaining
+    /// under RecoveringPercent a week, a step less while at or over FuelHighPercent and not falling. Weekly because the
+    /// stockpile fills slowly, so daily steps would overshoot. The first week has no trend yet and goes by level only.
     /// </summary>
     private void Oil(nint country, int tag, int balance, int now)
     {
@@ -221,7 +218,6 @@ public unsafe partial class AutoTrade : Plugin
         var weekly = first ? 0 : (fuel - _oilFuel) * 100 / max; // % of the maximum gained (or lost) in the week
         (_oilAt, _oilFuel) = (now, fuel);
         var percent = fuel * 100 / max;
-        // The log says what was done: "a step less" was logged weekly with no oil imports to cut.
         var action = percent < _fuelLow && weekly < RecoveringPercent
                 ? Import(tag, _oil, 1, balance, now) ? "importing a step more" : "no seller with room for more" // one seller step
             : percent >= _fuelHigh && weekly >= 0

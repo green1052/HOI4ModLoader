@@ -2,7 +2,7 @@
     com.green1052.fonts.name:0 "폰트"
     com.green1052.fonts.desc:0 "게임 글꼴을 원하는 폰트로 바꿉니다.\n- 폰트 설정의 오른쪽 화살표로 설치된 폰트 중 선택\n- 또는 설정 파일(HOI4ModLoader\config\com.green1052.fonts.cfg)에 .ttf/.otf 경로 입력\n다음 실행부터 적용됩니다."
     com.green1052.fonts.Font:0 "폰트"
-    com.green1052.fonts.Font.desc:0 "게임 글꼴로 쓸 폰트입니다. 오른쪽 화살표로 설치된 폰트 목록(한 페이지 8개)을 열어 체크하세요.\n- 폰트에 없는 글자(예: 한글)는 원래 글꼴로 표시\n- 설정 파일에는 .ttf/.otf/.ttc 경로도 입력 가능\n(없음)이면 원래 글꼴. 다음 실행부터 적용."
+    com.green1052.fonts.Font.desc:0 "게임 글꼴로 쓸 폰트입니다. 오른쪽 화살표 목록에서 체크하세요. 폰트에 없는 글자(예: 한글)는 원래 글꼴로 나옵니다.\n(없음)이면 원래 글꼴. 다음 실행부터 적용."
     com.green1052.fonts.HeaderFont:0 "제목 폰트"
     com.green1052.fonts.HeaderFont.desc:0 "제목 글꼴(이름에 header가 들어간 폰트)에 쓸 폰트입니다. 고르는 방법은 위와 같습니다.\n(없음)이면 위 폰트를 씁니다."
     com.green1052.fonts.SizePercent:0 "크기 (%)"

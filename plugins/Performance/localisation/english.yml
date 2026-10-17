@@ -1,6 +1,6 @@
 ﻿l_english:
-    com.green1052.performance.desc:0 "Lighter recurring game work where nothing is lost but a short delay.\n- Targeted decisions look for new targets every few days instead of daily\n- Optionally, at speeds 4-5 the screen is drawn less often, so game time runs faster\nSingle player only."
+    com.green1052.performance.desc:0 "Speeds the game up by doing some recurring work less often, at the cost of a short delay.\n- Targeted decisions look for new targets every few days instead of daily\n- Optionally, at speeds 4-5 the screen is drawn less often, so game time runs faster\nSingle player only."
     com.green1052.performance.DecisionTargetDays:0 "Decision target search (days)"
     com.green1052.performance.DecisionTargetDays.desc:0 "Targeted decisions look for new targets every this many days (1: daily, as vanilla).\nA newly valid target shows up that much later. Targets that became invalid still drop out daily."
     com.green1052.performance.FastSpeedFrameMs:0 "Frame interval at speeds 4-5 (ms)"
-    com.green1052.performance.FastSpeedFrameMs.desc:0 "At speeds 4 and 5, the screen is drawn at most every this many milliseconds (0: every frame, as vanilla).\nGame time runs faster: at speed 5 each frame is an hour. The map and numbers update less smoothly."
+    com.green1052.performance.FastSpeedFrameMs.desc:0 "At speeds 4 and 5, the screen is drawn at most every this many milliseconds (0: every frame, as vanilla).\nGame time runs faster, but the map updates less smoothly."

@@ -1,5 +1,5 @@
-l_english:
-    com.green1052.autoconstruction.desc:0 "Set a target count per building in the construction tab; whatever is missing is queued in the best states.\n- Shift+click a building +1, Ctrl+Shift+click +5, Ctrl+click -1\n- Builds railways and supply hubs where supply runs short\n- Moves military factories from surplus equipment to equipment you are short of\nWorks in multiplayer."
+﻿l_english:
+    com.green1052.autoconstruction.desc:0 "Set a target count per building in the construction tab; whatever is missing is queued in the best states.\n- Shift+click a building +1, Ctrl+Shift+click +5, Ctrl+click -1\n- Builds railways and supply hubs where supply runs short\n- Moves military factories from surplus lines to short ones\nWorks in multiplayer."
     com.green1052.autoconstruction.AutoSupply:0 "Auto supply"
     com.green1052.autoconstruction.AutoProduction:0 "Auto production"
     com.green1052.autoconstruction.SurplusPercent:0 "Surplus (% of need)"

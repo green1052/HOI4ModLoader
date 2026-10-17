@@ -15,10 +15,9 @@ public static class Signatures
 }
 
 /// <summary>
-/// A fresh random seed every time a game starts or a save is loaded, instead of the one saved with it: reloading a save no
-/// longer replays the same dice (combat, events' random_list and mean time to happen, everything drawn from the synced
-/// random number generator after the load). What was already decided before the save (an open event, a scheduled one)
-/// stays. Single player only: every player's simulation must draw the same numbers.
+/// A fresh random seed every time a game starts or a save is loaded, so reloading doesn't replay the same rolls (combat,
+/// random_list, mean time to happen). What was decided before the save stays. Single player only: every player's
+/// simulation must draw the same numbers.
 /// </summary>
 [Plugin("com.green1052.reroll", "Reroll", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class Reroll : Plugin
@@ -32,7 +31,7 @@ public unsafe class Reroll : Plugin
 
     public override void Load()
     {
-        var inIronman = Config.Bind("Reroll", "InIronman", false, "Also in Ironman games (whose point is that nothing is replayed).");
+        var inIronman = Config.Bind("Reroll", "InIronman", false, "Also reroll in Ironman games, which are meant not to be replayed.");
         _execute = Patches.Hook<ExecuteFn>(Sig.Find(Signatures.SetSeedExecute), command =>
         {
             Log.Guard("reroll", () =>

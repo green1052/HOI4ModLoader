@@ -43,11 +43,11 @@ public static class Signatures
 }
 
 /// <summary>
-/// Auto construction targets. In the construction tab, Shift+click a building to raise its target by 1 (Ctrl+Shift: 5),
-/// Ctrl+click to lower it; the target shows on the button (a text box the GuiPatch above adds). While a building's count (built
-/// plus queued) is under its target, more is queued with the construction tab's own command (so multiplayer stays in
-/// sync), in the best state first: core states, then higher infrastructure (lower when the building is infrastructure),
-/// then more free building slots. Auto supply (AutoSupply.cs) and auto production (AutoProduction.cs) come with it.
+/// Construction targets per building. In the construction tab, Shift+click a building to raise its target by 1
+/// (Ctrl+Shift: 5), Ctrl+click to lower it; the button shows how many are left to build. While built plus queued is under
+/// the target, more is queued with the construction tab's own command, so multiplayer stays in sync. Best states first:
+/// cores, then higher infrastructure (lower for infrastructure itself), then more free slots. Also runs AutoSupply.cs and
+/// AutoProduction.cs.
 /// </summary>
 [Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class AutoConstruction : Plugin
@@ -78,8 +78,7 @@ public unsafe partial class AutoConstruction : Plugin
     private delegate* unmanaged<int, nint> _tokenToString;
     private int* _maxFactoriesPerLine;
 
-    // Wanted count, kept for the session: CBuildingTypes are database objects made once at startup (the database init
-    // sets the global holding them, nothing else does), so a pointer names the same building in every game loaded.
+    // Wanted count. Building types are made once at startup, so a pointer names the same building in every game loaded.
     private readonly Dictionary<(int Tag, nint Type), int> _targets = [];
     private readonly Dictionary<nint, (int Count, long Until)> _sent = [];   // by type: count expected once the sent commands land
     private readonly HashSet<nint> _failed = [];                             // types whose last try found nowhere to build (logged once)
@@ -89,13 +88,13 @@ public unsafe partial class AutoConstruction : Plugin
     public override void Load()
     {
         var supply = Config.Bind("Supply", "AutoSupply", true,
-            "Where your divisions are low on supply: upgrade the railway of a saturated hub, connect a cut-off hub, or build a hub where there is none near.");
+            "Where your divisions are low on supply, upgrade a saturated hub's railway, connect a cut-off hub, or build a new hub.");
         var production = Config.Bind("Production", "AutoProduction", true,
-            "Move military factories from lines whose equipment has a big surplus to lines whose equipment is short, one at a time.");
-        // Every setting is bound whatever is on: unbound keys are pruned from the file after Load.
-        _surplusPercent = Math.Max(0, Config.Bind("Production", "SurplusPercent", 50, "A line gives factories away when its equipment's surplus is above this much (%) of what the army needs."));
-        _coverDays = Math.Max(0, Config.Bind("Production", "CoverDays", 60, "A short line only gets factories if its own output won't cover the shortage within this many days: a moved factory starts over at the base efficiency."));
-        _movesPerDay = Math.Max(1, Config.Bind("Production", "MovesPerTurn", 2, "Factories moved at most per game day, so lines keep their efficiency."));
+            "Move military factories, one at a time, from lines with a big equipment surplus to lines that are short.");
+        // Bound even when off: unbound keys are pruned from the file after Load.
+        _surplusPercent = Math.Max(0, Config.Bind("Production", "SurplusPercent", 50, "A line gives up factories when its surplus is over this share (%) of what the army needs."));
+        _coverDays = Math.Max(0, Config.Bind("Production", "CoverDays", 60, "A short line gets factories only if its own output won't cover the shortage within this many days. A moved factory restarts at base efficiency."));
+        _movesPerDay = Math.Max(1, Config.Bind("Production", "MovesPerTurn", 2, "Most factories moved per game day, so lines keep their efficiency."));
 
         _ = Sig.Find(Buildings.FindSig);
         _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.FreeLevels);
@@ -154,8 +153,7 @@ public unsafe partial class AutoConstruction : Plugin
         if (production) LoadProduction();
     }
 
-    // The targets, kept across a reload of the plugin (a new build, a setting changed in the menu) in the same game process:
-    // building types are database objects made at startup, so their pointers hold until it exits.
+    // Targets survive a plugin reload within one game process: building type pointers hold until it exits.
     private static readonly string TargetsFile = Path.Combine(Loader.ModsDir, "cache", "autoconstruction_targets.txt");
 
     private void SaveTargets()
@@ -186,9 +184,8 @@ public unsafe partial class AutoConstruction : Plugin
     private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));
 
     /// <summary>
-    /// Writes how many more the target wants built ("+N", "+0" once reached) into the button's target box, a small number in
-    /// its bottom right corner; nothing without a target. Queued ones still count until finished: the click queues at once,
-    /// and "+0" right away read as nothing to do.
+    /// Shows "+N" in the button's target box: levels still to build for its target; empty without a target. Queued levels
+    /// count as missing until finished, or the click (which queues at once) would show "+0" right away.
     /// </summary>
     private void ShowTarget(nint item)
     {
@@ -234,9 +231,8 @@ public unsafe partial class AutoConstruction : Plugin
     }
 
     /// <summary>
-    /// New construction lines the country's idle civilian factories would staff: the game fills the queue in order, up to
-    /// MAX_CIV_FACTORIES_PER_LINE a line, so with factories idle every line queued is full and each new one takes up to that
-    /// many (the last a part). Lines beyond it would wait without factories.
+    /// New construction lines the idle civilian factories can staff, at MAX_CIV_FACTORIES_PER_LINE a line (rounded up).
+    /// The game staffs lines in queue order, so more lines would only wait.
     /// </summary>
     private int Staffable(nint country)
     {
@@ -246,7 +242,7 @@ public unsafe partial class AutoConstruction : Plugin
         return idle <= 0 ? 0 : (idle + *_maxFactoriesPerLine - 1) / *_maxFactoriesPerLine;
     }
 
-    /// <summary>Levels of <paramref name="type"/> built in the country's states plus levels queued.</summary>
+    /// <summary>Levels of <paramref name="type"/> built in the country's states, plus those queued (not repairs) if <paramref name="queued"/>.</summary>
     private int Count(nint country, nint type, bool queued = true)
     {
         var count = 0;
@@ -278,9 +274,8 @@ public unsafe partial class AutoConstruction : Plugin
     }
 
     /// <summary>
-    /// Queues up to <paramref name="wanted"/> levels, one per place (state, or province for province buildings) from the
-    /// best down, places that already have a line of this building last: separate lines are built at the same time, while
-    /// the levels of one line are built one after another. Returns the levels queued.
+    /// Queues up to <paramref name="wanted"/> levels, one per state (province for province buildings), best first. Places
+    /// already building this type go last: separate lines build in parallel, one line's levels in turn. Returns the levels queued.
     /// </summary>
     private int Queue(nint country, int tag, nint type, int wanted)
     {
