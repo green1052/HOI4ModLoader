@@ -7,7 +7,7 @@ public static partial class Signatures
 {
     /// <summary>
     /// COrderGroupCommand ctor (mem[0x60], CPdxArray&lt;CArmy*&gt;* units, provider, CTheaterGroup* theaterOrNull): the army
-    /// list's new army from the selected divisions (they leave their armies; empty ones are deleted).
+    /// list's new army from the selected divisions. They leave their armies; emptied ones are deleted.
     /// </summary>
     [Signature] public const string NewArmyCommand = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 48 83 EC 30 49 8B F9 49 8B F0 48 8B EA 48 8B D9 C6 41 08 00";
 
@@ -18,8 +18,8 @@ public static partial class Signatures
     [Signature] public const string NewArmyGroupCall = "B9 80 00 00 00 E8 ? ? ? ? 48 89 44 24 ? 48 85 C0 74 ? 4C 8B 43 70 48 8D 54 24 ? 48 8B C8 E8";
 
     /// <summary>
-    /// CAssignToArmyGroupCommand ctor (mem[0x50], CPdxArray&lt;COrdersGroup*&gt;* armies, COrdersGroup* armyGroup, int index, -1:
-    /// last): a field marshal's card right-clicked with armies selected.
+    /// CAssignToArmyGroupCommand ctor (mem[0x50], CPdxArray&lt;COrdersGroup*&gt;* armies, COrdersGroup* armyGroup, int index
+    /// (-1: last)): right-clicking a field marshal's card with armies selected.
     /// </summary>
     [Signature] public const string JoinArmyGroupCommand = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 0F 29 74 24 ? 41 8B F9 49 8B D8 4C 8B E2 4C 8B F1 C6 41 08 00";
 
@@ -31,16 +31,16 @@ public static partial class Signatures
 }
 
 /// <summary>
-/// Ctrl+Alt+G with land divisions selected: they are split into armies of at most the game's army size for a general
-/// (NMilitary.CORPS_COMMANDER_DIVISIONS_CAP), neighbours together; a whole army of at least half that size stays as it is.
-/// Each new army gets the best idle general, and all of them join the army group most of the divisions came from, or a new
-/// one under the best idle field marshal. The army list's own commands, one step a tick (multiplayer works).
+/// Ctrl+Alt+G with land divisions selected splits them into armies of at most the general's army size
+/// (NMilitary.CORPS_COMMANDER_DIVISIONS_CAP), neighbours together. A whole army of at least half that size is kept.
+/// Each new army gets the best idle general. All join the army group most divisions came from, or a new one under the best
+/// idle field marshal. Uses the army list's own commands, one step at a time, so multiplayer works.
 /// </summary>
 public unsafe partial class ArmySupport
 {
     private static class Org
     {
-        // CArmy, COrdersGroup, CCountry, CUnitLeader (the rest: the loader's Division and OrdersGroup). Layouts for HOI4 1.19.3.
+        // Layouts for HOI4 1.19.3: CArmy, COrdersGroup, CCountry, CUnitLeader. The rest are the loader's Division and OrdersGroup.
         public const int Provider = 0x2A0;                                    // CArmy: its provider (an orders group manager, one per theatre)
         public const int ProviderOfGroup = 0x40, MemberCount = 0x5C, Leader = 0x88;
         public const int LeaderHolder = 0xFF0, Leaders = 0x70;
@@ -50,7 +50,7 @@ public unsafe partial class ArmySupport
         public const long TimeoutMs = 30_000; // multiplayer: a round trip
     }
 
-    /// <summary>A reorganisation under way: pointers are looked up again every tick (units in the country's list, groups by CRef).</summary>
+    /// <summary>A reorganisation under way. Pointers are looked up again every tick: units in the country's list, groups by CRef.</summary>
     private sealed class Organizing(List<List<nint>> chunks, HashSet<long> oldGroups, List<long> kept, long armyGroup)
     {
         public readonly List<List<nint>> Chunks = chunks; // divisions of each new army
@@ -184,7 +184,7 @@ public unsafe partial class ArmySupport
         }
         if (job.ArmyGroup != 0) Log.Info("organize: their army group is gone (its armies were emptied), making a new one");
         job.ArmyGroup = 0;
-        // Done once every army is in an army group it isn't in now: a new army may already sit in one.
+        // Done once every army is in a different army group than now; a new army may already be in one.
         job.OldParents.UnionWith(armies.Select(a => *(nint*)(a + OrdersGroup.ParentOffset)).Where(p => p != 0).Select(Ref));
         job.Armies.Clear();
         foreach (var byProvider in armies.GroupBy(a => *(nint*)(a + Org.ProviderOfGroup)))
@@ -218,7 +218,7 @@ public unsafe partial class ArmySupport
         _organizing = null;
     }
 
-    /// <summary>Our land divisions in the player's selection (checked against the country's own list before anything else is read).</summary>
+    /// <summary>Our land divisions in the player's selection, checked against the country's list before anything is read.</summary>
     private List<nint> SelectedDivisions(nint country, int tag)
     {
         var result = new List<nint>();
@@ -229,8 +229,8 @@ public unsafe partial class ArmySupport
     }
 
     /// <summary>
-    /// <paramref name="units"/> in armies of at most <paramref name="cap"/>, as even as possible: starting from one end of
-    /// them, each army takes the divisions nearest (in provinces) to the first one left.
+    /// <paramref name="units"/> in armies of at most <paramref name="cap"/>, as even as possible. Starting from one end,
+    /// each army takes the divisions nearest (in provinces) to the first one left.
     /// </summary>
     // ponytail: hop distance over the province graph (sea included), no real geometry.
     private static List<List<nint>> Split(List<nint> units, int cap)
@@ -302,7 +302,7 @@ public unsafe partial class ArmySupport
         return cmd;
     }, Signatures.SetLeaderCommand);
 
-    /// <summary>A command of <paramref name="size"/> made by <paramref name="make"/> (a game ctor, or filling a <paramref name="vtable"/> one), posted if the game takes it.</summary>
+    /// <summary>Builds a command with <paramref name="make"/> (a game ctor, or filling a <paramref name="vtable"/> one) and posts it. True if the game took it.</summary>
     private static bool Post(int size, Func<nint, nint> make, string? vtable = null)
     {
         var cmd = vtable != null ? Commands.New(vtable, size, 0, 0) : Allocator.AllocZeroed(size);

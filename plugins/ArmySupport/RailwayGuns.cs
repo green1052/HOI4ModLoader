@@ -8,22 +8,22 @@ namespace ArmySupport;
 public static partial class Signatures
 {
     /// <summary>
-    /// Railway gun distribution, per gun: `mov r13d,eax; cmp eax,r14d; setle [rsp+3Ch]` = "enough convoys to ship it",
-    /// which lets a gun target provinces outside its own rail network by sea.
+    /// Railway gun distribution, per gun: `mov r13d,eax; cmp eax,r14d; setle [rsp+3Ch]` sets "enough convoys", which lets
+    /// the gun target provinces off its rail network by sea.
     /// </summary>
     [Signature] public const string ConvoysOk = "44 8B E8 41 3B C6 0F 9E 44 24 3C 48 8B 7D B8";
 
     /// <summary>
     /// Railway gun distribution: score of a candidate province (ctx**, long* out, int province) -> out. *ctx is the
-    /// CPdxArray of 48-byte province records the distribution built: +0 id, +12 hostile units, +25 controller at war with us.
+    /// distribution's CPdxArray of 48-byte province records: +0 id, +12 hostile units, +25 controller at war with us.
     /// </summary>
     [Signature] public const string ScoreProvince = "48 89 5C 24 ? 48 89 54 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 80 00 00 00 48 8B 19";
 }
 
 /// <summary>
-/// Railway gun movement (single player, it changes the game's distribution): guns keep off the front line and stay on their
-/// own rail network. Candidate provinces next to the enemy (enemy-controlled or with hostile units) get a large penalty, so
-/// guns sit just behind the line instead of being overrun, and guns never ship out by sea (where submarines sink them).
+/// Railway guns keep off the front line and stay on their own rail network (single player: changes the game's
+/// distribution). Provinces next to the enemy get a large penalty, so guns sit just behind the line instead of being
+/// overrun. Guns never ship by sea, where submarines sink them.
 /// </summary>
 public unsafe partial class ArmySupport
 {

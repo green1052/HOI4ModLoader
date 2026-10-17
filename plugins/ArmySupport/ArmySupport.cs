@@ -3,9 +3,8 @@ using HOI4ModLoader;
 namespace ArmySupport;
 
 /// <summary>
-/// Support for the army: air wings and railway guns for field marshals (FieldMarshal.cs), railway gun positioning
-/// (RailwayGuns.cs), airbase send capacity (Airbases.cs), auto rebase (Rebase.cs), auto ground crews (GroundCrews.cs), auto aces (Aces.cs) and the Ctrl+Alt+G
-/// army organizer (Organize.cs).
+/// Army helpers, one file each: field marshal attachments, railway gun placement, airbase capacity, auto rebase, auto
+/// ground crews, auto aces and the Ctrl+Alt+G army organizer.
 /// </summary>
 [Plugin("com.green1052.armysupport", "Army Support", "1.0.0", GameVersion = "1.19.3")]
 public partial class ArmySupport : Plugin
@@ -13,22 +12,21 @@ public partial class ArmySupport : Plugin
     public override void Load()
     {
         var fieldMarshal = Config.Bind("FieldMarshal", "FieldMarshal", true,
-            "Right-click a field marshal's card with air wings or railway guns selected: single player attaches them to him (changes the game), multiplayer spreads them over his armies.");
+            "Right-click a field marshal's card with air wings or railway guns selected to attach them. Single player: to him; multiplayer: spread over his armies.");
         var frontPenalty = Math.Max(0, Config.Bind("RailwayGuns", "FrontPenalty", 500,
-            "Score taken off provinces on the front line (next to enemy-controlled provinces or hostile units) for railway guns; 0: off. Vanilla bonuses for being near the fighting are about 100-200. Single player."));
-        var noSea = Config.Bind("RailwayGuns", "NoSeaTransfer", true, "Never ship railway guns by sea; they only move along their own rail network. Single player.");
+            "Score taken off front-line provinces so railway guns stay just behind the front (vanilla's bonus near fighting is about 100-200). 0: off. Single player."));
+        var noSea = Config.Bind("RailwayGuns", "NoSeaTransfer", true, "Railway guns never go by sea, only along their own rail network. Single player.");
         var coverage = Math.Clamp(Config.Bind("Rebase", "Coverage", 100,
-            "Fly a wing reaching less than this much (%) of its mission region to a usable airbase with room that reaches more (wings attached to an army: the game does it); 0: off."), 0, 100);
+            "Air wings covering less than this % of their mission region fly to an airbase with room that covers more. 0: off."), 0, 100);
         var groundCrews = Config.Bind("Air", "AutoGroundCrews", false,
-            "Turn on More Ground Crews (+10 % air efficiency in a region for command power, given back when turned off) where your air wings fought hardest in the last two days "
-            + "(10+ planes lost and shot down where enemy planes are active), two regions at most, and off again where they stopped fighting for three days or command power falls under the reserve. "
-            + "Only regions it turned on are turned off; one you turn off yourself is left alone.");
+            "Turns More Ground Crews on in up to 2 regions where your air wings fought hardest in the last two days, "
+            + "and off after three quiet days or when command power drops under the reserve. Regions you toggle yourself are left alone.");
         var crewsReserve = Math.Clamp(Config.Bind("Air", "GroundCrewsReserve", 50,
-            "Command power auto ground crews never spends below."), 0, 1000);
+            "Auto ground crews never spends command power below this."), 0, 1000);
         var aces = Config.Bind("Air", "AutoAces", true,
-            "Assign your idle aces to air wings without a living ace (wings on a mission first, then the biggest), and take aces killed in action off their wings (every country's in single player: vanilla leaves them there, blocking the slot).");
+            "Puts your idle aces on air wings without a living ace, wings on a mission first. Also takes fallen aces off their wings (every country's in single player).");
         var organize = Config.Bind("Organize", "Organize", true,
-            "Ctrl+Alt+G with divisions selected: split them into armies of the game's army size (neighbours together), each under the best idle general, in the army group most of them came from or a new one under the best idle field marshal.");
+            "Ctrl+Alt+G with divisions selected splits them into armies of the game's army size, each under the best idle general, in their army group or a new one.");
 
         LoadSending();
         if (coverage > 0) LoadRebase(coverage);

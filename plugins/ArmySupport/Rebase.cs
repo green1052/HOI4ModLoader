@@ -5,7 +5,7 @@ namespace ArmySupport;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static partial class Signatures
 {
-    /// <summary>CAirBase: provinces of a strategic region in range (CPdxArray* outOrNull, region, base, long range, int maxCount) -> int.</summary>
+    /// <summary>CAirBase: provinces of a strategic region in range (CPdxArray* outOrNull, region, base, long range, int maxCount) -> int: their count.</summary>
     [Signature] public const string ProvincesInRange = "48 89 5C 24 ? 55 56 57 41 56 41 57 48 83 EC 50 41 83 78";
 
     /// <summary>CAirWing::GetRange(wing, long* out) -> out (map pixels, fixed point).</summary>
@@ -24,17 +24,16 @@ public static partial class Signatures
     [Signature] public const string RegionToState = "48 83 EC 28 4C 8B 42 ? 48 8B 51 ? 48 8D 4C 24 ? 41 8B 80 ? ? ? ? 2B 82 E0 00 00 00";
 
     /// <summary>
-    /// CStratAirTransferCommand ctor (mem[0x48], wing, base, bool returnHome, CStrategicRegion* region, int missionMask): flies
-    /// the wing over and resumes the mission there, as the game's own rebasing does.
+    /// CStratAirTransferCommand ctor (mem[0x48], wing, base, bool returnHome, CStrategicRegion* region, int missionMask):
+    /// flies the wing over and resumes the mission, as the game's own rebasing does.
     /// </summary>
     [Signature] public const string TransferCommand = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 48 83 EC 30 41 0F B6 E9 49 8B F0 48 8B D9";
 }
 
 /// <summary>
-/// Auto rebase: a wing on a mission reaching less than Coverage of its region from its airbase is flown to the usable
-/// airbase with room that reaches more of it (closest to the region on a tie), keeping its mission, with the game's own
-/// transfer command (multiplayer works). The game already does this for wings attached to an army; those are left to it,
-/// as are carriers.
+/// Auto rebase: a wing on a mission covering less than Coverage of its region flies to the land airbase with room that
+/// covers more (closest on a tie), keeping its mission. Uses the game's transfer command, so multiplayer works. Wings
+/// attached to an army (the game rebases those) and carriers are skipped.
 /// </summary>
 public unsafe partial class ArmySupport
 {

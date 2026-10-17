@@ -11,12 +11,12 @@ public static partial class Signatures
     public const string SendAnchor = "order_airwing_effect";
 
     /// <summary>
-    /// UI: send the selected air wings to an airbase (CAirBase* dest). Every way of doing it ends here: right-clicking an
-    /// airbase on the map, a carrier, a naval mission. It posts one vanilla transfer command per wing.
+    /// UI: send the selected air wings to an airbase (CAirBase* dest); posts one vanilla transfer command per wing.
+    /// Right-clicking an airbase, a carrier or a naval mission all end here.
     /// </summary>
     [Signature(Anchor = SendAnchor)] public const string SendSelectedWings = "48 89 4C 24 ? 55 53 56 57 41 54 41 56 41 57 48 8D 6C 24 ? 48 81 EC B0 00 00 00 45 33 E4 41 8B DC 89 5D";
 
-    /// <summary>UI: the selected air wings (CPdxArray* out, int role filter); the send above gets its list from it.</summary>
+    /// <summary>UI: the selected air wings (CPdxArray* out, int role filter). The send above gets its list here.</summary>
     [Signature] public const string SelectedWings = "40 55 41 56 48 83 EC 38 4C 8B F1 8B EA 48 8B 0D ? ? ? ? 48 85 C9 0F 84 ? ? ? ? 48 81 C1 38 05 00 00";
 
     /// <summary>CAirBase::GetNumPlanes(base): planes stationed there, every country's (the "used" number of the capacity tooltip).</summary>
@@ -24,9 +24,8 @@ public static partial class Signatures
 }
 
 /// <summary>
-/// Shift+right-click an airbase with air wings selected to send only the wings that fit: the airbase's capacity minus the
-/// planes there and on their way. Wings that don't fit stay where they are. Only the UI's selection list is trimmed, so the
-/// game sends its own transfer commands (multiplayer works).
+/// Shift+right-click an airbase with air wings selected to send only the wings that fit (capacity minus planes there and
+/// on their way). Only the UI's selection list is trimmed, so the game posts its own commands and multiplayer works.
 /// </summary>
 public unsafe partial class ArmySupport
 {
@@ -72,8 +71,7 @@ public unsafe partial class ArmySupport
         var kept = 0;
         foreach (var wing in data)
         {
-            // Already there (vanilla cancels its transfer) or already flying there (counted above): no new room needed.
-            // No pool counts as already there too, as vanilla treats it.
+            // Needs no room: already there (vanilla cancels the transfer), flying there (counted above), or no pool (vanilla treats it as there).
             var pool = *(nint*)(wing + Pool);
             var counted = pool == 0 || *(ulong*)(pool + BaseOfPool) == id || *(ulong*)(wing + Destination) == id;
             if (!counted)

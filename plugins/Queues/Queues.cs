@@ -12,14 +12,14 @@ public static class Signatures
 {
     /// <summary>
     /// CCountryTechTreeView click on a tech / on an XOR tech (view, event): event+8 is the CTechnologyStatus. Normally opens
-    /// the technology info window, whose Research button then starts it.
+    /// the tech's info window.
     /// </summary>
     [Signature] public const string TechClick = "48 89 5C 24 ? 57 48 83 EC 20 80 3D ? ? ? ? ? 48 8B F9";
     [Signature] public const string XorTechClick = "40 55 56 48 83 EC 28 80 3D";
 
     /// <summary>
-    /// National focus tree: open the detail popup of a clicked focus (view, CNationalFocus*, bool). Hooked instead of the
-    /// popup's select button, which is disabled while another focus is in progress.
+    /// National focus tree: opens a clicked focus' popup (view, CNationalFocus*, bool). Hooked instead of the popup's select
+    /// button, which is disabled while another focus runs.
     /// </summary>
     [Signature] public const string FocusClick = "48 85 D2 0F 84 ? ? ? ? 48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC 30";
 
@@ -29,12 +29,12 @@ public static class Signatures
     /// <summary>Intelligence agency upgrade entry refresh (entry): fills entry+WindowOfEntry's texts and buttons.</summary>
     [Signature] public const string AgencyEntryRefresh = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 38 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B F1";
 
-    /// <summary>Agency upgrades window: refresh every entry (window). Only runs when the window opens or the game changes something.</summary>
+    /// <summary>Agency upgrades window: refreshes every entry (window). Runs only when the window opens or something changes.</summary>
     [Signature] public const string AgencyWindowRefresh = "48 89 6C 24 ? 56 48 83 EC 20 48 8B 41 ? 48 8B B0";
 
     /// <summary>
-    /// CTechnologyTreeTechItem::UpdateBonus(item): always re-sets the item's "bonus" text (hidden and empty when there's no
-    /// bonus). Runs whenever the item's state changes, so a postfix can put the queue number there without it piling up.
+    /// CTechnologyTreeTechItem::UpdateBonus(item): re-sets the item's "bonus" text (hidden and empty with no bonus) on every
+    /// state change, so a number added after it never piles up.
     /// </summary>
     [Signature] public const string TechItemUpdateBonus = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC 88 01 00 00 4C 8B E9";
 
@@ -43,7 +43,7 @@ public static class Signatures
 
     /// <summary>
     /// CNationalFocusView::UpdateNodeStates(view, float dt, cache): updates every focus item, every frame while the tree is
-    /// open. Item names are set once when items are built, so a postfix keeps the queue number in front of them.
+    /// open. Item names are set only once, when the items are built.
     /// </summary>
     [Signature] public const string FocusUpdateNodeStates = "48 8B C4 48 89 58 ? 48 89 68 ? 56 57 41 54 41 56 41 57 48 83 EC 60 F3 0F 10 91 ? ? ? ? 45 32 FF";
 
@@ -56,12 +56,11 @@ public static class Signatures
 }
 
 /// <summary>
-/// Research, national focus and intelligence agency upgrade queues. Shift+click a tech, focus or agency upgrade to
-/// queue/unqueue it; whenever a research slot, the focus or the agency is idle, the first queued entry the game accepts
-/// is started with the same command the UI sends (so multiplayer stays in sync). Queued entries show their position:
-/// a numbered badge (Gui.Number) on a tech's bonus text, in front of a focus' name, and in the agency upgrade's number box (the GuiPatch above).
-/// Entries that can no longer start (researched techs, focuses completed or shut out by a mutually exclusive one, agency
-/// levels done) are dropped. The political power queue (<see cref="PoliticalQueue"/>) comes with it.
+/// Research, national focus and intelligence agency upgrade queues. Shift+click a tech, focus or upgrade to queue or
+/// unqueue it. When a research slot, the focus or the agency is idle, the first entry the game accepts starts with the
+/// UI's own command, so multiplayer stays in sync. Queued entries show their place: on a tech's bonus text, before a
+/// focus' name, in the upgrade's number box (the GuiPatch above). Entries that can no longer start are dropped.
+/// Also loads the political power queue (<see cref="PoliticalQueue"/>).
 /// </summary>
 [Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class Queues : Plugin
@@ -105,7 +104,7 @@ public unsafe class Queues : Plugin
     private delegate* unmanaged<nint, void> _techViewUpdateAllItems;
     private delegate* unmanaged<nint, nint, byte> _focusCompleted;
     private readonly HashSet<nint> _numberedFocusItems = []; // focus items whose name has our badge
-    private nint _agencyWindow; // last refreshed agency upgrades window, valid while it's open (i.e. whenever one of its entries is clicked)
+    private nint _agencyWindow; // last refreshed agency upgrades window; still open whenever one of its entries is clicked
     private bool _reportedNumberBox;
 
     private readonly Queue _research = new("research", Signatures.ResearchCommand, 0x40);
@@ -178,7 +177,7 @@ public unsafe class Queues : Plugin
         });
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
-        if (Config.Bind("Queues", "PoliticalPower", true, "Shift+click an idea, law, advisor or decision to take it as soon as there is the political power."))
+        if (Config.Bind("Queues", "PoliticalPower", true, "Shift+click an idea, law, advisor or decision to take it once you have the political power."))
             new PoliticalQueue(Log).Load();
     }
 
@@ -192,7 +191,7 @@ public unsafe class Queues : Plugin
         return true;
     }
 
-    /// <summary>Puts a queued tech's position on its "bonus" text, which the game has just re-set (and shows it if hidden).</summary>
+    /// <summary>Puts a queued tech's place on its freshly re-set "bonus" text, showing it if hidden.</summary>
     private void LabelTech(nint item)
     {
         var status = *(nint*)(item + StatusOfTechItem);
@@ -209,8 +208,8 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>
-    /// Keeps the badge in front of queued focuses' names (set once by the game when it builds the items), and takes it off
-    /// focuses no longer queued. Runs every frame while the tree is open; SetText only when something changed.
+    /// Keeps the number in front of queued focuses' names and takes it off unqueued ones. Runs every frame while the tree is
+    /// open, touching only the items that changed.
     /// </summary>
     private void LabelFocuses(nint view)
     {
@@ -228,8 +227,8 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>
-    /// Unqueues <paramref name="focus"/> and every queued focus that can no longer be reached without it: one of its
-    /// prerequisite blocks held an unqueued focus and now has none completed, in progress or still queued.
+    /// Unqueues <paramref name="focus"/> and every queued focus that needed it: a prerequisite block that held an unqueued
+    /// focus and has no option left completed, running or queued.
     /// </summary>
     private void UnqueueFocus(nint focus)
     {
@@ -277,8 +276,8 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>
-    /// Queues one more level of a repeatable agency upgrade, up to the levels left; past that, unqueues all of it. A plain
-    /// upgrade (one level) toggles.
+    /// Queues one more level of an agency upgrade, up to the levels left; past that, unqueues it all. A one-level upgrade
+    /// toggles.
     /// </summary>
     private void AddLevel(nint agency, nint upgrade)
     {
@@ -313,9 +312,8 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>
-    /// While another upgrade runs, the game hides every other upgrade's button (showing an icon in its place), so it can't be
-    /// clicked, let alone shift+clicked. Keep the button of any upgrade that isn't running or finished: a plain click still
-    /// does nothing, because the game's own command check rejects starting a second upgrade.
+    /// While an upgrade runs, the game hides the other upgrades' buttons, so they can't be shift+clicked. Shows them again
+    /// for upgrades with levels left; a plain click still does nothing, as the game rejects a second upgrade.
     /// </summary>
     private static void KeepClickable(nint entry)
     {
@@ -382,7 +380,7 @@ public unsafe class Queues : Plugin
         Drop(_research, tech => research != 0 && Researched(research, tech));
         Drop(_focus, f => focus != 0 && Unreachable(focus, f));
         if (agency == 0) return;
-        foreach (var upgrade in _agency.Items.Distinct().ToList()) // levels done by hand: keep only as many as are left
+        foreach (var upgrade in _agency.Items.Distinct().ToList()) // levels done by hand: keep no more than are left
             while (_agency.Items.Count(i => i == upgrade) > Math.Max(0, LevelsLeft(agency, upgrade))) _agency.Items.RemoveAt(_agency.Items.LastIndexOf(upgrade));
     }
 
@@ -393,7 +391,7 @@ public unsafe class Queues : Plugin
         if (dropped > 0) Log.Info($"{queue.Name}: dropped {dropped} that can no longer start, {queue.Items.Count} left");
     }
 
-    /// <summary>Every level of <paramref name="tech"/> researched: the first test of the game's own CanResearch.</summary>
+    /// <summary>Every level of <paramref name="tech"/> is researched; the first test of the game's CanResearch.</summary>
     private static bool Researched(nint research, nint tech)
     {
         var index = *(int*)(tech + IndexOfTech) - 1;
@@ -402,9 +400,8 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>
-    /// The focus is taken, shut out by a taken mutually exclusive one, or needs a prerequisite of which every option is
-    /// shut out. The game's availability check (CNationalFocus vtable slot 9) tests "taken" the same way: IsCompleted, the
-    /// focus has an entry in the progress (done or running).
+    /// The focus is taken, shut out by a taken mutually exclusive one, or has a prerequisite block whose options are all
+    /// shut out. "Taken" is IsCompleted (done or running), as in the game's availability check (CNationalFocus vtable slot 9).
     /// </summary>
     private bool Unreachable(nint progress, nint focus)
     {
@@ -428,9 +425,8 @@ public unsafe class Queues : Plugin
     }
 
     /// <summary>
-    /// Sends the first queued entry the game would accept (its own CanExecute) to the idle <paramref name="slot"/>. The entry
-    /// stays queued until it shows up running: in multiplayer a command takes a round trip, and sending another to the same
-    /// slot meanwhile would replace the first.
+    /// Sends the first entry the game accepts (its CanExecute) to the idle <paramref name="slot"/>. It stays queued until it
+    /// shows up running: a multiplayer command takes a round trip, and another one sent to the slot meanwhile would replace it.
     /// </summary>
     private void StartFirst(Queue queue, int slot, int tag, Action<nint>? fill = null)
     {
@@ -439,7 +435,7 @@ public unsafe class Queues : Plugin
         if (queue.Sent.TryGetValue(slot, out var sent))
         {
             if (now < sent.Until) return;
-            queue.Sent.Remove(slot); // the game took the command but never started it: don't keep the slot waiting on it
+            queue.Sent.Remove(slot); // taken but never started: stop waiting on it
             if (queue.Items.Remove(sent.Item)) Log.Info($"{queue.Name}: dropped an entry that never started");
         }
         foreach (var item in queue.Items)
@@ -464,8 +460,8 @@ public unsafe class Queues : Plugin
         private readonly Dictionary<int, nint> _running = []; // by slot: what was running at the last pump
 
         /// <summary>
-        /// <paramref name="item"/> is running in <paramref name="slot"/>, whether we sent it or the player started it. Takes one
-        /// entry off the queue when it starts (an item can be queued more than once: repeatable agency upgrades).
+        /// <paramref name="item"/> runs in <paramref name="slot"/>, sent by us or started by the player. When it starts, one
+        /// entry comes off the queue (repeatable agency upgrades are queued once per level).
         /// </summary>
         public void Running(int slot, nint item)
         {

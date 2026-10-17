@@ -21,8 +21,8 @@ public static class PoliticalSignatures
     [Signature] public const string AdvisorPick = "48 89 5C 24 ? 57 48 83 EC 20 80 79 ? ? 48 8B DA 48 8B F9 74";
 
     /// <summary>
-    /// CCountryCharacterSelectionItem click lambda (impl): impl+8 is the item. Runs the pick (AdvisorPick), then marks the
-    /// item clicked (highlight) for the selector to close.
+    /// CCountryCharacterSelectionItem click lambda (impl): impl+8 is the item. Runs the pick (AdvisorPick), then highlights
+    /// the item so the selector closes.
     /// </summary>
     [Signature] public const string AdvisorItemClick = "40 53 48 83 EC 20 48 8B 59 08 48 8B 8B A0 06 00 00 48 85 C9 74 ? 48 89 5C 24 30 48 8B 01 48 8D 54 24 30 FF 50 10 48 83 7B 10 00";
 
@@ -32,7 +32,7 @@ public static class PoliticalSignatures
     /// <summary>CCountryCharacterSelectionItem::Update(item, CCharacterStatus*, bool).</summary>
     [Signature] public const string AdvisorUpdate = "44 88 44 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24";
 
-    /// <summary>Decisions view: click on a decision (item) / on a targeted decision (item); both post at once.</summary>
+    /// <summary>Decisions view: click on a decision / a targeted decision (item); both post at once.</summary>
     [Signature] public const string DecisionClick = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 8B D9 48 8B 3D ? ? ? ? 48 8B 07 48 8B CF FF 90 ? ? ? ? 48 8B E8";
     [Signature] public const string TargetedDecisionClick = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 56 48 83 EC 20 48 8B D9 48 8B 35 ? ? ? ? 48 8B 06";
 
@@ -49,11 +49,10 @@ public static class PoliticalSignatures
 }
 
 /// <summary>
-/// Political power queue. Shift+click an idea (law, designer, national spirit) in its slot's picker, an advisor (political
-/// advisor, theorist, chief, high command) in the advisor picker, or a decision, to queue/unqueue it; queued entries show
-/// a numbered badge (Gui.Number) in front of their name. The first queued entry the game accepts (its own command check, which includes the cost)
-/// is taken with the same command the UI sends, one at a time, so it happens as soon as there's enough political power.
-/// Part of <see cref="Queues"/>, which loads it.
+/// Political power queue. Shift+click an idea (law, designer, national spirit), an advisor or a decision to queue or
+/// unqueue it; queued entries get a number before their name. The first entry the game accepts (its check includes the
+/// cost) is taken with the UI's own command, one at a time, as soon as there is enough political power.
+/// Loaded by <see cref="Queues"/>.
 /// </summary>
 internal sealed unsafe class PoliticalQueue(Logger log)
 {
@@ -88,7 +87,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
     private IHook<OneFn>? _ideaClick, _decisionClick, _targetedDecisionClick, _advisorItemClick;
     private IHook<TwoFn>? _advisorPick, _advisorUnselectable;
     private IHook<ThreeFn>? _ideaUpdate, _advisorUpdate, _decisionSet, _targetedDecisionSet;
-    private readonly HashSet<nint> _forced = []; // entries whose button we made clickable for Shift+click: a plain click does nothing
+    private readonly HashSet<nint> _forced = []; // items whose button we made clickable for Shift+click; a plain click does nothing
     private delegate* unmanaged<nint, void> _ideaListRefresh;
 
     private readonly List<Entry> _queue = [];
@@ -136,8 +135,8 @@ internal sealed unsafe class PoliticalQueue(Logger log)
             LabelAdvisor(status - CharacterOfItem);
             return 0;
         });
-        // A plain click on an advisor the game blocked does nothing, as if it were still disabled: stop it before the item
-        // highlights itself (stopping it at the pick leaves the highlight on and the selector open).
+        // A plain click on an advisor the game blocked must do nothing. Stop it here, before the item highlights itself;
+        // stopping it at the pick leaves the selector open.
         _advisorItemClick = Patches.Hook<OneFn>(Sig.Find(PoliticalSignatures.AdvisorItemClick), impl =>
             !Gui.ShiftHeld && _forced.Contains(*(nint*)(impl + IdeaItemOfImpl)) ? 0 : _advisorItemClick!.OriginalFunction(impl));
         _advisorUpdate = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.AdvisorUpdate), (item, status, flag) =>
@@ -198,16 +197,15 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
     }
 
-    /// <summary>A queued entry the player took by hand (a plain click): the queue would try it again forever.</summary>
+    /// <summary>Unqueues an entry the player took by hand, which the queue would otherwise retry forever.</summary>
     private void Drop(Kind kind, nint item)
     {
         if (_queue.RemoveAll(e => e.Kind == kind && e.Item == item) > 0) log.Info($"{kind}: taken by hand, unqueued");
     }
 
     /// <summary>
-    /// The game drops clicks on a disabled or unclickable button before any handler runs, and it blocks exactly what a queue
-    /// is for (can't afford yet). Make <paramref name="button"/> clickable, and remember <paramref name="item"/> so that a
-    /// plain click on it still does nothing.
+    /// The game drops clicks on a disabled or unclickable button, as on an entry you can't afford yet. Makes
+    /// <paramref name="button"/> clickable and remembers <paramref name="item"/>, so a plain click on it still does nothing.
     /// </summary>
     private void Force(nint item, nint button)
     {
@@ -225,7 +223,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
 
     private static string SlotName(nint str) => Encoding.Latin1.GetString(Native.MsvcString(str));
 
-    /// <summary>A targeted decision entry: the target object's vtable slot 0 is its CDecision*; tag and extra identify the target.</summary>
+    /// <summary>A targeted decision entry: the target's vtable slot 0 returns its CDecision*; tag and extra identify the target.</summary>
     private static Entry? TargetedEntry(nint target)
     {
         if (target == 0) return null;
@@ -257,7 +255,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
 
     private static bool Same(Entry a, Entry b) => a with { Occupant = 0 } == b with { Occupant = 0 };
 
-    /// <summary>Puts the numbered badge in front of the name box's text if the entry is queued, and takes an old one off otherwise.</summary>
+    /// <summary>Puts the entry's queue number before the name box's text, or takes it off if not queued.</summary>
     private void Label(nint box, Entry entry)
     {
         if (box != 0) Gui.Number(box, _queue.FindIndex(e => Same(e, entry)) + 1);
@@ -273,8 +271,8 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         var politics = country == 0 ? 0 : *(nint*)(country + PoliticsOfCountry);
         if (politics == 0) return;
 
-        // One at a time: the cost is paid when the command runs (a round trip later in multiplayer), so a second post could
-        // pass the same check with the same political power.
+        // One at a time: the cost is paid when the command runs (a round trip later in multiplayer), so a second post would
+        // pass the check with the same political power.
         var power = *(long*)(politics + PoliticalPower);
         var now = Environment.TickCount64;
         if (_waiting is { } w && w.PoliticalPower == power && now < w.Until) return;
@@ -285,8 +283,8 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         foreach (var entry in _queue)
         {
             if (!Post(entry, tag, active)) continue;
-            // Decisions can be repeatable: never post one twice. An idea stays until it shows up active (above), so one the
-            // game turns down when the command runs is tried again.
+            // Decisions can repeat, so post one only once. An idea stays until it shows up active (above), so one turned
+            // down when the command runs is tried again.
             if (entry.Kind != Kind.Idea) _queue.Remove(entry);
             _waiting = (power, now + WaitMs);
             log.Info($"{entry.Kind}: taken");
@@ -333,7 +331,7 @@ internal sealed unsafe class PoliticalQueue(Logger log)
 
     /// <summary>
     /// CAddAdvisorCommand: +40 character id, +48 pay cost, +56 std::string slot. CReplaceAdvisorCommand: +40 old id, +48 new
-    /// id, +56 pay cost, +64 slot. Neither has the usual tag/target layout, so both are filled here.
+    /// id, +56 pay cost, +64 slot. Neither uses the usual tag/target fields.
     /// </summary>
     private static bool PostAdvisor(string className, int size, int tag, nint occupant, Entry entry)
     {

@@ -5,7 +5,7 @@ namespace ArmySupport;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static partial class Signatures
 {
-    /// <summary>The AI's ace assignment: `mov r14,[rbx+Aces]; movsxd rax,[rbx+Aces+0Ch]`, the country's CPdxArray&lt;CAce*&gt;.</summary>
+    /// <summary>In the AI's ace assignment: `mov r14,[rbx+Aces]; movsxd rax,[rbx+Aces+0Ch]`; Aces is the country's CPdxArray&lt;CAce*&gt;.</summary>
     [Signature] public const string CountryAces = "4C 8B B3 D8 12 00 00 48 63 83 E4 12 00 00 4D 8D 2C C6";
 
     /// <summary>CAce::GetWing(ace) -> CAirWing*, or 0.</summary>
@@ -14,18 +14,17 @@ public static partial class Signatures
     /// <summary>CAirWing::GetAce(wing) -> CAce*, or 0.</summary>
     [Signature] public const string AceOfWing = "48 81 C1 E8 02 00 00 83 39 00 75 ? 83 79 ? ? 75";
 
-    /// <summary>CAce::CanAssignTo(ace, wing, std::string* reasonOrNull): `cmp byte [rcx+Alive],0; ...` alive and flies the wing's planes.</summary>
+    /// <summary>CAce::CanAssignTo(ace, wing, std::string* reasonOrNull) -> bool: alive and flies the wing's planes. Starts `cmp byte [rcx+Alive],0`.</summary>
     [Signature] public const string CanAssignAce = "40 53 48 83 EC 40 80 B9 58 01 00 00 00 49 8B D8 4C 8B C1";
 
-    /// <summary>Puts an ace on a wing (taking it off its old one), or with no ace takes the wing's off; no country field.</summary>
+    /// <summary>Puts an ace on a wing, off its old one. With no ace it takes the wing's ace off. No country field.</summary>
     [VTable] public const string AssignAceCommand = "CAssignAceCommand";
 }
 
 /// <summary>
-/// Auto aces, once a game day: an ace killed in action stays on its wing in vanilla, blocking the slot (the AI never frees
-/// it either); it is taken off. Every country's in single player, the player's in multiplayer. The player's idle aces go to
-/// the wing without a living ace that they can fly, wings on a mission first, then the biggest; the AI assigns its own.
-/// Vanilla commands: multiplayer works.
+/// Auto aces, once a game day. Fallen aces are taken off their wings; vanilla leaves them there, blocking the slot.
+/// Every country's in single player, the player's in multiplayer. The player's idle aces go to wings without a living
+/// ace, wings on a mission first, then the biggest. Vanilla commands, so multiplayer works.
 /// </summary>
 public unsafe partial class ArmySupport
 {
@@ -99,7 +98,7 @@ public unsafe partial class ArmySupport
 
     private static bool PostAce(nint ace, nint wing, bool force)
     {
-        var cmd = Commands.New(Signatures.AssignAceCommand, AceSize, 0, 0); // a null ace ref is all zero (GetAce reads it so)
+        var cmd = Commands.New(Signatures.AssignAceCommand, AceSize, 0, 0); // no ace: an all-zero ref, which GetAce reads as none
         if (ace != 0) *(long*)(cmd + AceOfCommand) = *(long*)(ace + AceRef);
         *(long*)(cmd + WingOfCommand) = *(long*)(wing + WingRef);
         return Commands.TryPost(cmd, force);

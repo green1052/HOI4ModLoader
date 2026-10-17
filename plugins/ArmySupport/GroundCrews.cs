@@ -3,10 +3,9 @@ using HOI4ModLoader;
 namespace ArmySupport;
 
 /// <summary>
-/// Auto ground crews: More Ground Crews (+10 % air efficiency in a region for command power, given back when turned off) goes on
-/// where the player's wings fight hardest, two regions at most, and off again where they stopped or command power runs under
-/// the reserve. Only the regions it turned on are turned off; one the player turns off by hand is left alone for the game.
-/// The player's own commands: multiplayer works.
+/// Auto ground crews: More Ground Crews goes on where the player's wings fight hardest, two regions at most, and off where
+/// the fighting stopped or command power drops under the reserve. Only regions it turned on are turned off; regions the
+/// player toggles are left alone. The player's own commands, so multiplayer works.
 /// </summary>
 public partial class ArmySupport
 {
