@@ -4,22 +4,22 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Battle odds: an AI offensive whose attacks the game's own combat sums say it loses doesn't start ----
+    // ---- Battle odds: an AI offensive the game's combat sums say it loses doesn't start ----
 
-    // CSubUnitDefinition at CArmy+0x138 (the division's current values, equipment and doctrine in), fixed point 1e5.
+    // CSubUnitDefinition at CArmy+0x138: the division's current stats, fixed point 1e5.
     private const int DefenseOfStats = 0xA8, BreakthroughOfStats = 0xB0, HardnessOfStats = 0xB8, SoftAttackOfStats = 0xC0,
                       HardAttackOfStats = 0xC8, MaxOrgOfStats = 0x280, ArmorOfStats = 0x298, PiercingOfStats = 0x2A0;
 
-    // NDefines globals by RVA in hoi4.exe 1.19.3 (CCombatLand reads them), read when used: the game fills them from its Lua
-    // after the plugins load. Vanilla's value where one reads implausibly (zero before that, a mod's nonsense).
+    // NDefines globals by RVA (hoi4.exe 1.19.3) that CCombatLand reads. Read on use: Lua fills them after plugins load.
+    // An implausible value falls back to vanilla's.
     private const int BaseAvoidRva = 0x3335B28, NoDefAvoidRva = 0x3335BD8, FortPenaltyRva = 0x3336760, RiverRva = 0x33362E0, LargeRiverRva = 0x3336390;
     private static double BaseAvoid => Define(BaseAvoidRva, 1, 100, 90);
     private static double NoDefAvoid => Define(NoDefAvoidRva, 1, 100, 60);
     private static double FortPenalty => Define(FortPenaltyRva, -1, -0.001, -0.15);
     private static double River => Define(RiverRva, -1, -0.001, -0.3);
     private static double LargeRiver => Define(LargeRiverRva, -1, -0.001, -0.6);
-    private const double ArmorPenalty = 0.5; // damage dealt by divisions whose piercing is under the target's armor (the threshold table's low end)
-    private const int LosingOddsPercent = 100; // attacks predicted lost outnumbering the won ones hold the offensive
+    private const double ArmorPenalty = 0.5; // damage factor when piercing is under the target's armor
+    private const int LosingOddsPercent = 100; // an attack is lost when breaking them takes longer than this % of breaking us
     private static readonly nint Image = System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress;
 
     private static double Define(int rva, double min, double max, double vanilla)
@@ -29,12 +29,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Why the order's divisions shouldn't attack: for each enemy province next to them with enemy divisions in it, the hours
-    /// until each side's organisation runs out, the way the game's land combat deals it (attacks an hour from soft and hard
-    /// attack by the other side's hardness, those up to its defense, or our breakthrough when it hits back, hit at the base
-    /// avoid chance and the rest at the no-defense one, half damage under armor, forts and rivers off our attack); more of
-    /// those lost than won and it holds. Null: it may go. Unlike power, this counts quality (Japan beats China's numbers).
-    /// AI threads, read only.
+    /// Why the order's divisions shouldn't attack, or null if they may. Each manned enemy province next to them is one attack:
+    /// it is lost if their organisation outlasts ours, as land combat deals it (<see cref="HoursToBreak"/>; forts and rivers
+    /// cut our attack). Held when more attacks are lost than won. Unlike power, this counts quality. AI threads, read only.
     /// </summary>
     private static string? PredictedLoss(ReadOnlySpan<nint> members, int tag)
     {
@@ -73,8 +70,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Hours until <paramref name="targets"/>' organisation runs out under <paramref name="hitters"/>' attacks: the targets
-    /// soak up attacks with their defense (<paramref name="defenderHolds"/>) or their breakthrough (hitting back).
+    /// Hours until <paramref name="targets"/>' organisation runs out under <paramref name="hitters"/>' attacks. Attacks up to
+    /// the targets' defense (<paramref name="defenderHolds"/>) or breakthrough hit at the base avoid chance, the rest at the
+    /// no-defense one; half damage when piercing is under armor.
     /// </summary>
     private static double HoursToBreak(List<nint> hitters, List<nint> targets, double attackModifier, bool defenderHolds)
     {

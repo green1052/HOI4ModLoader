@@ -7,15 +7,15 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Air training: green wings the air AI would send where nothing happens fly the training mission instead ----
+    // ---- Air training: green wings the AI would send where nothing happens train instead ----
 
     private const int MissionsOfWing = 0xA0, DestinationOfWing = 0x48, AttachedArmyOfWing = 0x9B8; // CAirWing: mission bits, transfer target CRef, army
     private const int PoolsOfAir = 0x58, WingsOfPool = 0x28;                                        // CStrategicAir: wing pools; their wings
     private const int DiplomacyOfCountry = 0xF88;
     private const int TrainingMission = 0x800, SetMissionSize = 0x48, StopAtMaxOfSetMission = 0x46;
     private const int AirSuperiorityIndex = 0, InterceptionIndex = 2; // mission indices (bit = 1 << index)
-    private const int TrainedLevel = 2;                                // AIR_WING_XP_LEVELS reached: 2 = past the second (300, training's cap)
-    private const int MaxTrainingPercent = 50;                         // of a country's wings on training at once
+    private const int TrainedLevel = 2;                                // AIR_WING_XP_LEVELS reached; 2 = training's cap (300)
+    private const int MaxTrainingPercent = 50;                         // of a country's wings training at once
 
     [Function(CallingConventions.Microsoft)] public delegate byte AssignWingFn(nint wing, nint airbase, nint region, int mission, byte cancelTransfer);
 
@@ -26,21 +26,21 @@ public unsafe partial class AiAssist
     private static delegate* unmanaged<nint, int> _xpLevel;
     private static delegate* unmanaged<nint, int, byte> _atWarAny;
     private static delegate* unmanaged<nint, int*, byte> _postAi;
-    private static readonly ConcurrentDictionary<int, (int Day, int Count)> TrainingPosted = new(); // not yet in the wings' bits
+    private static readonly ConcurrentDictionary<int, (int Day, int Count)> TrainingPosted = new(); // posted today, not yet in the wings' bits
     private static int _training, _keptBase;
     private const int BackAfterHours = 7 * 24;
-    private static readonly ConcurrentDictionary<nint, (nint From, int Hour)> Moved = new(); // wing: the base it last left, when
+    private static readonly ConcurrentDictionary<nint, (nint From, int Hour)> Moved = new(); // wing -> base it last left, hour
 
     private void LoadAirTraining()
     {
-        _ = Sig.Find(AirRegions.RegionAirDataSig) + Sig.FindAll(Game.StrategicAirSig, 2)[0]; // the superiority records Quiet reads
+        _ = Sig.Find(AirRegions.RegionAirDataSig) + Sig.FindAll(Game.StrategicAirSig, 2)[0]; // the functions the superiority offsets come from
         _setMission = (delegate* unmanaged<nint, nint, int, byte, byte, nint>)Sig.Find(Signatures.SetMissionCommand);
         _canTrain = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.CanTrain);
         _baseOf = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.AirBaseOfWing);
         _xpLevel = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.WingXpLevel);
         _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
-        Allocator.Free(Allocator.AllocZeroed(SetMissionSize)); // resolves the heap functions here, not racing on AI threads
+        Allocator.Free(Allocator.AllocZeroed(SetMissionSize)); // resolves the heap functions here, not on AI threads
         _assignWing = Patches.Hook<AssignWingFn>(Sig.Find(Signatures.AssignWing), (wing, airbase, region, mission, cancelTransfer) =>
         {
             var train = false;
@@ -60,9 +60,8 @@ public unsafe partial class AiAssist
     private static int _idleWingsAt;
 
     /// <summary>
-    /// Daily: green AI wings with no mission at all (the air AI found none for them: Germany's naval bombers at war sat
-    /// waiting) go on training, within the half of a country's wings. Wings the AI sends somewhere go through
-    /// <see cref="Train"/> instead. Main thread.
+    /// Daily: green AI wings with no mission go on training, within half of a country's wings. Wings the AI sends
+    /// somewhere go through <see cref="Train"/>. Main thread.
     /// </summary>
     private static void TrainIdleWings()
     {
@@ -73,7 +72,7 @@ public unsafe partial class AiAssist
             var tag = country == 0 ? 0 : Game.Tag(country);
             var air = tag <= 0 || tag == player ? 0 : Game.StrategicAir(tag);
             if (air == 0) continue;
-            var room = TrainingRoom(tag, day); // counted once a country: per wing it walked every wing again
+            var room = TrainingRoom(tag, day); // once per country: it walks every wing
             foreach (var pool in Native.PdxArray(air + PoolsOfAir).ToArray())
             {
                 if (pool == 0) continue;
@@ -98,11 +97,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Whether the wing the air AI is sending on <paramref name="mission"/> in <paramref name="region"/> trains instead (posting
-    /// the training mission unless it flies it already): an AI wing staying at its base that can still gain from training and
-    /// hasn't passed the second experience level, at peace or (at war) a fighter patrol over a land region no enemy plane flies
-    /// in, with at most half of the country's wings training. A wing the AI moves to another base goes (its base may be lost);
-    /// past the level the AI's own order clears training. AI worker thread.
+    /// Whether the wing the AI is sending on <paramref name="mission"/> in <paramref name="region"/> trains instead (posts the
+    /// training mission unless already on it): a green AI wing that can train, at peace, or at war a fighter staying at its
+    /// base on patrol over a quiet land region; at most half the country's wings. AI worker thread.
     /// </summary>
     private static bool Train(nint wing, nint airbase, nint region, int mission)
     {
@@ -114,8 +111,7 @@ public unsafe partial class AiAssist
         var diplomacy = country == 0 ? 0 : *(nint*)(country + DiplomacyOfCountry);
         if (diplomacy == 0) return false;
         var atWar = _atWarAny(diplomacy, 0) != 0;
-        // At war only a wing staying at its base trains (one being moved goes: its base may be lost); at peace any: the AI
-        // shuffles idle wings between bases with nothing to do, and they sat waiting (Italy after Ethiopia).
+        // At war a wing being moved goes (its base may be lost); at peace the AI moves idle wings for nothing.
         if (atWar && (*(long*)(wing + DestinationOfWing) != 0 || airbase == 0 || _baseOf(wing) != airbase)) return false;
         if (atWar && !(mission is AirSuperiorityIndex or InterceptionIndex && LandRegion(region) && Quiet(tag, region))) return false;
         if ((*(int*)(wing + MissionsOfWing) & TrainingMission) != 0) return true; // already training: kept
@@ -142,9 +138,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// No enemy air superiority in the region, by the country's own air records, and none of its divisions fighting there:
-    /// over its own battles air superiority still counts (the enemy fights under it) even with no enemy planes, as over
-    /// Italy's offensive in Ethiopia.
+    /// No enemy air superiority in the region, by the country's air records, and none of its divisions fighting there
+    /// (its battles need air cover even with no enemy planes).
     /// </summary>
     private static bool Quiet(int tag, nint region)
     {
@@ -161,9 +156,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Whether the AI sends the wing back to the base it left less than a week ago: refused, the wing keeps its mission where it
-    /// is. The air AI's daily pass flips wings between two bases (each move frees room at the base left, which then scores
-    /// best), so they spent their days in transit. Otherwise a move is remembered. AI worker thread.
+    /// Refuses a move back to the base the wing left under a week ago (the AI flips wings between two bases daily); the wing
+    /// keeps its mission where it is. Other moves are remembered. AI worker thread.
     /// </summary>
     private static bool MovingBack(nint wing, nint airbase)
     {
@@ -183,8 +177,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// How many more of the country's wings may go on training under MaxTrainingPercent: those with the training bit, or the
-    /// ones posted today if more (a posted mission shows in the bits once run; adding both counted it twice).
+    /// How many more of the country's wings may train under MaxTrainingPercent. Counts wings with the training bit or those
+    /// posted today, whichever is more (a posted mission shows in the bits once run).
     /// </summary>
     private static int TrainingRoom(int tag, int day)
     {

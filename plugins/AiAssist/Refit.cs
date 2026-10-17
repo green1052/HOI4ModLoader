@@ -6,7 +6,7 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Refit priority: the daily stockpile distribution fills front-line AI divisions before rear and garrison ones ----
+    // ---- Refit priority: front-line AI divisions get reinforcements and upgrades first ----
 
     private const int ArmyOfRequests = 0x20; // CArmyReinforcementRequests / CArmyUpgradesRequests -> CArmy
     private const int FrontFactor = 4;       // a front division comes first until it is 75 % full
@@ -14,7 +14,7 @@ public unsafe partial class AiAssist
     [Function(CallingConventions.Microsoft)] public delegate nint ScoreFn(nint requests, nint score, nint archetype);
 
     private IHook<ScoreFn>? _reinforceScore, _upgradeScore;
-    // CArmy -> (day, front): the score runs per archetype in stock, the front test once per division per day. Never dereferenced.
+    // CArmy -> (day, front): the front test runs once per division per day. Keys are never dereferenced.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Day, bool Front)> FrontCache = new();
     private static int _frontDay = -1;
     private static int _refitted;
@@ -35,7 +35,7 @@ public unsafe partial class AiAssist
         });
     }
 
-    /// <summary>Raises a positive score of an AI front-line division. Read only on game state; no closure (runs very often).</summary>
+    /// <summary>Raises an AI front-line division's positive score. No closure: runs very often.</summary>
     private static void Boost(nint requests, nint score)
     {
         try
@@ -45,17 +45,17 @@ public unsafe partial class AiAssist
             if (army == 0) return;
             var tag = Division.Commander(army);
             if (tag <= 0 || tag == Game.ControlledTag || !SheepMod.Active || !FrontLine(army, tag)) return;
-            *(long*)score *= FrontFactor; // keeps the (1 - fill) factor: a nearly full front division still yields to empty ones
+            *(long*)score *= FrontFactor; // the (1 - fill) factor stays: a nearly full division still yields to empty ones
         }
         catch (Exception e) { Failed(e); }
     }
 
-    /// <summary>The division is fighting, or stands next to ground held by a country its own is at war with (cached for the day).</summary>
+    /// <summary>The division is fighting or next to enemy-held ground; cached for the day.</summary>
     private static bool FrontLine(nint army, int tag)
     {
         var day = Game.Hour / 24;
         if (day != _frontDay) { FrontCache.Clear(); _frontDay = day; }
-        if (FrontCache.TryGetValue(army, out var cached) && cached.Day == day) return cached.Front; // an AI thread's write from yesterday may outlive the clear
+        if (FrontCache.TryGetValue(army, out var cached) && cached.Day == day) return cached.Front; // a write from yesterday may outlive the clear
         var front = Division.Fighting(army);
         var location = Division.Location(army);
         var country = Game.Country(tag);

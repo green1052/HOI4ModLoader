@@ -4,15 +4,12 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Defensive postures: an AI country facing a much stronger enemy gives up exposed ground for its grad, the most
-    //      defensible short line between that enemy and its core, holds it, counterattacks only fought-out spearheads
-    //      (pinning the enemy stacks that could help them), and goes back to its fronts once strong enough ----
+    // ---- Defensive postures: facing a much stronger enemy, an AI country falls back to its grad (the most defensible
+    //      short line before its core), holds it, counterattacks only fought-out spearheads, and returns once strong enough ----
     //
-    // Vanilla has fallback lines (CAIFront fallback update 0x141069F50: ShouldFallback 0x14105CB60 reads PLAN_MIN_SIZE_FOR_FALLBACK
-    // against the country at 0x14105CB85, the unit send 0x141064A70 reads FALLBACK_LOSING_FACTOR at 0x141064BC0, the line is drawn as
-    // COrderNewFallbackCommand), but Sheep Mod turns them off (PLAN_MIN_SIZE_FOR_FALLBACK = 2000, FALLBACK_LOSING_FACTOR = 0), and the
-    // front update deletes any fallback order it doesn't want (0x14106A0F1..0x14106A117). So the grad is province ids, held with
-    // plain moves and pinned divisions, never an order.
+    // Not vanilla's fallback lines: Sheep Mod turns them off (PLAN_MIN_SIZE_FOR_FALLBACK = 2000, FALLBACK_LOSING_FACTOR = 0;
+    // ShouldFallback 0x14105CB60, unit send 0x141064A70), and the front update 0x141069F50 deletes fallback orders it doesn't
+    // want (0x14106A0F1..0x14106A117). So the grad is province ids, held with plain moves and pinned divisions.
 
     private const int DecideHours = 24, MinGradHours = 30 * 24, RedrawHours = 7 * 24, WeekHours = 7 * 24, ExitDays = 7, BlockHours = 30 * 24;
     private const int StrongRatio = 200, PressedRatio = 160, ExitRatio = 80; // enemy power facing a sector per our share of it, %
@@ -20,31 +17,30 @@ public unsafe partial class AiAssist
     // ponytail: hand-tuned trade of ground against line; scale the giving-up cost by the strength ratio if grads run too deep or never form.
     private const int HoldCost = 100, AbandonBase = 20, AbandonPerVp = 5, Inf = 1 << 28;
     private const int FortressVp = 5, ExhaustedOrg = 40, FreshOrg = 70, CounterSize = 3, MaxCounters = 8, ReserveReach = 2;
-    private const int Hills = 0x4000, Forest = 0x8000; // CTerrainType+0x8C category bits, set by terrain name (ctor 0x14143BCF0: `or dword [r14+8Ch],4000h` at 0x14143C100, 8000h at 0x14143C132)
+    private const int Hills = 0x4000, Forest = 0x8000; // CTerrainType+0x8C category bits, set by terrain name (ctor 0x14143BCF0)
 
     private static bool _postures;
     private static int _garrisoned, _countered, _fellBack, _pinning, _brokeOff;
 
     /// <summary>
-    /// A country's grad: province id -> defenders wanted, its fortress cities, the explored ground in front of it it gives up, the
-    /// enemies it is drawn against. Published whole, never mutated (AI threads read it).
+    /// A country's grad: province id -> defenders wanted, fortress cities, the ground given up in front, the enemies it is drawn
+    /// against. Replaced whole, never mutated (AI threads read it).
     /// </summary>
     private sealed record Grad(int Hour, Dictionary<int, int> Want, HashSet<int> Fortresses, HashSet<int> Given, HashSet<int> Strong);
 
     /// <summary>
-    /// A country's posture decision: when made, since when it holds a grad, against whom, the highest enemy ratio (%), consecutive
-    /// daily decisions with every kept enemy under ExitRatio, until when re-entry needs StrongRatio, and its line (ids) by day for
-    /// a week back. Main thread only.
+    /// A country's posture decision: when made, grad held since, against whom, top enemy ratio (%), days in a row with every
+    /// kept enemy under ExitRatio, until when re-entry needs StrongRatio, and its line (ids) per day for a week. Main thread.
     /// </summary>
     private sealed record Stance(int Decided, int Since, HashSet<int> Strong, int Ratio, int Weak, int Blocked, Queue<(int Hour, HashSet<int> Ids)> History);
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, Grad> Grads = new();
     private static readonly Dictionary<int, Stance> Stances = [];
-    private static readonly Dictionary<nint, int> Attackers = []; // our counter and pinning attackers, with their tag: broken off when worn. Main thread; never dereferenced unless still the tag's unit.
+    private static readonly Dictionary<nint, int> Attackers = []; // counter and pinning attackers -> tag, broken off when worn. Main thread; dereferenced only while still the tag's unit.
 
     /// <summary>
-    /// The tag's grad if it should hold one (decided daily, kept a month at least), redrawn weekly, when the enemies change
-    /// or once the enemy broke into it (the next line back); null: its fronts are the AI's. Main thread.
+    /// The tag's grad, or null if it needn't hold one. Decided daily; redrawn weekly, when the enemies change, or when the enemy
+    /// breaks in (the next line back). Main thread.
     /// </summary>
     private static Grad? Posture(nint country, int tag, int hour)
     {
@@ -77,18 +73,17 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The enemies the tag can't hold the open line against: per enemy, its divisions' power within two provinces of our
-    /// threatened line over our land power's share for the line provinces facing it. Twice as strong, or PressedRatio (1.6x)
-    /// while we lost two line provinces or more in the last week, puts it on the list (only twice as strong within a month of
-    /// leaving a grad). The grad goes after seven daily decisions in a row with every kept enemy under 80 %, a month after
-    /// it was taken at the earliest. No line seen (out of contact, the enemy walking up to the grad): the stance stays as it was.
+    /// The enemies the tag can't hold the open line against. Ratio: an enemy's power within two provinces of our line over our
+    /// power's share for the line provinces facing it. Listed at StrongRatio, or PressedRatio after losing two line provinces in
+    /// a week (StrongRatio only, within BlockHours of leaving a grad). The grad ends after ExitDays in a row with every kept
+    /// enemy under ExitRatio, MinGradHours after it began at the earliest. No line in sight: the stance stays.
     /// </summary>
     private static Stance Decide(nint country, int tag, HashSet<nint>? border, Stance? old, int hour)
     {
         old ??= new Stance(hour, hour, [], 0, 0, Never, new());
         if (border == null || border.Count == 0) return old with { Decided = hour };
         var history = old.History;
-        while (history.Count > 1 && hour - history.ElementAt(1).Hour >= WeekHours) history.Dequeue(); // the oldest kept is a week old
+        while (history.Count > 1 && hour - history.ElementAt(1).Hour >= WeekHours) history.Dequeue(); // keep the oldest a week back
         var week = history.Count > 0 ? history.Peek().Ids : [];
         var lost = week.Count(id => Game.Province(id) is var p && p != 0 && Province.Enemy(country, tag, p));
         history.Enqueue((hour, border.Select(Game.Id).ToHashSet()));
@@ -128,23 +123,22 @@ public unsafe partial class AiAssist
             var ratio = (int)Math.Min(int.MaxValue, theirs * 100 / Math.Max(1, ours * contact[enemy] / border.Count));
             top = Math.Max(top, ratio);
             if (kept.Contains(enemy)) weak &= ratio < ExitRatio;
-            else if (ratio >= StrongRatio || !blocked && ratio >= PressedRatio && lost >= 2) strong.Add(enemy); // not just thin: civil wars between equals left salients bare
+            else if (ratio >= StrongRatio || !blocked && ratio >= PressedRatio && lost >= 2) strong.Add(enemy); // ratio, not just losses: equals mustn't give up salients
         }
-        if (kept.Count == 0) // no grad (or peace with all it was against): a new one needs a new reason
+        if (kept.Count == 0) // no grad, or peace with all it was against
             return new Stance(hour, hour, strong, top, 0, old.Strong.Count > 0 ? hour + BlockHours : old.Blocked, history);
         var days = weak && strong.Count == 0 ? old.Weak + 1 : 0;
         if (days >= ExitDays && hour - old.Since >= MinGradHours)
-            return new Stance(hour, hour, [], top, 0, hour + BlockHours, history); // strong enough again: no new grad for BlockHours
+            return new Stance(hour, hour, [], top, 0, hour + BlockHours, history); // strong enough again
         strong.UnionWith(kept);
         return new Stance(hour, old.Since, strong, top, days, old.Blocked, history);
     }
 
     /// <summary>
-    /// The grad: a minimum cut between the strong enemies' ground and the tag's core, through its own provinces up to
-    /// GradDepth steps from the line. Holding a province against each neighbour it can be attacked from costs (less across
-    /// rivers, into rough ground or forts); giving one up costs a little, more for victory points; the capital's state and
-    /// the ground past the explored area can't be given up. The held provinces next to the given-up side (or the enemy) are
-    /// the line: a defender each, two when attacked from three sides, one more for a fortress city. Null: nothing explored.
+    /// The grad: a minimum cut between the strong enemies and the tag's core, through its provinces up to GradDepth steps from
+    /// the line. Holding costs per attack direction (<see cref="Hold"/>); giving up costs a little, more for victory points;
+    /// the capital's state and ground past the explored area can't be given up. Held provinces facing the given-up side or the
+    /// enemy get a defender, two from three sides, one more in a fortress city. Null: nothing to hold.
     /// </summary>
     private static Grad? Cut(nint country, int tag, HashSet<nint>? border, Grad? old, HashSet<int> strong, int hour)
     {
@@ -184,8 +178,8 @@ public unsafe partial class AiAssist
                 if (q == 0) continue;
                 var controller = Province.Controller(q);
                 if (ids.TryGetValue(id, out var u)) edges.Add((u, v, Hold(q, p, old)));
-                else if (controller == tag) core = true;                           // our ground goes on past the explored area
-                else if (strong.Contains(controller)) attacked += Hold(q, p, old); // sea, neutrals, allies, weaker enemies: walls
+                else if (controller == tag) core = true;                           // our ground beyond the explored area
+                else if (strong.Contains(controller)) attacked += Hold(q, p, old); // anything else is a wall
             }
             if (attacked > 0) edges.Add((0, v, attacked));
             edges.Add((v, 1, core ? Inf : AbandonBase + AbandonPerVp * Math.Min(Province.VictoryPoints(p), 30)));
@@ -214,7 +208,7 @@ public unsafe partial class AiAssist
         return want.Count == 0 ? null : new Grad(hour, want, fortresses, abandoned, strong);
     }
 
-    /// <summary>What holding <paramref name="to"/> against an attack from <paramref name="from"/> costs: less across a river, into rough ground or forts; nothing across impassable ground.</summary>
+    /// <summary>Cost of holding <paramref name="to"/> against <paramref name="from"/>: less across a river, into rough ground or forts; 0 if impassable.</summary>
     private static int Hold(nint from, nint to, Grad? old)
     {
         var crossing = Game.AdjacencyType(from, Game.Id(to));
@@ -224,7 +218,7 @@ public unsafe partial class AiAssist
             cost = cost * Math.Max(20_000, Native.FixedPoint + *(long*)(crossing == Province.LargeRiver ? _riverLarge : _riverSmall)) / Native.FixedPoint;
         cost = cost * (100 + TerrainAttack(Province.TerrainCategory(to))) / 100;
         cost = cost * 100 / (100 + 15 * Province.FortLevel(to));
-        if (old != null && old.Want.ContainsKey(Game.Id(to))) cost = cost * 4 / 5; // the standing grad: no wandering over a near tie
+        if (old != null && old.Want.ContainsKey(Game.Id(to))) cost = cost * 4 / 5; // favour the current grad over a near tie
         return (int)Math.Max(10, cost);
     }
 
@@ -238,10 +232,10 @@ public unsafe partial class AiAssist
     private static HashSet<nint> Held(Grad grad, int tag) =>
         grad.Want.Keys.Select(Game.Province).Where(p => p != 0 && Province.Controller(p) == tag).ToHashSet();
 
-    /// <summary>Whether the province is on the given-up side of the tag's grad: no reserves or resting divisions go there.</summary>
+    /// <summary>On the given-up side of the tag's grad: no reserves or resting divisions go there.</summary>
     private static bool GivenUp(int tag, int province) => Grads.TryGetValue(tag, out var grad) && grad.Given.Contains(province);
 
-    /// <summary>Off its orders (else its front walks it back) and to the grad province, posted there: the AI's regrouping leaves it (<see cref="Pinned"/>). Main thread.</summary>
+    /// <summary>Posts the division at the grad province, off its orders so its front doesn't walk it back (<see cref="Pinned"/>). Main thread.</summary>
     private static bool Garrison(nint unit, int province, int tag, int hour)
     {
         if (!Station(unit, province, tag, hour, KeyGapHours, PostKind.Garrison)) return false;
@@ -249,7 +243,7 @@ public unsafe partial class AiAssist
         return true;
     }
 
-    /// <summary>The divisions there have fought themselves out: average organisation under ExhaustedOrg %. AI threads too (read only).</summary>
+    /// <summary>The divisions there average under ExhaustedOrg % organisation. AI threads too (read only).</summary>
     private static bool Exhausted(nint province)
     {
         var units = Province.Units(province);
@@ -260,11 +254,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Elastic defence, every two game hours: an enemy stack next to the grad that has fought itself out is attacked by at least two
-    /// fresh divisions, ones its neighbouring provinces of ours can spare (grad provinces keep their wanted defenders, others one)
-    /// and posted reserves up to two provinces behind the grad provinces next to it; every other enemy stack next to it, which could
-    /// come to its aid, is pinned by one fresh division where our stack passes vanilla's strength test (a division under attack only
-    /// moves to retreat). Divisions in combat are never sent; attackers whose organisation runs low break off (<see cref="BreakOff"/>). Main thread.
+    /// Elastic defence: a fought-out enemy stack next to the grad is attacked by two or more fresh divisions (spares next to it,
+    /// reserves behind the grad). Each enemy stack next to it is pinned by one fresh division, where our stack passes vanilla's
+    /// strength test, so it can't come to its aid. Worn attackers break off (<see cref="BreakOff"/>). Main thread.
     /// </summary>
     private static void CounterAttack(nint country, int tag, Grad grad, int hour)
     {
@@ -282,14 +274,14 @@ public unsafe partial class AiAssist
                 foreach (var a in Game.Neighbours(e)) // reserves behind the grad provinces facing it
                     if (grad.Want.ContainsKey(a) && Game.Province(a) is var held && held != 0 && Province.Controller(held) == tag)
                         attackers.AddRange(Reserves(tag, held).Where(u => !attackers.Contains(u)));
-                if (attackers.Count < 2) continue; // one division alone is the piecemeal attack this posture avoids
+                if (attackers.Count < 2) continue; // no piecemeal attacks
                 foreach (var unit in attackers.Take(CounterSize))
                     if (Attack(unit, n, tag, hour))
                     {
                         sent++;
                         Interlocked.Increment(ref _countered);
                     }
-                foreach (var r in Game.Neighbours(e)) // pin its neighbours: they can't shift into the fight while under attack
+                foreach (var r in Game.Neighbours(e)) // pin its neighbours: under attack, they can't shift into the fight
                 {
                     var q = Game.Province(r);
                     if (q == 0 || Gap.ContainsKey(r) || Province.Divisions(q) == 0 || !Province.Enemy(country, tag, q)) continue;
@@ -311,7 +303,7 @@ public unsafe partial class AiAssist
         }
     }
 
-    /// <summary>The fresh, idle divisions of the tag in the province that the province can spare (a grad province keeps its wanted defenders, others one).</summary>
+    /// <summary>Fresh divisions the province can spare (a grad province keeps its wanted defenders, others one).</summary>
     private static List<nint> FreshSpares(nint country, int tag, Grad grad, int province)
     {
         var spares = new List<nint>();
@@ -323,7 +315,7 @@ public unsafe partial class AiAssist
         return spares;
     }
 
-    /// <summary>The tag's fresh, idle reserve and second-line divisions up to ReserveReach provinces behind <paramref name="held"/>.</summary>
+    /// <summary>Fresh reserve and second-line divisions within ReserveReach provinces behind <paramref name="held"/>.</summary>
     private static List<nint> Reserves(int tag, nint held)
     {
         var found = new List<nint>();
@@ -338,7 +330,7 @@ public unsafe partial class AiAssist
     private static bool Fresh(nint unit, int tag) =>
         Spare(unit, tag) && Percent(Division.Organisation(unit)) >= FreshOrg && Percent(Division.Strength(unit)) >= FreshStrength;
 
-    /// <summary>Sends the division into the enemy province (the move becomes an attack), keeping any post, and keeps it in view to break off when worn.</summary>
+    /// <summary>Attacks the enemy province, keeping any post, and tracks the division to break off when worn.</summary>
     private static bool Attack(nint unit, int province, int tag, int hour)
     {
         if (!Send(unit, province, hour, SentHours, keep: true, attack: true)) return false;
@@ -347,8 +339,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The tag's counter, pinning and fire brigade attackers whose organisation fell under WornOrg % pull back (the owner may always
-    /// call off an attack; a move out of combat is a retreat): a reserve to its post, others to rest. Ones out of combat, or gone, are dropped.
+    /// The tag's tracked attackers under WornOrg % organisation pull back: a reserve to its post, others to rest. Ones gone or
+    /// done fighting are dropped.
     /// </summary>
     private static void BreakOff(nint country, int tag, nint[] units, int hour)
     {
@@ -363,7 +355,7 @@ public unsafe partial class AiAssist
             if (!Division.Fighting(unit) || Percent(Division.Organisation(unit)) >= WornOrg) continue;
             if (Posted.TryGetValue(unit, out var post) && post.Kind is (PostKind.Reserve or PostKind.Depth))
             {
-                if (!Commands.Move(unit, post.Province, true)) continue; // back to its post, behind the line: it rests there
+                if (!Commands.Move(unit, post.Province, true)) continue; // it rests at its post
                 Sent[unit] = hour + SentHours;
             }
             else
@@ -439,7 +431,7 @@ public static class MinCut
             Array.Fill(next, 0);
             while (Push(s, int.MaxValue) > 0) { }
         }
-        var side = new bool[nodes]; // the last level pass: what s still reaches in the residual graph
+        var side = new bool[nodes]; // the last level pass: what s reaches in the residual graph
         for (var i = 0; i < nodes; i++) side[i] = level[i] >= 0;
         return side;
     }

@@ -4,13 +4,11 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Supply hubs: the railway to the hub feeding starving AI divisions, and a new hub where none is near (late, rich only) ----
+    // ---- Supply hubs: upgrade the railway to the hub feeding starving AI divisions; late, rich countries also build new hubs ----
     //
-    // A hub costs 20000 (a railway level 170 + 130 a province): early on, or with few civilian factories, that money is better
-    // spent elsewhere. A railway level is cheap, so the feeding hub's railway to the capital is upgraded first, whatever the year.
-    //
-    // The interior minister already upgrades saturated hubs' railways and links cut-off hubs weekly; it never builds a new hub.
-    // Ported from AutoConstruction's AutoSupply (BuildHub, FeedingNode), same layouts (HOI4 1.19.3); its railway rules are vanilla's here.
+    // A hub costs 20000, a railway level about 170 + 130 per province: railways any year, hubs only from HubYear with
+    // HubCivilianFactories+. Vanilla's interior minister upgrades and links existing hubs but never builds one.
+    // Ported from AutoConstruction's AutoSupply (BuildHub, FeedingNode); layouts for HOI4 1.19.3.
 
     private const int CountriesOfSupply = 0x108, NetworkOfCountry = 0x80, SupplyNodes = 0xB8, SupplyNodeSize = 0xE8, ProvinceOfNode = 4; // CSupplySystem
     private const int FlowEntrySize = 16, CountryOfFlowEntry = 2, AmountOfFlowEntry = 8; // Game.EntriesOfFlow: {u16 node, u16 country, pad, i64 amount}
@@ -50,7 +48,7 @@ public unsafe partial class AiAssist
         _game.Check();
         if (_hubWorld != Game.Generation)
         {
-            HubPlans.Clear(); // tags only, but the old game's schedule
+            HubPlans.Clear(); // the old game's schedule
             RailwayPlans.Clear();
             _hubWorld = Game.Generation;
         }
@@ -62,14 +60,14 @@ public unsafe partial class AiAssist
         var year = Game.Year;
         if (_hubWorld != _yearLogged) Log.Info($"supply hubs: the game's year reads {year} (built from {HubYear}, by countries with {HubCivilianFactories}+ civilian factories)");
         _yearLogged = _hubWorld;
-        var hubYear = year is <= 1900 or >= HubYear; // earlier: railways only (a date that makes no sense: the factories alone decide)
+        var hubYear = year is <= 1900 or >= HubYear; // earlier: railways only; an implausible year leaves it to the factory count
         Dictionary<int, int>? civilian = null;
         foreach (var country in Game.Countries)
         {
             var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag <= 0 || tag == player) continue;
             HubPlans.TryGetValue(tag, out var plan);
-            if (plan.Queued != null && hour - plan.Next is < 0 and >= -HubCheckHours) continue; // not due (a load moving time back: due)
+            if (plan.Queued != null && hour - plan.Next is < 0 and >= -HubCheckHours) continue; // not due; a load moving time back makes it due
             var queued = plan.Queued ?? [];
             queued.RemoveAll(h => hour - h is < 0 or >= MonthHours);
             HubPlans[tag] = (hour + HubCheckHours, queued);
@@ -118,8 +116,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// One railway level more (the AI's own builder) on the railway from the hub feeding the worst-starving area to the capital
-    /// state, where it isn't at the top level yet; one a check, and a hub's railway at most every <see cref="RailwayCooldownHours"/> hours.
+    /// Raises the railway from the hub feeding the worst-starving area to the capital state by one level, unless it is at the top.
+    /// One per check; the same hub at most every <see cref="RailwayCooldownHours"/> hours.
     /// </summary>
     private static void UpgradeRailway(nint country, int tag, nint network, Dictionary<nint, int> starving, int hour)
     {
@@ -130,7 +128,7 @@ public unsafe partial class AiAssist
             if (feeding < 0 || RailwayPlans.TryGetValue((tag, feeding), out var last) && hour - last is >= 0 and < RailwayCooldownHours) continue;
             var path = RailwayToCapital(feeding, tag, capital, out var lowest);
             if (path == null || lowest >= MaxRailway) continue; // in the capital state, not linked by our railways, or at the top already
-            // +1 level along the path, mode 2 as the interior minister calls it; it posts the command itself.
+            // +1 level along the path in mode 2, as the interior minister calls it; posts the command itself.
             if (Native.WithPdxArray(path, p => { var t = tag; return _buildRailway(p, &t, 1, 2); }) == 0) continue; // refused: the next starving area
             RailwayPlans[(tag, feeding)] = hour;
             Interlocked.Increment(ref _railways);
@@ -189,13 +187,13 @@ public unsafe partial class AiAssist
         {
             var feeding = FeedingNodeProvince(network, Game.Id(province), Game.TagIndex(tag));
             if (Near(province, HubDistance, id => id == feeding || Game.Province(id) is var p && p != 0 && Province.Controller(p) == tag && Province.BuildingLevel(p, Buildings.SupplyNodeSlot) > 0))
-                continue; // a hub is near: vanilla's railway rules are what helps
+                continue; // a hub is near: the railway is what helps
             if (BuildHub(country, tag, province, type, building)) return true;
         }
         return false;
     }
 
-    /// <summary>The province of our node sending the most supply into the province (its supply flow), or -1.</summary>
+    /// <summary>The province of our node sending the most supply into the province, or -1.</summary>
     private static int FeedingNodeProvince(nint network, int province, int tagIndex)
     {
         var flow = Game.SupplyFlow(province);
@@ -254,7 +252,7 @@ public unsafe partial class AiAssist
         return states;
     }
 
-    /// <summary>Any railway out of the province (the railway map's level per neighbour).</summary>
+    /// <summary>Whether any railway leaves the province.</summary>
     private static bool HasRailway(nint province)
     {
         var railways = *(nint*)(Game.State + RailwaysOfGameState);
@@ -266,7 +264,7 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    /// <summary>A province within <paramref name="max"/> land steps of <paramref name="from"/> matches <paramref name="wanted"/>.</summary>
+    /// <summary>Whether a province within <paramref name="max"/> land steps of <paramref name="from"/> matches <paramref name="wanted"/>.</summary>
     private static bool Near(nint from, int max, Func<int, bool> wanted)
     {
         var start = Game.Id(from);

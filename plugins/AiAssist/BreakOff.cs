@@ -4,7 +4,7 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Break off losing attacks: an AI attack the attacker is losing, with no reason to bear the losses, stops ----
+    // ---- Break off losing attacks: an AI attack that is losing, with nothing to gain, stops ----
 
     private const int BreakOffHours = 72, CancelSize = 0x48;
     private static delegate* unmanaged<nint, nint, byte, nint> _cancelMovement;
@@ -20,11 +20,10 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Once a game hour: an AI attack the attacker is losing (under LosingProgressPercent of the battle against half again as
-    /// many defenders, reserves counted, or under HopelessProgressPercent) is broken off, and the province isn't attacked again for
-    /// BreakOffHours (<see cref="RuledOut"/>), unless there is a reason to bear the losses: it closes a pocket, opens the way to
-    /// a pocket of ours, is a feint drawing the enemy's reserves, or another feature runs those divisions (a breakout, a
-    /// pinning attack, an operation). Vanilla fought such battles to the last organisation point. Main thread.
+    /// Once a game hour: breaks off AI attacks that are losing (under LosingProgressPercent against OutnumberedPercent defenders,
+    /// reserves counted, or under HopelessProgressPercent). The province is then not attacked for BreakOffHours
+    /// (<see cref="RuledOut"/>). Spared: attacks that close a pocket, reach a pocket of ours or are a feint, and divisions
+    /// another plugin runs. Main thread.
     /// </summary>
     private void BreakOff()
     {
@@ -41,7 +40,7 @@ public unsafe partial class AiAssist
             var defender = *(nint*)(combat + DefenderOfCombat);
             if (defender == 0) continue;
             var id = Game.Id(p);
-            // Our attackers: AI divisions next to the battle, fighting, on their way into it.
+            // Attackers: fighting AI divisions next to the battle, headed into it.
             var attackers = new Dictionary<int, List<nint>>();
             foreach (var n in Game.Neighbours(p))
                 if (Game.Province(n) is var q && q != 0)
@@ -70,7 +69,7 @@ public unsafe partial class AiAssist
                 var stopped = 0;
                 foreach (var unit in units)
                 {
-                    if (Jobs.Taken(unit, Id)) continue; // another plugin's job (FrontLine's breakouts, pinning attacks, operations)
+                    if (Jobs.Taken(unit, Id)) continue; // another plugin's job
                     var cmd = Allocator.AllocZeroed(CancelSize);
                     _cancelMovement(cmd, unit, 1);
                     if (Commands.TryPost(cmd, true)) stopped++;
@@ -92,7 +91,7 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    /// <summary>An attack on this province was lost lately: none again for BreakOffHours (see <see cref="BreakOff"/>).</summary>
+    /// <summary>True if an attack on this province was broken off in the last BreakOffHours.</summary>
     private static bool LostLately(int tag, nint target) =>
         _breakOff && LostAttacks.TryGetValue((tag, Game.Id(target)), out var at) && Game.Hour - at is >= 0 and < BreakOffHours;
 

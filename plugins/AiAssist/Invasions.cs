@@ -10,9 +10,8 @@ public unsafe partial class AiAssist
 {
     // ---- Strategic invasions: beaches scored by what is there; a launch waits while its beach is crowded ----
 
-    // CalcNavalInvasionTarget's parallel_for closure: +0 bool* found (the current target is still a candidate: kept, no pick),
-    // +8 bool* takeFirst (the feasibility check: the first candidate wins), +0x10 CPdxArray<CProvince*>* candidates, +0x48 CCountry*,
-    // +0x60 SRWLOCK*, +0x68 CPdxArray<long>* scores (same index as the candidates).
+    // CalcNavalInvasionTarget's parallel_for closure: +0 bool* found (current target kept, no pick), +8 bool* takeFirst (first
+    // candidate wins), +0x10 CPdxArray<CProvince*>* candidates, +0x48 CCountry*, +0x60 SRWLOCK*, +0x68 CPdxArray<long>* scores.
     private const int FoundOfClosure = 0, TakeFirstOfClosure = 8, CandidatesOfClosure = 0x10, CountryOfClosure = 0x48, LockOfClosure = 0x60, ScoresOfClosure = 0x68;
     private const int TargetsOfInvasion = 0x70, BeachHours = 24; // COrder: CPdxArray<int> beach ids
     private const int BeachPercent = 50, BeachHoldHours = 7 * 24; // a launch waits while enemy divisions around a beach outnumber half the landing, a week at most
@@ -51,14 +50,11 @@ public unsafe partial class AiAssist
         });
     }
 
-    // ---- Invasion escort: fighters (and naval bombers) over the sea regions an AI landing has to sail through ----
+    // ---- Invasion escort: fighters and naval bombers over the sea regions an AI landing sails through ----
     //
-    // Vanilla already does the naval side: a landing only sails once its country (with allies) dominates every strategic sea region
-    // on its route (COrder::CanExecute 0x14103CA80 -> 0x140EA1250 -> 0x141003F50, DOMINANCE_CONTROLLED_THRESHOLD_RATIO; the AI's
-    // launch reads it cached at COrder+0x11A, written by 0x14102BB10), and the naval AI's CInvasionSupportObjective collects those
-    // regions (0x1420141F0) for its fleets, at the priority common/ai_navy/goals gives naval_invasion_support (mod-able).
-    // NAI.PATROL_FLEETS_PER_INVASION_REGION_ON_PATH is read by nothing but its loader. The air AI never looks at the route: a sea
-    // region's fighters follow the enemy planes seen there (NAVAL_FIGHTERS_PER_PLANE). So the route is taken from the support objective.
+    // The naval side is vanilla's: a landing waits for sea dominance on its route (COrder::CanExecute 0x14103CA80), and
+    // CInvasionSupportObjective sends fleets there. The air AI ignores the route (sea fighters follow enemy planes seen there),
+    // so the route is read from the support objective.
 
     // CInvasionSupportObjective: +8 CCountry*, +0x10 CPdxArray<CStrategicRegion*> the route's regions (from the path's sea provinces).
     private const int CountryOfObjective = 0x08, RegionsOfObjective = 0x10;
@@ -92,9 +88,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The sea regions on the routes of the country's planned landings, where the air AI scored them at all: twice the fighters vanilla
-    /// asks for (a hundred at least) and twice the naval bombers (those follow enemy ships). Scores are never raised, as with bombing
-    /// targets: only how many planes a region the allocator already serves wants. Writes only this country's own entries: AI worker threads.
+    /// Doubles the fighters (EscortFighters at least) and naval bombers the air AI wants over the sea regions on the country's
+    /// landing routes, where it scores them at all; scores stay. Writes only this country's entries: AI worker threads.
     /// </summary>
     private static void EscortInvasions(nint country, nint entries, nint totals)
     {
@@ -168,8 +163,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// How much better than vanilla's distance/port score the beach is: worth (victory points, capital, supply hub, airfields, resources
-    /// on it or next to it) up; enemy divisions within two rings and the beach's land forts and coastal bunkers down. A day per beach.
+    /// The factor on vanilla's distance/port score for a beach: up for what is worth taking on or next to it, down for enemy divisions
+    /// within two rings, land forts and coastal bunkers. Cached a day.
     /// </summary>
     // ponytail: no "behind the front" term; the ring garrison already sinks beaches next to the enemy's front. Add one if logs show front-hugging landings.
     // The beach's own garrison counts twice (TargetValue and the ring); drop the x2 for an empty beach if those dominate.
@@ -199,7 +194,7 @@ public unsafe partial class AiAssist
         return held;
     }
 
-    /// <summary>The province's coastal bunker, working level (bombarded levels don't count).</summary>
+    /// <summary>The province's working coastal bunker level (bombarded levels don't count).</summary>
     private static int CoastalBunker(nint province)
     {
         var db = Buildings.Db;
@@ -208,8 +203,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The group's invasion order that hasn't sailed yet, or 0; an army group's armies' too (a launch for the army group
-    /// covers them: seen as a plain offensive, it was held by the line's gates and the landing never sailed).
+    /// The group's invasion order that hasn't sailed yet, or 0. For an army group, its armies' too: otherwise the launch looks like
+    /// a plain offensive, the line's gates hold it and the landing never sails.
     /// </summary>
     private static nint Unlaunched(nint group)
     {
@@ -225,8 +220,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Whether the invasion may sail: the enemy divisions around its most crowded beach are at most half of ours. The AI re-posts a
-    /// held launch every update; after a week it goes anyway (vanilla). A delay, not a new beach: the AI keeps its target. AI thread, read only.
+    /// Whether the invasion may sail: enemy divisions around its most crowded beach are at most half of ours, or it waited a week.
+    /// The AI retries a held launch every update and keeps its target. AI thread, read only.
     /// </summary>
     // ponytail: no re-targeting; post CRemoveNavalInvasionTargetCommand (ctor 0x14183B9A0) for a held beach if logs show invasions sitting out the hold.
     private static bool BeachClear(nint group, nint invasion, int tag)

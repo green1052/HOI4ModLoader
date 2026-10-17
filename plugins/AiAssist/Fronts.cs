@@ -23,8 +23,8 @@ public unsafe partial class AiAssist
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> UnguardedAt = new(); // tag -> hour last logged
 
     /// <summary>
-    /// The division is in no army, or its army has no order at all (its front gone, an area defence order deleted): kept out of
-    /// the regrouping and the army balancing, it would stand there with no order for good, so the game may place it.
+    /// The division has no army, or its army has no order (front gone, area defence order deleted). The regrouping and army
+    /// balancing may take it even when pinned: kept out of them, it would stand idle for good.
     /// </summary>
     private static bool OrderlessArmy(nint unit)
     {
@@ -51,13 +51,8 @@ public unsafe partial class AiAssist
     private const int RelationsOfDiplomacy = 0x08, GuaranteesOfRelation = 0x290; // CRelation*[tag index]; non-zero: it guarantees that one
 
     /// <summary>
-    /// The border across these provinces is a bystanders' one: at least BystanderShare % of it is held by countries that are no
-    /// threat, and none of the rest is at war with the country or expected to be. No threat: one its AI marks as no target (a
-    /// negative conquer, or ignore, befriend, alliance or protect: Germany toward Switzerland, the Low Countries, Italy) or
-    /// in its faction, or a neutral too small to attack (in no faction, under half its land divisions: the Low
-    /// Countries and Switzerland against Germany, not Poland). Never one it expects a war with (the game's daily list: at war,
-    /// a war goal or justification either way, a focus either way, a war preparation strategy, their factions and subjects),
-    /// a guarantor of one of those, or a rival (a positive conquer or contain).
+    /// The border across these provinces is a bystanders' one: at least BystanderShare % of it is held by countries that are
+    /// no threat, and none of the rest is one we're at war with or expect a war with (<see cref="Verdict"/>).
     /// </summary>
     private static bool Bystanders(nint country, int tag, IEnumerable<nint> across)
     {
@@ -115,15 +110,17 @@ public unsafe partial class AiAssist
 
     private const int BystanderShare = 80, SmallArmyPercent = 50, FactionOfDiplomacy = 0x290;
 
-    /// <summary>True: the country is no threat (see <see cref="Bystanders"/>); false: it keeps the front; null: neither.</summary>
+    /// <summary>
+    /// True: no threat (an ally, marked no target by our AI strategies, or a factionless neutral under half our land divisions).
+    /// False: it keeps the front (at war, an expected war or its guarantor, a positive conquer or contain). Null: neither.
+    /// </summary>
     private static bool? Verdict(nint country, int tag, int c, int[] expected, int ours)
     {
         if (Array.IndexOf(expected, c) >= 0 || Game.AtWar(country, c) || Guarantees(c, expected)) return false;
         var index = Game.TagIndex(c);
         var conquer = Strategy(country, ConquerStrategy, index);
         if (conquer > 0) return false;
-        // Antagonize is the scripts' ideological hostility (Germany at 100 toward every democracy): no military intent, and a
-        // negative conquer (-99999 toward the Low Countries) says outright it won't attack.
+        // Antagonize is ideological, not military intent, so it is ignored; a negative conquer means it won't attack.
         if (conquer < 0 || Game.Allied(country, c) || Strategy(country, IgnoreStrategy, index) > 0 || Strategy(country, BefriendStrategy, index) > 0
             || Strategy(country, AllianceStrategy, index) > 0 || Strategy(country, ProtectStrategy, index) > 0) return true;
         if (Strategy(country, ContainStrategy, index) > 0) return false;
@@ -170,16 +167,15 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// At war on a land line, and no enemy at war holds a port (from the last controller scan): nobody can land, so the coast
-    /// and city garrisons all go to the line (Germany's West Wall held eleven divisions while its ports were guarded).
+    /// At war on a land line, and no enemy at war holds a port (last controller scan): nobody can land, so all port and home
+    /// garrisons go to the line.
     /// </summary>
     private static bool NoLandings(nint country, int tag) =>
         _portHolders is { } ports && HasLine(tag) && !ports.Any(holder => Game.AtWar(country, holder));
 
     /// <summary>
-    /// Its line was short in the last GarrisonHours, or a war on its home land border is on or coming: its garrisons keep only
-    /// a floor and the rest go to the line. A month, not the two days a line counts as short: the garrisons manned it, two
-    /// days later they went back to the coast and it was short again (France's Maginot Line thin while its army guarded the coast).
+    /// Its line was short in the last GarrisonHours, or a war on its home land border is on or coming: garrisons keep only a
+    /// floor and the rest go to the line. A month, so they don't go back to the coast as soon as the line is manned.
     /// </summary>
     private static bool GarrisonsToLine(nint country, int tag) =>
         _portHolders != null && (HasLine(tag) && ShortOfMen.TryGetValue(tag, out var short_) && Game.Hour - short_ is >= 0 and < GarrisonHours
@@ -189,10 +185,8 @@ public unsafe partial class AiAssist
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Day, bool On)> LandWars = new();
 
     /// <summary>
-    /// A war on its home land border is on or coming: a country at war with it, or one it expects a war with (justification,
-    /// war goal, focus, war preparation, either way), holds ground next to its core ground. The garrisons go to that border
-    /// then, before the war too (Poland guarded its coast while Germany justified a war over Danzig; France its coast in the
-    /// war while the Maginot Line was thin). Not a border far from home (Japan's in China). Cached a day.
+    /// A war on its home land border is on or coming: a country it is at war with, or expects a war with (justification, war
+    /// goal, focus, war preparation, either way), holds ground next to its core ground. Cached a day.
     /// </summary>
     private static bool LandWarAtHome(nint country, int tag)
     {
@@ -230,21 +224,21 @@ public unsafe partial class AiAssist
     private static int _stationed;
     private static bool _holdLine, _axis, _beachDefense;
     private const int AxisHours = 24, ThinSectorWeight = 8, SectorHours = 72, SalientHead = -1; // a thin sector is held 3 days unless taken
-    private const int AxisFreshHours = 2 * AxisHours; // the general updates its fronts about once a day (25 hours seen): an axis lives until the next one
-    // CAIFront+0x218: its CAIForceConcentration (the game's armoured push), embedded. +0 divisions it was given (0: none), +0x14 its units,
-    // +0x20 its army, +0x48 target (optional, set flag +0x78) with its CPdxArray<CProvince*> path at +0x60 (path[0] ours .. path[n-1] the target), +0x84 attack on.
+    private const int AxisFreshHours = 2 * AxisHours; // the general updates its fronts about daily: an axis lives until the next update
+    // CAIFront+0x218: its embedded CAIForceConcentration (the game's armoured push). +0 divisions given (0: none), +0x14 units, +0x20 army,
+    // +0x48 target (if flag +0x78) with its CPdxArray<CProvince*> path at +0x60 (path[0] ours .. path[n-1] the target), +0x84 attack on.
     private const int ConcentrationOfFront = 0x218, UnitsOfConcentration = 0x14, ArmyOfConcentration = 0x20, PathOfConcentration = 0x60, HasTarget = 0x78, AttackOn = 0x84;
     private const int ArmiesOfAiFront = 0x60; // CAIFront: CPdxArray<COrdersGroup*>
     private static int _spearheads;
 
-    // Keyed by raw CAIGeneral pointers, which a freed and reallocated general can reuse: entries carry the tag they were made for.
-    // Hour: last refreshed (hourly while the theatre has a line); Since: when its anchor was picked; Anchor: the province it is on.
+    // Keyed by raw CAIGeneral pointers, which a reallocated general can reuse: entries carry their tag.
+    // Hour: last refreshed; Since: when its anchor was picked; Anchor: its province.
     // Head: the spearhead's province, SalientHead for a salient's neck, PincerHead for a pincer's first arm, 0 for a thin sector.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, int Head, HashSet<int> Core, HashSet<int> Line, int Since, int Anchor)> Axes = new(); // general -> its breakthrough axis
 
     private void LoadFronts()
     {
-        if (_axis) _ = Sig.Find(Signatures.ConcentrationActive) + Sig.Find(Signatures.ConcentrationPath) + Sig.Find(Signatures.ConcentrationAttacking); // the force concentration offsets are still where they were
+        if (_axis) _ = Sig.Find(Signatures.ConcentrationActive) + Sig.Find(Signatures.ConcentrationPath) + Sig.Find(Signatures.ConcentrationAttacking); // pins the force concentration offsets
         _unitRequests = Patches.Hook<GeneralRetFn>(Sig.Find(Signatures.UpdateFrontUnitRequests), general =>
         {
             var result = _unitRequests!.OriginalFunction(general);
@@ -252,18 +246,16 @@ public unsafe partial class AiAssist
             return result;
         });
         if (!_holdLine) return;
-        // Area defence against enemies that hold no port: no orders made, and DropAreaDefence deletes the ones left, so their
-        // armies' divisions are collected for the land fronts (on an order they never are). Requests at 0 alone didn't free an
-        // army already on an area defence front: Italy kept shipping its East African divisions to the Dodecanese.
+        // Area defence against enemies that hold no port: no new orders (DropAreaDefence deletes the old ones), so the
+        // divisions are free for the land fronts. Zero requests alone don't free an army already on such a front.
         _areaDefense = Patches.Hook<GeneralRetFn>(Sig.Find(Signatures.UpdateAreaDefense), general =>
         {
             var skip = false;
             Safely(() => skip = GeneralCantBeInvaded(general));
             return skip ? 0 : _areaDefense!.OriginalFunction(general);
         });
-        // The regrouping drains fronts through here (unassign, then one mass move a turn), which no front request can block:
-        // the last defender of a province, and the wall around a pocket, are kept out of its lists instead. Vanilla would
-        // reassign them and staff the new front with divisions from far away, while the replacements walk the pocket breaks out.
+        // The regrouping drains fronts through here, which no front request can block: pinned divisions (a province's last
+        // defender, a pocket's wall) and fresh arrivals are left out of its list.
         _collect = Patches.Hook<CollectFn>(Sig.Find(Signatures.CollectReassignableUnits), (context, list) =>
         {
             var result = _collect!.OriginalFunction(context, list);
@@ -330,9 +322,7 @@ public unsafe partial class AiAssist
             var country = front == 0 ? 0 : *(nint*)(front + CountryOfFront);
             var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag == 0 || tag == Game.ControlledTag) continue;
-            // Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't
-            // land: a land war takes them all. Checked first: an area defence front has no front line. Left alone, Italy walked
-            // its Somali line divisions to Kismayo, and its Eritrean ones to ports in Libya and Italy, against Ethiopia.
+            // Area defence (port and home garrisons, battle plan type 5): checked first, as it has no front line.
             if (*(int*)(front + AreaDefense) != 0)
             {
                 if (_holdLine) UnguardAreaDefence(front, country, tag, hour, areaFronts, front == mainArea, othersDesired);
@@ -382,22 +372,18 @@ public unsafe partial class AiAssist
                 }
                 if (spot?.Tag == tag) foreach (var our in threatened) spot.Value.Line.Add(Game.Id(our));
             }
-            // Hold the line: at war, every province of ours on the line keeps a defender, and the front as many divisions as the
-            // enemy divisions across it, whatever else (a supply crisis, another front) the game weighs. The theatre distribution
-            // takes a front's divisions for other fronts only beyond its minimum (CollectReassignableUnits and the donation pass
-            // 0x141A5D070 keep AI_THEATRE_DISTRIBUTION_PERCENTAGE_OF_MINIMUM_UNITS_TO_KEEP x +0x90): left alone, Italy shipped its
-            // Somali divisions to Eritrea and Ethiopia walked in.
-            // A front on a bystander's border (every country across marked no target by the AI's own strategies): no divisions
-            // wanted, so the theatre distribution sends them where a war is or may come (Germany kept seven facing Switzerland).
+            // Hold the line: at war, every line province keeps a defender and the front as many divisions as the enemy across it.
+            // The theatre distribution only takes divisions beyond a front's minimum (CollectReassignableUnits and the donation
+            // pass 0x141A5D070 keep AI_THEATRE_DISTRIBUTION_PERCENTAGE_OF_MINIMUM_UNITS_TO_KEEP x +0x90).
+            // A front on a bystanders' border wants no divisions, so they go where a war is or may come.
             if (_holdLine && !hostile && enemyHeld.Count > 0 && *(int*)(front + MaxWanted) > 0 && Bystanders(country, tag, enemyHeld.Keys))
             {
                 DropFront(front);
                 Interlocked.Increment(ref _bystanders);
                 continue;
             }
-            // An ally's front overseas (its line all in an ally's ground, which no land route links to ours): no divisions wanted,
-            // so none are shipped there (Germany sent nine to Italian East Africa against the British), unless the ally is losing
-            // ground there and our own line is manned (an Afrika Korps when Italy needs one).
+            // An ally's front overseas (all in allied ground no land route links to ours) wants none, unless the ally is losing
+            // ground there and our own line is manned.
             if (_holdLine && contact.Count > 0 && *(int*)(front + MaxWanted) > 0 && Overseas(country, tag, contact, hour))
             {
                 DropFront(front);
@@ -418,36 +404,28 @@ public unsafe partial class AiAssist
     private const int AreaSharePercent = 33, AreaFloorPercent = 10, AreaLateSharePercent = 50, AreaLateFloorPercent = 35, LateFrom = 1939, LateBy = 1942;
 
     /// <summary>
-    /// Area defence (the AI's port and home garrisons, battle plan type 5) against enemies that hold no port, so can't land:
-    /// it wants no divisions, and a land war takes them all. Otherwise, while the country fights on a land line (its own or
-    /// an ally's), its area defence fronts together want at most AreaSharePercent of its land divisions: the British guarded
-    /// France's coast with 36 of their 97 and their Dominions with all of theirs while the line in Belgium was short.
+    /// Area defence fronts (port and home garrisons, battle plan type 5). Against enemies that hold no port, they want nothing.
+    /// Otherwise a floor of divisions guards home and, at war on a land line, together they want at most AreaSharePercent of
+    /// the land divisions; floor and share rise from LateFrom to LateBy.
     /// </summary>
     private void UnguardAreaDefence(nint front, nint country, int tag, int hour, int areaFronts, bool main, int othersDesired)
     {
         if (*(int*)(front + MaxWanted) <= 0) return;
         if (!NoLandings(country, tag))
         {
-            // Landings stay possible: AreaFloorPercent of the divisions always guards home, all of it on the capital's front
-            // (vanilla's other area fronts mostly want none: Britain's home islands held five divisions, the floor spread
-            // over nine fronts reached none of them). To the line (a war at home, a short line) only that floor; at war on a
-            // land line up to AreaSharePercent.
+            // Landings stay possible: a floor always guards home. While the garrisons go to the line (a war at home, a short
+            // line) or before any land war, only the floor: a division per home port (its naval bases on core ground).
             var divisions = LandDivisions(country);
             var toLine = GarrisonsToLine(country, tag);
-            // Before a land war too (in peace, or at war with no land line yet) only the floor: the rest stand ready on the
-            // fronts the AI draws for the war it expects, not along every coast. That floor is a division per home port then
-            // (its own naval bases on core ground: where a landing would come), else AreaFloorPercent.
             var minimal = toLine || !HasLine(tag);
-            // Later in the war landings grow (fleets and landing craft): from 1939 to 1942 the floor and the cap rise (by 1943
-            // was too slow: Britain's island held fifteen divisions in 1942).
+            // Landings grow later in the war: from LateFrom to LateBy the floor and the share rise.
             var late = Game.Year is var year and > 1900 ? Math.Clamp((year - LateFrom) / (double)(LateBy - LateFrom), 0, 1) : 0;
             var floorPercent = AreaFloorPercent + (int)(late * (AreaLateFloorPercent - AreaFloorPercent));
             var sharePercent = AreaSharePercent + (int)(late * (AreaLateSharePercent - AreaSharePercent));
             var floor = minimal ? Math.Max(1, Math.Min(Math.Max(_homePorts.GetValueOrDefault(tag), (int)(divisions * late * AreaLateFloorPercent / 100)), divisions / 2))
                 : Math.Max(1, divisions * floorPercent / 100);
             // The floor is shared: the other area fronts keep what vanilla wants there (a coast it marks threatened), the
-            // capital's the rest. All of it on the capital's front left the United States' west coast a division against Japan
-            // (the others were cut to the floor over eighteen fronts, one each).
+            // capital's front gets the rest.
             if (main)
                 *(int*)(front + MinWanted) = Math.Max(*(int*)(front + MinWanted), Math.Min(Math.Max(1, floor - othersDesired), *(int*)(front + MaxWanted)));
             else
@@ -471,7 +449,7 @@ public unsafe partial class AiAssist
         _log?.Debug($"#{tag}: its enemies hold no port, so its port and home garrisons (area defence) go to the land fronts");
     }
 
-    /// <summary>A front that wants no divisions and has no army on it: the general draws no front order there (vanilla redrew it daily, we deleted it: it flickered).</summary>
+    /// <summary>Zeroes the front's requests and armies, so the general draws no front order there (a deleted order was redrawn daily).</summary>
     private static void DropFront(nint front)
     {
         *(int*)(front + MinWanted) = *(int*)(front + DesiredWanted) = *(int*)(front + MaxWanted) = 0;
@@ -493,15 +471,13 @@ public unsafe partial class AiAssist
     private const int SpareHours = 7 * 24, OverseasHelpPercent = 10;
 
     /// <summary>
-    /// The country's own line has been manned all week: it can spare a little for an ally's line overseas (Germany for Italy's
-    /// Africa, up to OverseasHelpPercent of its divisions: see <see cref="KeepMinimum"/>).
+    /// The country's own line was manned all week, so it can spare a little for an ally's line overseas (OverseasHelpPercent,
+    /// see <see cref="KeepMinimum"/>).
     /// </summary>
     private static bool Spare(int tag, int hour) => !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < SpareHours);
 
     /// <summary>
-    /// Part of the line is the core ground of the ally holding it: its homeland (the British and the Dominions in France),
-    /// which help is shipped to, unlike a colony (Germany's nine divisions in Italian East Africa). Dropped as overseas, the
-    /// Commonwealth's divisions already in France stood guarding its coast.
+    /// Part of the line is core ground of the ally holding it: its homeland gets help shipped to it, unlike a colony.
     /// </summary>
     private static bool AllyHome(IEnumerable<nint> line)
     {
@@ -518,9 +494,8 @@ public unsafe partial class AiAssist
     private static int _supplyCapped;
 
     /// <summary>
-    /// A front whose line provinces get under SupplyFullPercent of the supply their divisions need asks for no more divisions
-    /// than stand on it now (its minimum too): more crammed into a narrow front only starved them all; the theatre distribution
-    /// moves the rest where supply reaches. Runs after <see cref="KeepMinimum"/>, which it overrides.
+    /// A front whose line gets under SupplyFullPercent of the supply it needs asks for no more divisions than stand on it (one per
+    /// line province at least): more would only starve. Runs after <see cref="KeepMinimum"/> and overrides it.
     /// </summary>
     private static void CapToSupply(nint front, int tag, HashSet<nint> contact, int hour)
     {
@@ -546,8 +521,8 @@ public unsafe partial class AiAssist
     private const int MaxPerLineProvince = 3, NeedHours = 7 * 24, AllyHelpPercent = 25;
 
     /// <summary>
-    /// Every country whose ground this line is on has at least as many land divisions as <paramref name="tag"/>: the line is
-    /// theirs to man (Hungary on Germany's), not one a stronger country holds for a weaker ally (France in Belgium).
+    /// Every other country whose ground this line is on has at least as many land divisions as <paramref name="tag"/>:
+    /// the line is theirs to man, we only help.
     /// </summary>
     private static bool StrongerOwners(int tag, HashSet<nint> line)
     {
@@ -556,13 +531,10 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Hold the line's minimum: a defender per line province, and as many divisions as the enemy has across the front, up to
-    /// MaxPerLineProvince a province; twice the enemy there already (an offensive front, Germany in Poland), one per line
-    /// province, so its surplus can go where a front is short (the West Wall held eleven divisions against France's forty).
-    /// The week's highest is kept: following the enemy's daily moves, two fronts asking for more than the country had (the
-    /// Maginot Line's eight provinces wanted 48 to 60 against France) traded divisions every day. On a line all in the ground
-    /// of allies at least as strong (Hungary's on Germany's border), up to AllyHelpPercent of ours: allies help each other
-    /// without one front taking a minor's whole army; France's in Belgium counts in full.
+    /// Hold the line's minimum: a defender per line province and as many divisions as the enemy across the front (at most
+    /// MaxPerLineProvince a province); once twice the enemy, one per line province, so the surplus can go elsewhere. The week's
+    /// highest is kept, so fronts don't trade divisions daily. Never more than we have; less on a stronger ally's or an
+    /// overseas line.
     /// </summary>
     private void KeepMinimum(nint front, nint section, int tag, Dictionary<nint, bool> enemyHeld, HashSet<nint> contact, int hour)
     {
@@ -576,8 +548,7 @@ public unsafe partial class AiAssist
             if (unit != 0 && Division.Commander(unit) == tag) holding++;
         var need = holding >= 2 * facing ? contact.Count : Math.Max(contact.Count, Math.Min(facing, MaxPerLineProvince * contact.Count));
         var ours = LandDivisions(Game.Country(tag));
-        // A stronger ally's stretch of the line gets up to AllyHelpPercent of our divisions, our own stretch its full share,
-        // and never more than we have: a 17-division minor on a 55-province line it held two provinces of was asked for 106.
+        // Our own stretch gets its full share, a stronger ally's up to AllyHelpPercent of our divisions.
         if (helping) need = Math.Min(need, Math.Max(1, MaxPerLineProvince * own + ours * AllyHelpPercent / 100));
         // An ally's line overseas (kept while we can spare it): a small expeditionary force, not an army shipped away.
         if (own == 0 && !AllyHome(contact) && OverseasLine(Game.Country(tag), tag, contact)) need = Math.Min(need, Math.Max(1, ours * OverseasHelpPercent / 100));
@@ -589,7 +560,7 @@ public unsafe partial class AiAssist
         *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
         *(int*)(front + MaxWanted) = Math.Max(*(int*)(front + MaxWanted), *(int*)(front + DesiredWanted));
         Interlocked.Increment(ref _raised);
-        // In the log when the minimum changes, else once a week per front: daily it was most of a 40 MB log.
+        // Logged when the minimum changes, else once a week per front.
         if (RaisedAt.TryGetValue(section, out var last) && last.Need == need && hour - last.Hour is >= 0 and < NeedHours) return;
         RaisedAt[section] = (hour, need);
         _log?.Debug($"#{tag}: a front of {contact.Count} line province(s) facing {facing} enemy division(s) keeps at least {need}");
@@ -607,10 +578,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The theatre's axis for this hour, re-published with the current line: an enemy salient's neck (cut off from both flanks,
-    /// kept until the pocket closes or a week passes), else the game's own spearhead while it attacks across the line (moving on
-    /// with its head; a path past a neutral or allied province may miss the line), else the thinnest enemy sector, held three
-    /// days and moved only when taken (on to its thinnest enemy neighbour): offensive divisions don't swap far-apart sectors.
+    /// The theatre's axis for this hour: an enemy salient's neck, else the game's own spearhead while it attacks across the line,
+    /// else a pincer around a massed enemy, else the thinnest enemy sector (held three days, moved on to the next only once taken).
     /// AI thread of the general; published records are never changed.
     /// </summary>
     private static void Anchor(nint general, nint country, int tag, nint thinnest, int weight, HashSet<int> line, HashSet<nint>? enemyLine, int hour)
@@ -682,9 +651,8 @@ public unsafe partial class AiAssist
 
     /// <summary>
     /// The theatre's armoured spearhead while it attacks: the first enemy province on its force concentration's path, 0 if none.
-    /// The game's own liveness test first: a front that lost its concentration keeps a stale path and attack flag. Read only, on
-    /// the general's own AI thread, the only one that rebuilds and frees the path. Invasion fronts: the landing has its own target.
-    /// The flag is the concentration wanting the attack on; the attack gate may still hold it (as with a thin-sector axis).
+    /// The game's liveness test comes first: a lost concentration keeps a stale path and attack flag. Invasion fronts are skipped.
+    /// Read on the general's own AI thread, the only one that frees the path.
     /// </summary>
     // ponytail: first attacking concentration of the theatre only; pick by path progress if two attack at once and it matters.
     private static int Spearhead(nint general)
@@ -713,17 +681,16 @@ public unsafe partial class AiAssist
             var next = new List<int>();
             foreach (var id in ring)
             foreach (var n in Game.Province(id) is var p && p != 0 ? Game.Neighbours(p) : [])
-                if (Game.Province(n) is var q && q != 0 && Province.State(q) != 0 && core.Add(n)) next.Add(n); // land only: through a sea zone it reached far coasts
+                if (Game.Province(n) is var q && q != 0 && Province.State(q) != 0 && core.Add(n)) next.Add(n); // land only
             ring = next;
         }
         return core;
     }
 
     /// <summary>
-    /// Whether a local attack from <paramref name="from"/> may go to <paramref name="to"/>: off a theatre's line that has
-    /// an axis today, anything; on it, only targets on the axis (the theatre's other sectors hold while it pushes), and
-    /// pinning attacks on enemy stacks next to the axis, which could shift into the breakthrough (a division under attack
-    /// only moves to retreat), where the attack passes vanilla's strength test.
+    /// Whether a local attack from <paramref name="from"/> may go to <paramref name="to"/>: anything off a line with a fresh axis;
+    /// on it, only targets on the axis, and pinning attacks (passing vanilla's strength test) on enemy stacks next to it, so
+    /// they can't shift into the breakthrough.
     /// </summary>
     private static bool OnAxis(int tag, nint from, nint to)
     {

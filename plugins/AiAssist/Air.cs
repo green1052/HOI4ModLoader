@@ -6,7 +6,7 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Air retreat: regions the AI is losing badly get a lower score, so its own allocator moves the planes ----
+    // ---- Air retreat: regions the AI is losing get a lower score, so its allocator moves the planes ----
 
     private const int RegionEntrySize = 0x4E8, RegionOfEntry = 0x00, KindOfEntry = 0x08, ScoreOfEntry = 0x10, IgnoredRegion = 5;
     private const int SuperiorityRecords = 0xE0, SuperiorityRecordSize = 0xA0, OurSuperiority = 0x00, EnemySuperiority = 0x08;
@@ -23,24 +23,24 @@ public unsafe partial class AiAssist
     private int _pulled;
     private static bool _airRetreat;
 
-    /// <summary>The region scoring hook, shared by air retreat, bombing targets and invasion escorts; each runs only under its own setting.</summary>
+    /// <summary>Region scoring hook shared by air retreat, bombing targets and invasion escorts, each under its own setting.</summary>
     private void LoadRegionPriorities()
     {
-        _ = Sig.FindAll(Game.StrategicAirSig, 2)[0] + Sig.Find(AirRegions.RegionAirDataSig) + Sig.Find(AirRegions.RegionCombatDataSig) // the offsets below are still where they were
+        _ = Sig.FindAll(Game.StrategicAirSig, 2)[0] + Sig.Find(AirRegions.RegionAirDataSig) + Sig.Find(AirRegions.RegionCombatDataSig) // the functions the offsets below come from
             + Sig.Find(Signatures.RegionNeighbours) + Sig.Find(Signatures.StrBombWishes);
         _priorities = Patches.Hook<PrioritiesFn>(Sig.Find(Signatures.UpdateRegionPriorities), (aiObj, country, scratch, buffer, entries, bases, totals, buffer2) =>
         {
             _priorities!.OriginalFunction(aiObj, country, scratch, buffer, entries, bases, totals, buffer2);
             Safely(() =>
             {
-                if (_bombingTargets) BombingTargets(country, entries, totals); // first: air retreat may still lower a lost region
+                if (_bombingTargets) BombingTargets(country, entries, totals); // first, so air retreat can still lower a lost region
                 if (_strategicInvasions) EscortInvasions(country, entries, totals);
                 if (_airRetreat) AirRetreat(country, entries);
             });
         });
     }
 
-    /// <summary>Scales down the score of regions where we hold under 35 % of air superiority, lost 20+ planes in a week and 1.5+ per kill; under 15 %: 0.</summary>
+    /// <summary>Regions with under 35 % of air superiority, 20+ planes lost in a week and 1.5+ lost per kill get a scaled-down score; under 15 %: 0.</summary>
     private void AirRetreat(nint country, nint entries)
     {
         var tag = Game.Tag(country);
@@ -73,7 +73,7 @@ public unsafe partial class AiAssist
         }
     }
 
-    // ---- Bombing targets: strategic bombers go for the enemy regions right behind the front, not the far hinterland ----
+    // ---- Bombing targets: strategic bombers go for the enemy regions next to the front ----
 
     private const int StrategicBombingRegion = 4;                      // entry kind the STR_BOMB_* rules score: enemy-held region
     private const int WishesOfEntry = 0x68, StrategicBombing = 3;      // planes wanted per mission (fixed point), by mission bit
@@ -84,10 +84,9 @@ public unsafe partial class AiAssist
     private static int _bombing;
 
     /// <summary>
-    /// Enemy-held regions the strategic bombing rules scored, by their distance to our land front (land regions both sides hold
-    /// ground in): next to it they ask for twice the bombers, one further as is, farther their score and bomber wish are halved.
-    /// Scores are never raised: the allocator's top-N cut and score shares would take CAS and fighters from the front regions.
-    /// No land front: vanilla. Writes only this country's own entries: AI worker threads.
+    /// Scales strategic bombing targets by distance to our land front (land regions both sides hold ground in): next to it
+    /// twice the bombers, one further as is, farther half the score and bombers. Scores are never raised, as that would take
+    /// CAS and fighters from the front. No land front: vanilla. Runs on AI worker threads, on this country's entries only.
     /// </summary>
     private static void BombingTargets(nint country, nint entries, nint totals)
     {
@@ -140,13 +139,13 @@ public unsafe partial class AiAssist
             *wish = scaled;
             changed = true;
         }
-        if (totals != 0) *(long*)(totals + 8 * StrategicBombing) += delta; // the per-mission sums URP already made
+        if (totals != 0) *(long*)(totals + 8 * StrategicBombing) += delta; // the per-mission sums the original already made
         if (changed) Interlocked.Increment(ref _bombing);
     }
 
     private static bool LandRegion(nint region) => region != 0 && *(long*)(region + WaterOfRegion) <= SeaShare;
 
-    // ---- Breakthrough axis, in the air: battles on the day's axis get the close air support first ----
+    // ---- Breakthrough axis, in the air: battles on the axis get close air support first ----
 
     // The wing's owner as the game reads it (0x140F5AAD0): wing+0x9C4 when set, else *(*(wing+0x38)+0x40)+0x90.
     private const int MissionBitsOfAirMission = 0x14, WingOfAirMission = 0x28, OwnerOfWing = 0x9C4, EquipmentOfWing = 0x38, OwnerOfEquipment = 0x40, TagOfOwner = 0x90;
@@ -172,8 +171,7 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The plane budget is spent in the collector's array order, so battles on the axis move to the front of it (stable:
-    /// between two axis battles the game's own order decides). Game thread hourly; AI threads only count (targets 0).
+    /// Planes go to targets in array order, so battles on the axis move to the front (stable sort). Game thread, hourly.
     /// </summary>
     private static void ConcentrateCas(nint mission, nint targets)
     {

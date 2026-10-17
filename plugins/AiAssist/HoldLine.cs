@@ -6,52 +6,52 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Hold the line: pinned defenders, holes refilled, reserves and second-line posts, new divisions; attacks wait on a thinly
-    //      manned line (sending and posting divisions: Posts.cs; offensives called off and the launch gate: AttackGate.cs;
-    //      rotation, escape and the fire brigade: Micro.cs; beach defence: Beaches.cs) ----
+    // ---- Hold the line: pinned defenders, refilled holes, reserves, second-line posts and new divisions; no attacks on a thin
+    //      line. Related: Posts.cs (moving and posting), AttackGate.cs (calling off and gating offensives), Micro.cs (rest,
+    //      escape, fire brigade), Beaches.cs. ----
 
     private const int ArrivalOfUnit = 0x160, FreshHours = 168, FreshWalkHours = 168;
-    // TrackFronts (CAIGeneral::UpdateFrontUnitRequests) refreshes a line once a game day, plus a few extra hours: two days keep it between updates.
+    // TrackFronts (CAIGeneral::UpdateFrontUnitRequests) refreshes a line about daily; two days bridge the gap.
     private const int LineFreshHours = 48, MaxBackfills = 2, BackfillRadius = 8, MinBackfillOrg = 60;
     private const int KeyBackfillRadius = 20, KeyHole = 60;
-    // Game hours: a division we sent walks without new orders; a hole or target isn't sent another meanwhile.
+    // Game hours a sent division is left alone, and its hole or target gets no other.
     private const long SentHours = 48, GapHours = 168, KeyGapHours = 72;
-    private const int BackfillHours = 6; // the pass runs at most this often, in game hours (the game runs up to ~16 hours a real second)
+    private const int BackfillHours = 6; // game hours between passes
     private const int ReserveMax = 6, ReservePerLine = 4, ReserveMoves = 2, ReserveRadius = 6;
     private const int DepthKey = 25, MaxDepthPosts = 2, DepthRadius = 4;
-    private const int MemberOfUnit = 0xB8; // CArmy: its COrdersGroupMember (what COrder members point at)
+    private const int MemberOfUnit = 0xB8; // CArmy -> its COrdersGroupMember (what COrder members point at)
 
     [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
     private IHook<CollectFn>? _collect;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, HashSet<nint> Provinces)> Line = new(); // AI front -> its threatened provinces, refreshed daily
-    private static readonly Dictionary<nint, long> Sent = []; // unit -> game hour until: a division we sent is left alone while it walks (main thread)
-    private static readonly Dictionary<int, long> Gap = [];   // province id -> game hour until: a hole or target a division is walking to (main thread)
+    private static readonly Dictionary<nint, long> Sent = []; // unit -> hour until it is left alone while walking (main thread)
+    private static readonly Dictionary<int, long> Gap = [];   // province id -> hour until: a division is walking there (main thread)
 
     private enum PostKind { Reserve, Garrison, Helper, Depth, Drive }
 
-    /// <summary>A pinned division's job: its tag, the province it holds, the line province it backs (second line).</summary>
+    /// <summary>A pinned division's job: tag, kind, the province it holds, and the line province it backs (second line).</summary>
     private readonly record struct Posting(int Tag, PostKind Kind, int Province, int Guard = 0);
 
-    // Reserves, grad garrisons, line helpers and second-line divisions: the theatre shuffle and army balancing leave them. AI threads
-    // only ask whether a unit is in it; never dereferenced unless still one of the tag's units.
+    // Posted divisions (reserves, grad garrisons, helpers, second line): the theatre shuffle and army balancing leave them alone.
+    // AI threads only test membership; a key is dereferenced only while it is still one of the tag's units.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, Posting> Posted = new();
-    // Divisions we took off their orders, with the order they were on: put back on it when we let them go, else vanilla's regrouping
-    // sends them to some far front and back (main thread; never dereferenced unless still one of the tag's units).
+    // Divisions we took off their orders -> that order, to put them back on it when released; else vanilla sends them to a far
+    // front and back. Main thread; dereferenced only while still one of the tag's units.
     private static readonly Dictionary<nint, (int Tag, long Group, int Order)> Home = [];
-    // New divisions we sent where they were needed, with their tag and since when: the theatre shuffle and army balancing leave
-    // them while they walk (FreshlyArrived keeps them a week once there). Never dereferenced.
+    // New divisions we dispatched -> tag and hour: left alone while they walk (FreshlyArrived keeps them a week once there).
+    // Never dereferenced.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> FreshDivisions = new();
-    // Tags that outgun the enemy on their line two to one, with the hour seen: their attacks go ahead however thin the line (AI threads read).
+    // Tag -> hour it last had twice the enemy's power on its line: its attacks go ahead however thin the line. AI threads read.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> DominantSince = new();
     private static readonly Dictionary<int, HashSet<nint>> Known = []; // tag -> its land divisions at its last backfill pass (main thread)
     private PerGame _game = null!;
-    private static int _world = -1; // Game.Generation at the last reset: until it runs after a load, Line points into the old world
+    private static int _world = -1; // Game.Generation at the last reset; until it runs after a load, Line points into the old world
     private int _backfillAt = Never;
     private static int _backfilled, _reserved, _deployed, _returned, _stopped, _depth, _kept;
 
     /// <summary>
-    /// A division that took up its post only days ago: the theatre shuffle would march it somewhere else and back
-    /// (ping-pong). While it walks, its arrival field is a schedule, not a stamp; a stale schedule reads as long ago.
+    /// True for a division that arrived within FreshHours, so the theatre shuffle doesn't march it away and back. While a
+    /// division walks, its arrival field is a schedule, not a stamp, so walking ones never count.
     /// </summary>
     private static bool FreshlyArrived(nint unit)
     {
@@ -63,10 +63,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The AI's regrouping can't take this division: a reserve, a grad garrison, resting, a new division on its way, one another
-    /// plugin runs, the last one of its country in a province on the line (next to enemy ground, troops there or not: vanilla
-    /// strips quiet stretches of a front bare) or one of no more than the enemy divisions next to it, or one on the wall of a
-    /// pocket (an enemy province with divisions whose neighbours are all ours). AI threads: read only.
+    /// The AI's regrouping can't take this division: posted, resting, newly dispatched, or run by another plugin; or on the
+    /// line where it is its country's last there, one of no more than the enemy divisions next to it, or walls in a pocket.
+    /// AI threads, read only.
     /// </summary>
     private static bool Pinned(nint unit)
     {
@@ -93,28 +92,25 @@ public unsafe partial class AiAssist
         return ours <= facing; // a line province keeps as many as the enemy divisions next to it
     }
 
-    private const int UnitsOfAssignCommand = 0x28; // COrderAssign/UnassignCommand: CPdxArray<CRef id> (then the group's CRef at +0x40, the order id at +0x48)
+    private const int UnitsOfAssignCommand = 0x28; // COrderAssign/UnassignCommand: CPdxArray<CRef>; group CRef +0x40, order id +0x48
 
     /// <summary>
-    /// An AI assign command can't take a division its line needs (<see cref="Pinned"/>) onto another order: vanilla made a new
-    /// front around a pocket and pulled its divisions off the main line, which stood open meanwhile. Divisions next to the
-    /// pocket (or any encircled enemy ground) may go: they are the ones to wall it in. Strips them in place; false when none
-    /// is left. AI threads.
+    /// Strips pinned divisions (<see cref="Pinned"/>) and HQs from an AI assign command, in place, so a new order can't empty
+    /// the line. Divisions next to a pocket and ones in no army still go. False when none is left. AI threads.
     /// </summary>
     private static bool KeepsLine(nint cmd, int tag)
     {
         if (*(nint*)cmd != _assignVTable) return true;
         var country = Game.Country(tag);
         if (country == 0) return true;
-        var byRef = new Dictionary<long, nint>(); // the country's own divisions by CRef: never resolve ids blind (a stale one read a garbage tag)
+        var byRef = new Dictionary<long, nint>(); // own divisions by CRef: a stale id resolved blind reads garbage
         foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) byRef[Division.Ref(u)] = u;
         var units = Native.PdxArray<long>(cmd + UnitsOfAssignCommand);
         var kept = 0;
         foreach (var reference in units)
         {
             var unit = byRef.GetValueOrDefault(reference);
-            // A division in no army (the army balancing's new armies are filled through here) always gets its assignment:
-            // kept out, it stayed between armies and the AI walked it back and forth.
+            // A division in no army always goes: army balancing fills new armies this way, and one kept out is walked back and forth.
             if (unit == 0 || !Division.IsHeadquarters(unit) && (!Pinned(unit) || NextToPocket(unit) || Division.Group(unit) == 0)) units[kept++] = reference;
             else Interlocked.Increment(ref _keptOnLine);
         }
@@ -125,17 +121,18 @@ public unsafe partial class AiAssist
 
     private static int _keptOnLine;
 
-    // Root front order commands: COrderReplaceRootCommands (0x70: +0x48 front line CRef, +0x50 section id, +0x58/+0x60 start/end
-    // 0..100000), CArmyGroupCommand (0x80, a new army with its front: the same at +0x60/+0x68/+0x70/+0x78), COrderEditRootCommand
-    // (0x50: +0x28 group CRef, +0x30 the order's id). CFrontSection: +0x30 CProvince* of our side; COrder: +0x88 its pairs.
+    // Root front order commands:
+    //   COrderReplaceRootCommands (0x70): +0x48 front line CRef, +0x50 section id, +0x58/+0x60 start/end (0..100000)
+    //   CArmyGroupCommand (0x80, a new army with its front): the same at +0x60/+0x68/+0x70/+0x78
+    //   COrderEditRootCommand (0x50): +0x28 group CRef, +0x30 order id
+    // CFrontSection +0x30: our side's CProvince*; COrder +0x88: its province pairs.
     private static nint _replaceRootVTable, _editRootVTable, _armyGroupVTable;
     private const int ProvincesOfSection = 0x30, PairsOfOrder = 0x88, FullStretch = 100_000;
     private static int _frontOrdersDropped;
 
     /// <summary>
-    /// An AI front order drawn, redrawn or given a new army along a bystanders' border (<see cref="Bystanders"/>) or an ally's
-    /// line overseas is dropped before it exists: deleting it afterwards made it flicker, the general drawing it again hourly.
-    /// AI threads.
+    /// Drops an AI front order (drawn, redrawn or with a new army) along a bystanders' border (<see cref="Bystanders"/>) or an
+    /// ally's line overseas before it exists; deleting it later makes the general redraw it hourly. AI threads.
     /// </summary>
     private static bool KeepsFrontOrder(nint cmd, int tag)
     {
@@ -193,9 +190,8 @@ public unsafe partial class AiAssist
     private static int _headquartersAt, _headquartersPulled;
 
     /// <summary>
-    /// AI army HQs stay off the fronts (taken off once, never assigned again: <see cref="KeepsLine"/>) and step back when they
-    /// stand next to enemy ground: vanilla's battle plans sent them into the attack with the line, where they died. An HQ's
-    /// bonuses reach its army from behind the line. Main thread, every two game hours.
+    /// Every HeadquartersHours: AI army HQs are taken off their orders (never assigned again: <see cref="KeepsLine"/>) and step
+    /// back from enemy ground, so battle plans don't walk them into the attack. Main thread.
     /// </summary>
     private static void KeepHeadquarters()
     {
@@ -230,10 +226,10 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    /// <summary>The country's tracked threatened line (refreshed within the last two days) that it still holds, or null. AI threads too.</summary>
+    /// <summary>The country's tracked threatened line (seen within LineFreshHours) that it still holds, or null. Any thread.</summary>
     private static HashSet<nint>? LineOf(int tag, int hour)
     {
-        if (Game.Generation != _world) return null; // a load the reset hasn't caught up with (AI threads): no line, not a stale one
+        if (Game.Generation != _world) return null; // loaded, not reset yet: no line rather than a stale one
         HashSet<nint>? line = null;
         foreach (var e in Line)
             if (e.Value.Tag == tag && hour - e.Value.Hour is >= 0 and < LineFreshHours)
@@ -243,9 +239,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The country may start attacks: its divisions standing on the threatened line outnumber the line's provinces by a
-    /// margin, or no line is tracked. Attacking on a barely manned line widens it, the holes open, and the spearhead gets
-    /// cut off.
+    /// True if no line is tracked or the country (with allies) has ~1.2 divisions per threatened line province. Attacking from
+    /// a thinner line opens holes.
     /// </summary>
     private static bool Manned(int tag, HashSet<nint>? line)
     {
@@ -254,7 +249,7 @@ public unsafe partial class AiAssist
         var divisions = 0;
         foreach (var province in line)
             divisions += Standing(country, tag, province);
-        return line.Count * 6 <= divisions * 5; // ~1.2 divisions per threatened province
+        return line.Count * 6 <= divisions * 5;
     }
 
     /// <summary>Divisions of the tag or its allies standing in the province.</summary>
@@ -270,8 +265,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Our side's power (the tag's and its allies' divisions) within two provinces of <paramref name="from"/> is at least twice the
-    /// enemy's there: no resting, escaping or holding back of attacks on that ground.
+    /// Our side's land power within two provinces of <paramref name="from"/> is at least twice the enemy's. Such ground needs no
+    /// resting, escaping or holding back of attacks.
     /// </summary>
     private static bool Dominant(nint country, int tag, IEnumerable<nint> from)
     {
@@ -306,11 +301,11 @@ public unsafe partial class AiAssist
         return all;
     }
 
-    /// <summary>At most every <paramref name="hours"/> game hours (never while paused): true, and the time stamped.</summary>
+    /// <summary>True, and stamps the hour, once <paramref name="hours"/> game hours have passed since the last time.</summary>
     private static bool Due(ref int last, int hours)
     {
         var hour = Game.Hour;
-        if ((uint)(hour - last) < (uint)hours) return false; // a load to an earlier date runs at once
+        if ((uint)(hour - last) < (uint)hours) return false; // unsigned: after loading an earlier date it runs at once
         last = hour;
         return true;
     }
@@ -318,14 +313,13 @@ public unsafe partial class AiAssist
     private const int Never = -(1 << 30);
 
     /// <summary>
-    /// Every six game hours, per AI country: posts no longer behind the line are let go, new divisions go where they are needed,
-    /// free divisions walk back into the empty provinces of the threatened line (or the grad), the ones worth holding first,
-    /// running offensives on a thin line stop, and a country with divisions to spare keeps reserves and second-line posts.
+    /// Every BackfillHours, per AI country: releases stale posts, places new divisions, refills the holes of the threatened line
+    /// (or grad) with key ground first, stops offensives on a thin line, and posts reserves and a second line when it can spare them.
     /// </summary>
     private void Backfill()
     {
-        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _backfillAt, BackfillHours)) return; // menus, lobby, loading: no AI commands
-        _game.Check(); // a save loaded since the last reset: its caches point into the old world
+        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _backfillAt, BackfillHours)) return;
+        _game.Check(); // caches from before a load point into the old world
         var hour = Game.Hour;
         Expire(hour);
         var player = Game.ControlledTag;
@@ -337,12 +331,12 @@ public unsafe partial class AiAssist
             DropAreaDefence(country, tag);
             DropBystanderFronts(country, tag);
             var fresh = NewDivisions(country, tag); // every pass: one deployed in peace isn't new once war comes
-            var grad = _postures ? Posture(country, tag, hour) : null; // a much stronger enemy: its grad is the line
+            var grad = _postures ? Posture(country, tag, hour) : null; // facing a much stronger enemy, the grad is the line
             var line = grad != null ? Held(grad, tag) : LineOf(tag, hour);
             if (line == null || line.Count == 0)
             {
                 DominantSince.TryRemove(tag, out _);
-                continue; // no line seen lately: its posts stay while they still back one (PrunePosted)
+                continue; // no line lately: posts stay while they still back one (PrunePosted)
             }
             var dominant = grad == null && Dominant(country, tag, line);
             if (dominant) DominantSince[tag] = hour;
@@ -353,14 +347,14 @@ public unsafe partial class AiAssist
             foreach (var (province, key) in Holes(country, tag, grad, line).Select(p => (p, Key(country, tag, p))).OrderByDescending(h => h.Item2))
             {
                 if (sent == (grad != null ? MaxGradMoves : MaxBackfills)) break;
-                var important = grad != null || key >= KeyHole; // a port, a city on a river, the grad: worth walking further for
+                var important = grad != null || key >= KeyHole; // worth walking further for
                 var id = Game.Id(province);
                 var armies = grad == null ? Armies(tag, province, hour, fronts) : null;
                 var helper = Helper(tag, province, line, important ? KeyBackfillRadius : BackfillRadius, prefer: armies);
-                if (helper == 0) continue; // nothing free nearby: the attack gate keeps the front still instead
+                if (helper == 0) continue; // nothing free nearby: the attack gate holds the front instead
                 var done = grad != null ? Garrison(helper, id, tag, hour)
                     : armies != null && armies.Contains(Division.Group(helper)) ? Send(helper, id, hour, important ? KeyGapHours : GapHours) // its own front: it stays
-                    : Station(helper, id, tag, hour, important ? KeyGapHours : GapHours, PostKind.Helper); // another front's would walk it straight back
+                    : Station(helper, id, tag, hour, important ? KeyGapHours : GapHours, PostKind.Helper); // posted, else its front walks it back
                 if (!done) continue;
                 sent++;
                 Interlocked.Increment(ref _backfilled);
@@ -377,16 +371,15 @@ public unsafe partial class AiAssist
         ShareJobs();
     }
 
-    private const int AreaDefenceOrder = 5; // COrder type of an area defence (port and home garrison) battle plan
+    private const int AreaDefenceOrder = 5; // COrder type: area defence (port and home garrisons)
 
     /// <summary>
-    /// Against enemies that hold no port (<see cref="NoLandings"/>), the AI's area defence orders left over are deleted
-    /// (UpdateAreaDefense makes no new ones then): their armies walk divisions to ports far away (Italy's East African ones to
-    /// Kismayo, Libya, the Dodecanese), and divisions on an order are never collected for other fronts. Main thread.
+    /// Deletes leftover area defence orders when no enemy holds a port (<see cref="NoLandings"/>; UpdateAreaDefense makes no
+    /// new ones then). Their divisions would walk to far ports and are never collected for other fronts. Main thread.
     /// </summary>
     private static void DropAreaDefence(nint country, int tag)
     {
-        if (!NoLandings(country, tag)) return; // landings possible: the garrisons are only cut back (UnguardAreaDefence)
+        if (!NoLandings(country, tag)) return; // landings possible: garrisons are only cut back (UnguardAreaDefence)
         foreach (var group in OrdersGroup.OfCountry(country))
         foreach (var order in Native.PdxArray(group + OrdersGroup.RootOrdersOffset).ToArray())
         {
@@ -398,9 +391,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The tag's front orders along bystanders' borders (<see cref="Bystanders"/>: no country across that
-    /// it expects a war with) are deleted: their divisions go where a war is or may come, instead of facing Luxembourg, Belgium
-    /// or Switzerland. A target being prepared (focus, justification, war goal, war preparation) keeps its front.
+    /// Deletes the tag's front orders along bystanders' borders (<see cref="Bystanders"/>) or allies' lines overseas, so their
+    /// divisions go where a war is or may come. A target being prepared keeps its front.
     /// </summary>
     private static void DropBystanderFronts(nint country, int tag)
     {
@@ -413,8 +405,8 @@ public unsafe partial class AiAssist
                 if (order == 0 || Order.Type(order) != Order.Front) continue;
                 var members = Order.Members(order);
                 if (members.Length == 0) continue;
-                // The order's own line (its province pairs), as KeepsFrontOrder judged it when drawn: by where its divisions
-                // stood (still walking up, or past a neutral corner on the way) it was drawn and deleted again every day.
+                // Judge the order's own province pairs, as KeepsFrontOrder did; judging by where its divisions stand
+                // (still walking up) would delete and redraw it daily.
                 var across = new HashSet<nint>();
                 var standing = new List<nint>();
                 var pairs = *(nint*)(order + PairsOfOrder);
@@ -439,8 +431,8 @@ public unsafe partial class AiAssist
         line.Where(p => !Gap.ContainsKey(Game.Id(p)) && Standing(country, tag, p) < (grad?.Want.GetValueOrDefault(Game.Id(p), 1) ?? 1));
 
     /// <summary>
-    /// The armies (COrdersGroup) of the tag's divisions standing on the AI fronts this province is on, cached per front; null if it
-    /// is on none. Read through the provinces, never the front: a tracked front may have been freed since.
+    /// The armies (COrdersGroup) of the tag's divisions on the AI fronts this province is on, cached per front; null if on none.
+    /// Read through the provinces, never the front, which may have been freed since.
     /// </summary>
     private static HashSet<nint>? Armies(int tag, nint province, int hour, Dictionary<nint, HashSet<nint>> cache)
     {
@@ -464,7 +456,7 @@ public unsafe partial class AiAssist
         return groups;
     }
 
-    /// <summary>The tag's land divisions that weren't there at its last pass (just deployed, or come from elsewhere); none on its first pass in a game.</summary>
+    /// <summary>The tag's land divisions not seen at its last pass; none on the first pass.</summary>
     // ponytail: by pointer; a new division in a dead one's memory is missed (vanilla places it), read a creation date if that shows.
     private static List<nint> NewDivisions(nint country, int tag)
     {
@@ -479,9 +471,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// New divisions go where the country needs them most, not where vanilla's theatre share-out points: its grad's holes (on one), else
-    /// the empty provinces of its threatened line (key ground first), then the least held provinces of its most thinly held front until
-    /// that front is manned. Off their orders and pinned while they walk; whatever is left over is vanilla's.
+    /// Sends new divisions where they are needed most: the grad's holes, else the line's holes (key ground first), then the
+    /// most thinly held front until it is manned. Pinned while they walk; the rest are left to vanilla.
     /// </summary>
     // ponytail: first come, first sent, no distance; new divisions mostly stand together at the deployment province.
     private void Deploy(nint country, int tag, List<nint> fresh, Grad? grad, HashSet<nint> line, int hour)
@@ -493,7 +484,7 @@ public unsafe partial class AiAssist
             var unit = free.Dequeue();
             if (grad != null ? Garrison(unit, Game.Id(hole), tag, hour) : Dispatch(unit, Game.Id(hole), tag, hour)) Interlocked.Increment(ref _deployed);
         }
-        if (grad != null || free.Count == 0) return; // on a grad, the old line's fronts are given up
+        if (grad != null || free.Count == 0) return; // on a grad the old fronts are given up
         Dictionary<nint, int>? thinnest = null;
         foreach (var e in Line)
         {
@@ -503,7 +494,7 @@ public unsafe partial class AiAssist
         }
         if (thinnest == null) return;
         var divisions = thinnest.Values.Sum();
-        while (free.Count > 0 && thinnest.Count * 6 > divisions * 5) // ~1.2 divisions per threatened province, as Manned
+        while (free.Count > 0 && thinnest.Count * 6 > divisions * 5) // as Manned
         {
             var target = thinnest.MinBy(p => p.Value).Key;
             if (!Dispatch(free.Dequeue(), Game.Id(target), tag, hour)) continue;
@@ -513,10 +504,10 @@ public unsafe partial class AiAssist
         }
     }
 
-    /// <summary>A new division off its orders and to the province, pinned while it walks there (<see cref="Pinned"/>). Main thread.</summary>
+    /// <summary>Takes a new division off its orders and sends it to the province, pinned while it walks. Main thread.</summary>
     private static bool Dispatch(nint unit, int province, int tag, int hour)
     {
-        if (!Relocate(unit, province, hour, GapHours, remember: false)) return false; // new: its deployment front isn't home
+        if (!Relocate(unit, province, hour, GapHours, remember: false)) return false; // its deployment order isn't home
         FreshDivisions[unit] = (tag, hour);
         return true;
     }

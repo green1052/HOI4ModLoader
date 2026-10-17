@@ -4,28 +4,27 @@ namespace AiAssist;
 
 public partial class AiAssist
 {
-    // ---- Beach defence: landings are walled in and attacked at once, not after the front collapses ----
+    // ---- Beach defence: landings are walled in and attacked at once ----
 
     private const int BeachheadMax = 8, BeachheadRadius = 6, MaxLandingSends = 6, BeachDefenseHours = 3, LandedHours = 10 * 24;
-    private const long LandingHours = 72; // game hours a beachhead province or its wall isn't sent another
+    private const long LandingHours = 72; // game hours a beachhead or wall province gets no second division
 
-    private static int _provinceCount = -1; // probe result: the game has no province enumeration
-    // By province id, from the last controller scan: its controller then, the game hour it last changed hands, the hour it was taken
-    // from the sea (no neighbour held by the taker or its allies before, or next to its fresh landing). Written on the main
-    // thread (replaced whole on a resize or a load), read on AI threads too: readers take one reference.
+    private static int _provinceCount = -1; // last province id, from ProbeProvinces
+    // By province id, from the last controller scan: controller, hour it last changed hands, hour it was taken from the sea.
+    // Written on the main thread (replaced whole on resize or load), read on AI threads: readers take one reference.
     private static int[] _controllers = [], _changed = [], _landed = [];
     private static int _scanned = Never;
     private int _beachesAt = Never;
     private int _defended;
 
     /// <summary>
-    /// Every three game hours: for each landing on AI ground, the invaded country walls the beachhead in (a division into each of
-    /// its empty landward neighbours) and sends attackers into it. Free divisions near the beachhead only; the front is left to the AI.
+    /// Every three game hours: for each landing on AI ground, the invaded country puts a division in each empty landward
+    /// neighbour and attacks into the beachhead. Uses free divisions nearby only.
     /// </summary>
     private void DefendBeachheads()
     {
         if (!Game.HasStarted || !SheepMod.Active || !Due(ref _beachesAt, BeachDefenseHours)) return; // menus, lobby, loading: no AI commands
-        _game.Check(); // a save loaded since the last reset: its caches point into the old world
+        _game.Check(); // a save loaded since the last reset
         var hour = Game.Hour;
         TrackControllers(hour);
         var beachheads = Landings(hour);
@@ -36,12 +35,11 @@ public partial class AiAssist
         {
             var tag = country == 0 ? 0 : Game.Tag(country);
             if (tag <= 0 || tag == player) continue;
-            // An island or a quiet country being invaded has no land line yet; a grad's holders stay on the grad.
+            // An island may have no land line yet; a grad's holders stay on the grad.
             var line = (Grads.TryGetValue(tag, out var grad) ? Held(grad, tag) : LineOf(tag, hour)) ?? [];
             var sent = 0;
-            // With Hold the line, off their orders and posted, as its backfill does: a front's AI would walk them straight back. The
-            // wall is let go once no enemy is next to it, an attacker after the landing's hours; both back on their orders then.
-            // Without it nothing would let them go: only sent.
+            // With HoldTheLine they are posted, so the front AI can't walk them back; the post ends when no enemy is next to the
+            // wall, or after LandingHours for an attacker. Without it they are only sent.
             bool Wall(nint unit, int province) =>
                 _holdLine ? Station(unit, province, tag, hour, LandingHours, PostKind.Helper) : Send(unit, province, hour, LandingHours);
             bool Strike(nint unit, int province) =>
@@ -50,12 +48,12 @@ public partial class AiAssist
             {
                 var first = Game.Province(beachhead.First());
                 var holder = first == 0 ? 0 : Province.Controller(first);
-                if (holder == tag || !Game.AtWar(country, holder)) continue; // a friendly or neutral landing, not ours to answer
+                if (holder == tag || !Game.AtWar(country, holder)) continue; // not an enemy landing
                 foreach (var id in beachhead)
                 {
                     var p = Game.Province(id);
                     if (p == 0 || Province.Controller(p) != holder) continue;
-                    // Wall it in: an empty land neighbour of ours the landing could pour through gets a defender.
+                    // Wall it in: each empty land neighbour of ours gets a defender.
                     foreach (var n in Game.Neighbours(p))
                     {
                         var q = Game.Province(n);
@@ -64,7 +62,7 @@ public partial class AiAssist
                         if (helper == 0 || !Wall(helper, n)) continue;
                         if (++sent >= MaxLandingSends) goto nextCountry;
                     }
-                    // Crush it: attack into the beachhead itself; the move turns into combat on arrival.
+                    // Attack into the beachhead: the move turns into combat on arrival.
                     if (!Gap.ContainsKey(id) && Helper(tag, p, line, BeachheadRadius) is var attacker && attacker != 0 && Strike(attacker, id)
                         && ++sent >= MaxLandingSends) goto nextCountry;
                 }
@@ -75,11 +73,10 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// Beachheads, by holder: provinces taken from the sea in the last ten days and the ones next to them taken since (flood-filled),
-    /// and small enemy pockets on the coast with divisions in them whose land side touches a country at war with their holder (one
-    /// landing may spread over several provinces; capped: bigger is a home front, not a landing).
+    /// Beachheads, by holder: provinces taken from the sea in the last ten days plus neighbours taken since (flood-filled), and
+    /// small coastal pockets with divisions next to a country at war with their holder. Capped at BeachheadMax provinces.
     /// </summary>
-    // ponytail: same-holder components only — a mixed allied landing answers as several small beachheads, each handled fine.
+    // ponytail: same-holder components only — a mixed allied landing becomes several small beachheads, each handled fine.
     private static List<HashSet<int>> Landings(int hour)
     {
         var landings = new List<HashSet<int>>();
@@ -97,7 +94,6 @@ public partial class AiAssist
                 if (Province.Divisions(p) == 0 || !Coastal(p)) continue;
                 var holderCountry = Game.Country(holder);
                 if (holderCountry == 0) continue;
-                // A land neighbour held by a country at war with the holder.
                 var contested = Game.Neighbours(p).Any(n => Game.Province(n) is var q && q != 0
                     && Province.Controller(q) is var controller && controller != holder && Game.AtWar(holderCountry, controller));
                 if (!contested) continue;
@@ -112,15 +108,15 @@ public partial class AiAssist
                     if (Game.Province(n) is var q && q != 0 && Province.Controller(q) == holder && (!landed || Landed(n, hour)) && beachhead.Add(n)) next.Add(n);
                 frontier = next;
             }
-            foreach (var b in beachhead) seen.Add(b); // its home coast too: don't rescan it every pass
+            foreach (var b in beachhead) seen.Add(b); // also its home coast, so it isn't rescanned
             if (landed || beachhead.Count < BeachheadMax) landings.Add(beachhead);
         }
         return landings;
     }
 
     /// <summary>
-    /// Scans every province's controller (once a game hour at most): a change of hands is stamped, and a coastal one the taker had
-    /// barely any land link to (<see cref="FromSea"/>) counts as taken from the sea. Main thread.
+    /// Scans every province's controller, at most once a game hour: stamps changes of hands and landings (<see cref="FromSea"/>),
+    /// and records who holds naval bases. Main thread.
     /// </summary>
     private static void TrackControllers(int hour)
     {
@@ -161,7 +157,7 @@ public partial class AiAssist
         _homePorts = homePorts;
     }
 
-    /// <summary>Finds the last province id once (the game has no province enumeration): the run of valid ids, up to 512 misses in a row.</summary>
+    /// <summary>Finds the last province id once (the game has no province enumeration): stops after 512 missing ids in a row.</summary>
     private static void ProbeProvinces()
     {
         if (_provinceCount >= 0) return;
@@ -173,13 +169,12 @@ public partial class AiAssist
     /// <summary>Naval bases each country holds on its own core ground, from the last controller scan. Read by AI worker threads.</summary>
     private static volatile Dictionary<int, int> _homePorts = [];
 
-    /// <summary>Countries holding a naval base, from the last controller scan (null before it): the ones that can land troops. Read by AI worker threads.</summary>
+    /// <summary>Countries holding a naval base (can land troops), from the last controller scan; null before it. Read by AI worker threads.</summary>
     private static volatile HashSet<int>? _portHolders;
 
     /// <summary>
-    /// Whether <paramref name="p"/>, a coastal province just taken by <paramref name="taker"/>, came from the sea: at the last scan at most
-    /// one neighbour was held by it or its allies, not counting its own fresh landing (a landing next to its holdings has a short land
-    /// link to them; a push over land comes on a broader front).
+    /// Whether coastal <paramref name="p"/>, just taken by <paramref name="taker"/>, came from the sea: at the last scan at most one
+    /// neighbour (not counting its fresh landings) was held by it or its allies. A push over land comes on a broader front.
     /// </summary>
     private static bool FromSea(nint p, int taker, int[] before, int hour)
     {

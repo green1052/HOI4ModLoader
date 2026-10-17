@@ -6,7 +6,7 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Production lines: small factory cuts don't drain lines that have built up efficiency ----
+    // ---- Production lines: small factory cuts don't drain efficient lines ----
 
     private const int BestVariants = 208;                                          // CCountryProduction: best variant per archetype
     private const int DesiredFactories = 696;                                       // CAIInteriorMinister: int per archetype
@@ -20,7 +20,7 @@ public unsafe partial class AiAssist
     private static delegate* unmanaged<nint, long*, long*> _efficiency;
     private static delegate* unmanaged<nint, byte> _isNaval;
     private static int _stickyHours, _stuck;
-    // minister -> the game hour each archetype's cut was first held (0: none). Only that country's AI thread touches its array.
+    // minister -> hour each archetype's cut was first held (0: none). Only that country's AI thread touches its array.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int[]> HoldSince = new();
 
     private void LoadProductionLines(int days)
@@ -36,10 +36,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Vanilla cuts an equipment's factories off its last lines whatever their efficiency and spends them on other equipment,
-    /// where they start over at 10 %. A small cut off efficient lines is held for up to StickyDays (it is often undone soon);
-    /// the factories it would have freed come off the smallest increases instead (air or land alike: factories are fungible).
-    /// Big cuts, full stops and cuts vanilla still asks for after the hold go through. Ships are left alone.
+    /// Holds a small cut to efficient lines for up to StickyDays: moved factories restart at 10 % efficiency elsewhere. The
+    /// smallest increases elsewhere give up the factories instead. Big cuts, full stops and cuts still wanted after the hold
+    /// go through. Ships are left alone.
     /// </summary>
     private static void Stick(nint minister, nint lines, nint byArchetype)
     {
@@ -72,7 +71,7 @@ public unsafe partial class AiAssist
         for (var i = 0; i < n; i++)
         {
             var cut = current[i] - desired[i];
-            if (cut <= 0 || desired[i] <= 0 || active[i] == 0 // a full stop is a big change
+            if (cut <= 0 || desired[i] <= 0 || active[i] == 0 // full stop
                 || weighted[i] / active[i] < StickyEfficiency || cut > Math.Max(1, current[i] * StickyBand / 100))
             {
                 since[i] = 0;
@@ -81,7 +80,7 @@ public unsafe partial class AiAssist
             if (since[i] == 0 || hour < since[i]) since[i] = hour;
             else if (hour - since[i] >= _stickyHours)
             {
-                since[i] = 0; // vanilla kept asking: it meant it
+                since[i] = 0; // still wanted after the hold
                 continue;
             }
             desired[i] = current[i];
@@ -94,7 +93,7 @@ public unsafe partial class AiAssist
             var pick = -1;
             for (var i = 0; i < n; i++)
                 if (desired[i] > current[i] && (pick < 0 || desired[i] - current[i] < desired[pick] - current[pick]) && Military(best[i])) pick = i;
-            if (pick < 0) break; // nothing grows: the kept factories just stay where they are efficient
+            if (pick < 0) break; // nothing grows: the kept factories just stay
             var take = Math.Min(kept, desired[pick] - current[pick]);
             desired[pick] -= take;
             kept -= take;

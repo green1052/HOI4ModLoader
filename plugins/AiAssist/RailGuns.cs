@@ -8,14 +8,14 @@ public unsafe partial class AiAssist
 {
     // ---- Railway guns: the armies on a breakthrough axis get them first and keep them ----
     //
-    // The AI general shares the country's railway guns out hourly (0x14107E410): armies scored RAILWAY_GUN_ASSIGNMENT_SCORE_UNITCOUNT_MULTIPLIER
-    // x divisions, taken largest first, each up to divisions / (divisions per gun) clamped to [1, RAILWAY_GUN_PER_ARMY_CAP]; a gun moves
-    // from army B to A only when SCORE_HOLD + score(B) <= score(A). Its score loop is patched to add a bonus to the axis armies' score
-    // and division count (the sort key), read from a table this side keeps: the stub calls nothing.
+    // The AI general shares out railway guns hourly (0x14107E410): army score = UNITCOUNT_MULTIPLIER x divisions, largest
+    // first, each up to divisions / (divisions per gun) in [1, RAILWAY_GUN_PER_ARMY_CAP]; a gun moves from B to A only when
+    // SCORE_HOLD + score(B) <= score(A). A patch in its score loop adds a bonus to the score and division count (sort key) of
+    // armies in our table. The stub calls nothing.
 
     private const int GunArmySlots = 64;
-    private const long GunScoreBonus = 1000 * Native.FixedPoint; // the defines are fixed point: 10 per division, 20 to hold
-    private const int GunOrderBonus = 10_000;                    // divisions, for the order only (quotas read the army's own count)
+    private const long GunScoreBonus = 1000 * Native.FixedPoint; // fixed point, as the defines (10 per division, 20 to hold)
+    private const int GunOrderBonus = 10_000;                    // divisions, for the sort only (quotas read the real count)
 
     private static bool _railGuns;
     private static int _gunned;
@@ -29,8 +29,8 @@ public unsafe partial class AiAssist
     {
         var loop = Sig.Find(AiSignatures2.RailwayGunScore);
         _gunTable = (long*)NativeMemory.AllocZeroed((nuint)(8 * (GunArmySlots + 1))); // never freed: the stub may run any time
-        // Over `mov [r9+r8*8],rdx; mov rax,[r13+60h]; mov [rbp+1150h],rax` (15 bytes, whole instructions): the same, plus the bonus
-        // for an army in the table. rcx, rdx, r11 and the flags are dead there; rax is reloaded as the original does.
+        // Replaces `mov [r9+r8*8],rdx; mov rax,[r13+60h]; mov [rbp+1150h],rax` (15 bytes) with the same plus the bonus for an
+        // army in the table. rcx, rdx, r11 and the flags are dead there.
         Patches.Asm(loop + 0x5C, 15,
             "use64",
             "mov [r9+r8*8], rdx",
@@ -74,8 +74,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Records the general's axis armies and rewrites the table when they changed or an hour passed (dropping generals gone
-    /// quiet). Any AI thread; the stub may read the table meanwhile: one wrong bonus at worst.
+    /// Records the general's axis armies; rewrites the table when they changed or an hour passed, dropping generals gone quiet.
+    /// Any AI thread; a concurrent read by the stub gives one wrong bonus at worst.
     /// </summary>
     private static void PublishGunArmies(nint general, nint[] armies, int hour)
     {
@@ -98,7 +98,7 @@ public unsafe partial class AiAssist
         if (!same && armies.Length > 0) Interlocked.Increment(ref _gunned);
     }
 
-    /// <summary>For the per-game reset: no army of the old world keeps its bonus.</summary>
+    /// <summary>Per-game reset: clears every army's bonus.</summary>
     private static void ClearRailGuns()
     {
         GunArmies.Clear();

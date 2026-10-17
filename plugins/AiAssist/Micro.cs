@@ -4,30 +4,30 @@ namespace AiAssist;
 
 public partial class AiAssist
 {
-    // ---- Rotation, escape and the fire brigade: AI divisions come off their front to rest or before a salient is cut off, and
-    //      reserves counterattack break-ins (hold the line) ----
+    // ---- Hold the line's micro: worn divisions rest, divisions in a closing salient escape, reserves counterattack break-ins ----
 
     private const int WornOrg = 30, WornStrength = 50, RestedOrg = 90, RestedStrength = 80, MaxRestingPercent = 25; // %
     private const int MaxMoves = 2, RestDepth = 2, MaxRestSearch = 6, MaxNeckSearch = 8, MaxRestHours = 168, RestArea = 3;
-    private const int MicroHours = 2, CombatHours = 48; // the pass runs at most every two game hours; worn counts only after fighting in the last two days
+    private const int MicroHours = 2, CombatHours = 48; // pass interval; worn counts only after fighting within CombatHours
     private const int FireRadius = 3, MaxFireBrigades = 2, ReadyOrg = 70, ReadyStrength = 50, BreakInHours = 48;
 
-    // Divisions we took off their front to rest or escape, with their tag and since when: the theatre shuffle and army balancing
-    // leave them until rested, then they go back on their order. Never dereferenced unless still one of the tag's units.
+    // Divisions resting or escaping, with tag and start hour; left alone until rested, then back on their order.
+    // Dereferenced only while still one of the tag's units.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> Resting = new();
     private static readonly Dictionary<nint, int> Combat = []; // unit -> last game hour seen in combat (main thread; never dereferenced)
     private int _microAt = Never;
     private static int _rested, _escaped, _fireBrigade;
 
     /// <summary>
-    /// Every two game hours, per AI country: rested divisions go back on their orders, worn-out ones and ones in a closing salient
-    /// come off the line, ready reserves counterattack break-ins (hold the line); on a grad, fought-out spearheads are
-    /// counterattacked (defensive postures), else fresh divisions take empty enemy provinces (attack targets).
+    /// Every two game hours, per AI country:
+    /// - hold the line: rested divisions go back, losing attacks break off, reserves counterattack, worn or trapped divisions pull back;
+    /// - on a grad, fought-out spearheads are counterattacked (defensive postures);
+    /// - else fresh divisions take empty enemy provinces (attack targets).
     /// </summary>
     private void Micro()
     {
-        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _microAt, MicroHours)) return; // menus, lobby, loading: no AI commands
-        _game.Check(); // a save loaded since the last reset: its caches point into the old world
+        if (!Game.HasStarted || !SheepMod.Active || !Due(ref _microAt, MicroHours)) return;
+        _game.Check(); // drop a previous game's caches first
         var hour = Game.Hour;
         Expire(hour);
         if (_holdLine) TrackControllers(hour);
@@ -48,15 +48,15 @@ public partial class AiAssist
                     PullBack(country, tag, units, hour);
                 }
             }
-            if (Grads.TryGetValue(tag, out var grad)) CounterAttack(country, tag, grad, hour); // on its grad: no piecemeal taking back of given-up ground
+            if (Grads.TryGetValue(tag, out var grad)) CounterAttack(country, tag, grad, hour); // on a grad: no piecemeal retaking of given-up ground
             else if (_attackTargets && !MicroElsewhere) TakeEmpty(country, tag, units, hour);
         }
         ShareJobs();
     }
 
     /// <summary>
-    /// The tag's resting divisions that rested (or rested a week: short of equipment, they won't get better) go back on the order
-    /// we took them off; gone ones are dropped.
+    /// Resting divisions that recovered, or rested a week (short of equipment, they won't recover), go back on their order;
+    /// gone ones are dropped.
     /// </summary>
     private static void Release(int tag, nint[] units, int hour)
     {
@@ -71,9 +71,9 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// Divisions in a salient whose way back is closing under an enemy at least as strong, and divisions worn out by fighting next
-    /// to enemy divisions (while few enough of those around rest), come off their front to a province a few steps back, where
-    /// another of ours stays in theirs. Not where we outgun the enemy two to one.
+    /// Pulls back divisions in a closing salient (<see cref="Closing"/>) and divisions worn by fighting next to the enemy (while
+    /// <see cref="RestRoom"/>) to a safe province a few steps back. Another of ours must stay behind; not where we outgun the
+    /// enemy two to one.
     /// </summary>
     private void PullBack(nint country, int tag, nint[] units, int hour)
     {
@@ -105,7 +105,7 @@ public partial class AiAssist
         }
     }
 
-    /// <summary>Fewer than MaxRestingPercent of the tag's divisions within RestArea provinces of ours rest (one more counted).</summary>
+    /// <summary>Whether one more can rest: at most MaxRestingPercent of the tag's divisions within RestArea provinces rest.</summary>
     private static bool RestRoom(int tag, nint location)
     {
         int all = 0, resting = 0;
@@ -120,8 +120,8 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// Off its orders (on its front, the AI would walk it straight back) and to the rest province, left alone until rested
-    /// (<see cref="Release"/>). A resting post isn't one any more: another is posted. Main thread.
+    /// Takes the division off its orders (or the AI walks it straight back) and sends it to rest until <see cref="Release"/>.
+    /// It stops being a post. Main thread.
     /// </summary>
     private static bool Rest(nint unit, int province, int tag, int hour)
     {
@@ -136,9 +136,8 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// Going back from <paramref name="from"/> over our provinces, one ring (provinces at the same distance) is a single province
-    /// next to enemy divisions before reaching provinces away from the enemy (the neck of a closing pocket), and the enemy's power
-    /// next to the neck is at least ours inside (a thin coastal strip facing a weak enemy isn't a trap).
+    /// Whether <paramref name="from"/>'s way back is closing: walking back ring by ring over our provinces, a ring narrows to one
+    /// province next to enemy divisions (the neck) before safe ground, and the enemy's power at the neck is at least ours inside.
     /// </summary>
     // ponytail: rings, not a max-flow of disjoint paths; a wide salient with a one-province gap elsewhere is missed.
     private static bool Closing(nint me, int tag, nint from)
@@ -175,10 +174,7 @@ public partial class AiAssist
         return false;
     }
 
-    /// <summary>
-    /// A province of ours at least RestDepth steps back through our provinces, with no enemy-held neighbour and not on the
-    /// given-up side of a grad; -1 if none nearby.
-    /// </summary>
+    /// <summary>A province of ours at least RestDepth steps back, not next to the enemy nor given up by a grad; -1 if none nearby.</summary>
     // ponytail: looks at who holds provinces, not at enemy units inside ours (paratroopers, a breakthrough in progress).
     private static int RestProvince(nint me, int tag, nint from)
     {
@@ -204,9 +200,8 @@ public partial class AiAssist
     // ---- Fire brigade: posted reserves counterattack break-ins near them, then go back to their post ----
 
     /// <summary>
-    /// The tag's reserves and second-line divisions that are off their post (back from a counterattack, pushed off) walk back; ready
-    /// ones (organisation 70 %+, strength 50 %+) attack a break-in within FireRadius provinces with as many of them nearby as it takes.
-    /// The attackers are tracked (<see cref="BreakOff"/>) and keep their post. Main thread.
+    /// Reserves and second-line divisions off their post walk back. Ready ones (ReadyOrg, ReadyStrength) attack a break-in within
+    /// FireRadius provinces, as many as it takes; they keep their post and <see cref="BreakOff"/> tracks them. Main thread.
     /// </summary>
     private static void FireBrigade(nint country, int tag, nint[] units, int hour)
     {
@@ -237,7 +232,7 @@ public partial class AiAssist
             var province = target == 0 ? 0 : Game.Province(target);
             if (province == 0) continue;
             var defenders = Province.Enemy(country, tag, province) ? Province.Divisions(province) : Hostiles(country, province);
-            var need = Math.Max(1, defenders * (Province.FortLevel(province) / 2 + 1)); // vanilla's local attack test (as many as they are, more against forts); our mobile ones count double below
+            var need = Math.Max(1, defenders * (Province.FortLevel(province) / 2 + 1)); // vanilla's local attack test; mobile divisions count double below
             var team = new List<nint>();
             var power = 0;
             foreach (var p in Within([province], FireRadius, q => Province.Controller(q) == tag))
@@ -250,7 +245,7 @@ public partial class AiAssist
                     power += Division.Motorized(unit) ? 2 : 1;
                 }
             }
-            if (power < need) continue; // too strong for what is near: the line holds it
+            if (power < need) continue; // too strong for the reserves near: left to the line
             foreach (var unit in team)
                 if (Attack(unit, target, tag, hour))
                     Interlocked.Increment(ref _fireBrigade);
@@ -260,9 +255,9 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// A break-in at or next to our province <paramref name="p"/> nothing is sent at yet: enemy troops inside it, or an enemy-held
-    /// neighbour reaching into our side (at least two of our provinces around it and twice the enemy's) taken in the last two days,
-    /// landed on, or touching no enemy ground at all (paratroopers). Its id, or 0.
+    /// The id of a break-in at or next to our province <paramref name="p"/> with nothing sent at it yet, or 0: enemy troops inside
+    /// it, or an enemy-held neighbour reaching into our side (2+ of ours around it, twice the enemy's) that was taken in the last
+    /// BreakInHours, landed on, or touches no other enemy ground.
     /// </summary>
     private static int BreakIn(nint country, int tag, nint p, int hour)
     {

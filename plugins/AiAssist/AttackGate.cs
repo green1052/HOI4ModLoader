@@ -9,8 +9,8 @@ public unsafe partial class AiAssist
     // ---- Running offensives called off (a thin line, a trapped salient, a beaten attack) ----
 
     /// <summary>
-    /// Fronts of the tag whose threatened provinces aren't manned (as <see cref="Manned"/>): the armies standing on them call off their
-    /// running front offensives (the attack gate then holds new ones until manned). The AI's own execute command, posted forced.
+    /// Armies on a thinly manned threatened line (<see cref="Manned"/>) call off their running front offensives; the attack gate
+    /// holds new ones until it is manned. Posts the AI's own execute command, forced.
     /// </summary>
     private static void HoldOffensives(nint country, int tag, int hour)
     {
@@ -33,9 +33,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Running front offensives with a division in a salient whose way back is closing (<see cref="Closing"/>) are called off:
-    /// vanilla kept pushing single divisions deeper until the enemy cut the salient's neck (Japan around Guangzhou). Their
-    /// divisions then hold, and those inside pull out as worn ones do. The AI's own execute command, posted forced.
+    /// Calls off running front offensives with a division in a salient whose way back is closing (<see cref="Closing"/>), before
+    /// the enemy cuts its neck. Their divisions hold; those inside pull out as worn ones do. Posts the AI's execute command, forced.
     /// </summary>
     private static void StopTrappedOffensives(nint country, int tag)
     {
@@ -67,21 +66,20 @@ public unsafe partial class AiAssist
 
     private const int DefenderOfCombat = 0x30, DivisionsOfSide = 0x20, ReservesOfSide = 0x100, ProgressSlot = 25;
     private const int LosingProgressPercent = 40, HopelessProgressPercent = 25, OutnumberedPercent = 150, BeatenHours = 72, GroupOfOrder = 0x38;
-    // army -> hour its offensive was called off: by army, not order, as the general redraws its front order (a new one) at once
+    // army -> hour its offensive was called off; keyed by army because the general redraws the front order at once
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> Beaten = new();
     private static int _beatenStops;
 
     /// <summary>
-    /// Running front offensives losing more of their attacks than they win are called off, and don't start again for three
-    /// days (the army's: the general redraws the order at once): an attack is losing while the attacker holds under 25 % of the
-    /// battle, or under 40 % with the defenders, reserves counted, half again as many as the attackers next to it. Vanilla kept
-    /// feeding three divisions into five with seven in reserve.
+    /// Calls off running front offensives losing more attacks than they win; that army waits BeatenHours before attacking again.
+    /// An attack is losing under HopelessProgressPercent of the battle, or under LosingProgressPercent against
+    /// OutnumberedPercent defenders (reserves counted).
     /// </summary>
     private static void StopBeatenOffensives(nint country, int tag, int hour)
     {
         foreach (var (army, at) in Beaten) if (hour - at is < 0 or >= BeatenHours) Beaten.TryRemove(army, out _);
         var landCombat = Sig.VTable(LandCombat);
-        var losing = new HashSet<nint>();  // our attacks being lost: the battles' provinces
+        var losing = new HashSet<nint>();  // provinces of battles we attack and are losing
         var winning = new HashSet<nint>();
         foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState).ToArray())
         {
@@ -136,8 +134,8 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    // ---- The PostAICommand gate: an "attack on" is dropped while the country's threatened line is thinly manned (or it holds
-    //      a grad), a landing while its beach is crowded; the AI asks again every hour ----
+    // ---- PostAICommand gate: drops an "attack on" while the threatened line is thin or the country holds a grad, and a
+    //      landing while its beach is crowded. The AI asks again every hour. ----
 
     [Function(CallingConventions.Microsoft)] public delegate byte PostFn(nint cmd, nint tag);
 
@@ -147,8 +145,8 @@ public unsafe partial class AiAssist
     private static int _held;
 
     /// <summary>
-    /// The one PostAICommand hook (every AI command): the line's divisions kept on it (HoldTheLine), AI front orders on
-    /// bystanders' borders dropped, then the launch gate: invasions by their beach (StrategicInvasions), other attacks by the grad and the line (HoldTheLine).
+    /// The one PostAICommand hook, seeing every AI command. In order: keeps the line's divisions on it, drops front orders on
+    /// bystanders' borders and redeployments off a live line (HoldTheLine), then gates launches (<see cref="Ready"/>).
     /// </summary>
     private void LoadPostAiCommand()
     {
@@ -188,21 +186,19 @@ public unsafe partial class AiAssist
                 keep = true;
             }
             if (keep) return _post!.OriginalFunction(cmd, tag);
-            Commands.Free(cmd); // deleted, as the game does with an invalid command
+            Commands.Free(cmd); // as the game does with an invalid command
             return 0;
         });
     }
 
-    private const int UnitOfRedeployment = 0x38; // CStrategicRedeploymentCommand: the division's CRef (1.19.3, seen in game)
+    private const int UnitOfRedeployment = 0x38; // CStrategicRedeploymentCommand: the division's CRef
     private static nint _redeployVTable;
 
-    private const int RedeployEnemyRadius = 2; // enemy divisions this close (provinces) make the line a live one
+    private const int RedeployEnemyRadius = 2; // provinces: enemy divisions this close make a line live
 
     /// <summary>
-    /// A strategic redeployment (to another front: walking to a port, shipping out) of a division on the line or right behind
-    /// it (a province next to enemy ground, or next to one) while enemy divisions stand within RedeployEnemyRadius: vanilla
-    /// re-tasks whole armies so and empties a live front (Italy's Somali line, Ethiopia across it). Quiet fronts may still
-    /// give theirs. AI threads: read only.
+    /// True for a strategic redeployment of a division on the line or one province behind it while enemy divisions stand within
+    /// RedeployEnemyRadius: vanilla would empty a live front this way. Quiet fronts may still give divisions. AI threads, read only.
     /// </summary>
     private static bool Redeploys(nint cmd)
     {
@@ -234,32 +230,30 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Whether an "attack on" may go ahead: it runs already, a paradrop, an invasion whose beach isn't crowded (StrategicInvasions),
-    /// or the country holds no grad (DefensivePostures) and its threatened line is manned or outguns the enemy two to one
-    /// (HoldTheLine). Read only: AI threads.
+    /// Whether an "attack on" may go ahead: it already runs, is a paradrop or an invasion whose beach isn't crowded, or the country
+    /// holds no grad and its threatened line is manned or twice the enemy (then <see cref="TimeToAttack"/>). AI threads, read only.
     /// </summary>
     private static bool Ready(nint cmd, nint tag)
     {
         var group = Game.Resolve(*(long*)(cmd + Commands.GroupOfOrderCommand));
         if (group == 0) return true;
         var id = *(int*)(cmd + Commands.OrderOfOrderCommand);
-        // CAIOperation::UpdateExecution launches an invasion for the whole group: order id 0 (`xor r8d,r8d` at 0x141A4D9C2).
+        // CAIOperation::UpdateExecution launches an invasion for the whole group with order id 0.
         var order = id != 0 ? _findOrder(group, id) : Unlaunched(group);
         if (id != 0 && (order == 0 || Order.Executing(order))) return true; // running
         if (order != 0 && Order.Type(order) is Order.Invasion or Order.Paradrop) // at sea: the home line has no say
             return Order.Type(order) != Order.Invasion || !_strategicInvasions || BeachClear(group, order, *(int*)tag);
-        if (Grads.ContainsKey(*(int*)tag)) return false; // on its grad (DefensivePostures): no offensives until strong enough again
+        if (Grads.ContainsKey(*(int*)tag)) return false; // holds a grad (DefensivePostures)
         if (!_holdLine) return true;
         var hour = Game.Hour;
         if (DominantSince.TryGetValue(*(int*)tag, out var seen) && hour - seen is >= 0 and < 2 * BackfillHours) return true; // twice the enemy's power on its line
-        if (!Manned(*(int*)tag, LineOf(*(int*)tag, hour))) return false; // a thin line doesn't advance: attacking widens it, the holes get the spearhead cut off
+        if (!Manned(*(int*)tag, LineOf(*(int*)tag, hour))) return false; // attacking would widen a thin line
         return !_timing || order == 0 || TimeToAttack(order, *(int*)tag, hour);
     }
 
     private const int MinAttackOrg = 60, MaxGatheringPercent = 30, MaxEnemyAirPercent = 70;
     private const int RegionOfProvince = 0xC8; // CProvince -> its strategic region
-    // The weather manager (gamestate+0x688): province records of 0x180 bytes by province id at +0x10, the mud flag at +0x130
-    // (the set_mud console command 0x140284FC0 sets it).
+    // Weather manager (gamestate+0x688): 0x180-byte province records by id at +0x10; mud flag at +0x130 (set by set_mud).
     private const int WeatherOfGameState = 0x688, ProvincesOfWeather = 0x10, WeatherRecordSize = 0x180, MudOfWeather = 0x130;
 
     /// <summary>Most of the order's divisions stand in muddy provinces. AI threads, read only.</summary>
@@ -271,13 +265,13 @@ public unsafe partial class AiAssist
         var muddy = 0;
         foreach (var member in members)
             if (Division.Location(member - MemberOfUnit) is var at && at != 0 && Game.Id(at) is var id && id > 0 && (_provinceCount <= 0 || id <= _provinceCount)
-                && *(byte*)(records + (nint)id * WeatherRecordSize + MudOfWeather) != 0) muddy++; // ids past the map's last: no record
+                && *(byte*)(records + (nint)id * WeatherRecordSize + MudOfWeather) != 0) muddy++; // ids past the map have no record
         return muddy * 2 > members.Length;
     }
 
     /// <summary>
-    /// The enemy's share (%) of air superiority over most of the order's divisions, when over MaxEnemyAirPercent; 0 otherwise
-    /// (or with no air war there). From the country's strategic air records (as AirRetreat reads them). AI threads.
+    /// The enemy's average air superiority share (%) over the order's divisions, when it is over MaxEnemyAirPercent above most
+    /// of them; 0 otherwise. Read from the country's strategic air records. AI threads.
     /// </summary>
     private static int EnemyAirOver(ReadOnlySpan<nint> members, int tag)
     {
@@ -305,10 +299,9 @@ public unsafe partial class AiAssist
     private const int MinFortLevel = 3, FortAttackRatioPercent = 200;
 
     /// <summary>
-    /// Why the order's divisions shouldn't attack yet: half or more of the enemy provinces next to them have forts of level
-    /// MinFortLevel or more, and their power is under twice the enemy divisions' there; null otherwise. Vanilla attacked the
-    /// Maginot line with Germany's western armies, wore them out on its forts, and France then walked into Germany. Power
-    /// counts strength and organisation, not quality, so open ground is left to vanilla (Japan beats China's numbers). AI threads.
+    /// Why the order's divisions shouldn't attack yet: half or more of the enemy provinces ahead have forts of MinFortLevel+
+    /// and the divisions have under FortAttackRatioPercent of the defenders' power; null otherwise. Only fortified lines are
+    /// checked, since power ignores division quality. AI threads.
     /// </summary>
     private static string? Outgunned(ReadOnlySpan<nint> members, int tag)
     {
@@ -343,10 +336,10 @@ public unsafe partial class AiAssist
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> WaitedAt = new(); // order -> hour last logged
 
     /// <summary>
-    /// Offensive timing: a battle plan starts once its divisions are ready, not while they still recover their organisation
-    /// (under MinAttackOrg % on average), walk up to the line (over MaxGatheringPercent % of them on the move), fight under an
-    /// enemy sky, stand in mud, face a fortified line they don't outgun two to one, stand in a salient whose way back closes,
-    /// or had their attacks beaten back in the last three days. AI threads.
+    /// Offensive timing: a battle plan starts once its divisions are ready. It waits while they average under MinAttackOrg %
+    /// organisation, over MaxGatheringPercent % are on the move, the enemy holds the sky, most stand in mud, a fortified line
+    /// ahead isn't outgunned, the battle odds say it loses, one stands in a closing salient, or its attacks were beaten back
+    /// in the last BeatenHours. AI threads.
     /// </summary>
     private static bool TimeToAttack(nint order, int tag, int hour)
     {
@@ -373,7 +366,7 @@ public unsafe partial class AiAssist
         Interlocked.Increment(ref _waited);
         if (!WaitedAt.TryGetValue(order, out var last) || hour - last is < 0 or >= 24)
         {
-            foreach (var (o, at) in WaitedAt) if (hour - at is < 0 or >= 48) WaitedAt.TryRemove(o, out _); // orders come and go
+            foreach (var (o, at) in WaitedAt) if (hour - at is < 0 or >= 48) WaitedAt.TryRemove(o, out _);
             WaitedAt[order] = hour;
             _log?.Debug($"#{tag}: holds an offensive of {members.Length} division(s): {why}");
         }

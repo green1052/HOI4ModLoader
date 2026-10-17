@@ -4,23 +4,22 @@ namespace AiAssist;
 
 public partial class AiAssist
 {
-    // ---- Pincers and feints: a second axis around a massed enemy, and a feint elsewhere before a new main push ----
+    // ---- Pincers and feints: two arms around a massed enemy; a feint elsewhere before a new push ----
 
     private const int PincerHead = -2;                             // Axes.Head of a pincer's first arm
-    private const int MinCluster = 3, PincerNear = 2, PincerFar = 5; // enemy divisions massed; how far (line provinces) the arms are from them
+    private const int MinCluster = 3, PincerNear = 2, PincerFar = 5; // divisions to count as massed; arms' distance from the mass (line provinces)
     private const int FeintHours = 36, FeintDistance = 5;
 
     private static bool _pincers, _feints;
     private static int _pincered, _feinted;
 
-    // general -> the pincer's second arm (its Core is an axis core like Axes'); general -> the feint before its axis' push.
+    // general -> the pincer's second arm (Core as in Axes); general -> the feint before its push.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, HashSet<int> Core, int Anchor)> SecondArms = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Until, HashSet<int> Core, int Anchor)> Feints = new();
 
     /// <summary>
-    /// The enemy line's mass (a province with at least MinCluster divisions and twice the line's average) and the thinnest
-    /// enemy line province on each side of it, PincerNear..PincerFar line provinces away: the two arms close behind it.
-    /// Sides are told apart by the first step along the enemy line out of the mass. Null if there is none.
+    /// The enemy line's mass (MinCluster+ divisions and twice the line's average) and the thinnest enemy line province on
+    /// each side of it, PincerNear..PincerFar away. A side is the first step out of the mass along the line. Null if none.
     /// </summary>
     private static (int A, int B, int Mass, int Enemies)? Pincer(HashSet<nint> enemyLine)
     {
@@ -28,7 +27,7 @@ public partial class AiAssist
         var mass = enemyLine.MaxBy(Province.Divisions);
         var enemies = Province.Divisions(mass);
         if (enemies < MinCluster || enemies * enemyLine.Count < 2 * enemyLine.Sum(Province.Divisions)) return null;
-        // Along the enemy line from the mass: each province's distance and the side (first step) it was reached by.
+        // Along the enemy line from the mass: each province's distance and side.
         var side = new Dictionary<nint, (int Depth, nint Side)> { [mass] = (0, 0) };
         var frontier = new List<nint> { mass };
         for (var depth = 1; depth <= PincerFar && frontier.Count > 0; depth++)
@@ -50,8 +49,8 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// A new push at <paramref name="anchor"/>: first a feint, FeintHours long, at the enemy line province at least
-    /// FeintDistance from it with the most divisions to tie down (their reserves move there); the push waits meanwhile.
+    /// Before a push at <paramref name="anchor"/>: a FeintHours feint at the enemy line province with the most divisions at
+    /// least FeintDistance away, to draw reserves there. The push waits meanwhile.
     /// </summary>
     private static void StartFeint(nint general, int tag, int anchor, HashSet<nint> enemyLine, int hour)
     {
@@ -73,7 +72,7 @@ public partial class AiAssist
     private static HashSet<int>? FeintCore(nint general, int tag, int hour) =>
         Feints.TryGetValue(general, out var f) && f.Tag == tag && hour - f.Until < 0 ? f.Core : null;
 
-    /// <summary>The general's pincer second arm of today, or null.</summary>
+    /// <summary>The general's current pincer second arm, or null.</summary>
     private static HashSet<int>? SecondCore(nint general, int tag, int hour) =>
         SecondArms.TryGetValue(general, out var s) && s.Tag == tag && hour - s.Hour is >= 0 and < AxisFreshHours ? s.Core : null;
 }

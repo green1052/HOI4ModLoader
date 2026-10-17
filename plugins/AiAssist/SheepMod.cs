@@ -3,9 +3,8 @@ using System.Runtime.InteropServices;
 namespace AiAssist;
 
 /// <summary>
-/// Sheep Mod (Sheep of Latrobe's mod, the "Discord mod"), which this plugin is an add-on for: found by its defines file
-/// in the game's virtual file system (PhysFS, which hoi4.exe exports). Mods are mounted after the plugins load, so this is
-/// asked once a game runs (the first AI update), not in Load.
+/// Detects Sheep Mod (the "Discord mod") by its defines file in the game's virtual file system (PhysFS, exported by hoi4.exe).
+/// Mods mount after plugins load, so this is asked on the first AI update, not in Load.
 /// </summary>
 internal static unsafe class SheepMod
 {

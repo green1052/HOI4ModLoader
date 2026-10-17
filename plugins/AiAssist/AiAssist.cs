@@ -3,43 +3,13 @@ using HOI4ModLoader;
 namespace AiAssist;
 
 /// <summary>
-/// An add-on for Sheep Mod (the "Discord mod") that fixes vanilla AI logic its scripts can't reach, without bonuses.
-/// Only works where Sheep Mod is in the game; single player (it changes how AI countries play).
-/// - Hold the line: at war, every front province keeps a defender (front requests, regrouping and army balancing can't
-///   take it), holes are refilled from nearby (key ground first, the same front's divisions first), reserves stand a province
-///   behind and counterattack break-ins (fire brigade), key line provinces get a second line, freshly arrived divisions stay a
-///   week, divisions worn by fighting rest behind the line and divisions in a closing salient pull out (both go back on their own
-///   order once rested), and no "attack on" starts, and running front offensives stop, while the threatened line is thinly
-///   manned (unless the AI outguns the enemy there two to one). New divisions go to the grad's or the line's holes, then the most
-///   thinly held front, first. Its passes run on game time.
-/// - Beach defence: landings (ground taken from the sea in the last ten days) are walled in and attacked at once.
-/// - Breakthrough axis: local attacks (and close air support) keep to the AI's own armoured spearhead while it attacks, moving on
-///   with it, else to the theatre's thinnest enemy sector for three days; off the axis only pinning attacks on enemy stacks next to
-///   it. Enemy salients are cut at their neck first (encirclement), a massed enemy gets two arms (pincers), a new push a feint first.
-/// - Defensive postures: facing a much stronger enemy, a country gives up exposed ground for its grad (a minimum cut through its
-///   provinces: rivers, rough ground, forts, few attack directions), holds it, and counterattacks only fought-out spearheads.
-/// - Strategic invasions: naval invasions pick thinly held, valuable beaches and wait (a week at most) while their beach is crowded;
-///   fighters and naval bombers cover the sea regions on a planned landing's route.
-/// - Attack targets: local attacks pick pocket-closing, then valuable, then front-shortening targets instead of at random
-///   (Sheep's pocket test in script is never read); next to a pocket of our own, the target that opens a corridor to it
-///   comes first (and breakouts from inside); fresh divisions take empty enemy provinces next to the line.
-/// - Armor terrain, supply-aware attacks: local attacks skip targets that cripple armor or that supply can't follow.
-/// - Air retreat: regions the AI is losing the air war in get fewer planes.
-/// - Bombing targets: strategic bombers ask for more planes for the enemy regions next to the land front, less (and a lower
-///   score) for ones far behind it.
-/// - Air training: green wings train (the training mission) instead of flying where nothing happens, half the air force at most.
-/// - Production lines: small factory cuts on efficiently running production lines are held for a while (vanilla restarts the
-///   freed factories elsewhere at 10 % efficiency).
-/// - Refit priority: front-line divisions get reinforcements and upgrades first (until they are 75 % full).
-/// - Offensive timing, battle odds: a battle plan's offensive waits until its divisions are ready and the game's combat sums say
-///   it wins; running offensives losing most of their attacks are called off, and losing local attacks broken off.
-/// - Exploitation: fresh mobile divisions drive through gaps in the enemy line to what is worth taking behind it.
-/// - No fronts on bystanders' borders or allies' lines overseas; stable leaders; idle armies and fleets train; task forces
-///   bombard coastal battles.
-/// - Railway guns: the armies on the breakthrough axis get the railway guns first and keep them.
-/// - Supply hubs: the railway from the hub feeding starving AI divisions to the capital is upgraded, and (late, rich countries)
-///   a new hub goes where they starve with none near (vanilla only upgrades and links hubs).
-/// - Ground crews: spare command power goes to More Ground Crews in the regions where the AI's wings fight hardest (vanilla's AI never uses it).
+/// Add-on for Sheep Mod: fixes vanilla AI logic its scripts can't reach, with no bonuses. Does nothing without Sheep Mod;
+/// single player only (it changes how AI countries play). Each feature has its own setting:
+/// - Fronts: hold the line, beach defence, defensive postures (grads), refit priority.
+/// - Attacks: breakthrough axis, encirclement, pincers, feints, attack targets, armor terrain, supply-aware attacks,
+///   offensive timing, breaking off losing attacks, exploitation.
+/// - Air and navy: air retreat, bombing targets, air training, ground crews, strategic invasions, naval training, shore bombardment.
+/// - Other: army training, stable leaders, production lines, railway guns, supply hubs.
 /// </summary>
 [Plugin(Id, "AI Assist", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
@@ -51,114 +21,68 @@ public unsafe partial class AiAssist : Plugin
     public override void Load()
     {
         var refit = Config.Bind("AI", "RefitPriority", true,
-            "Reinforcements and new equipment go to the AI's front-line divisions (in combat or next to enemy-held ground) before its rear and garrison divisions.");
+            "Reinforcements and new equipment go to front-line divisions (in combat or next to enemy ground) first.");
         _holdLine = Config.Bind("AI", "HoldTheLine", true,
-            "At war, a front whose line gets under 80 % of the supply it needs asks for no more divisions than stand on it; the AI keeps a division in every province of a front that borders the enemy, and on the front at least as many divisions as the enemy has across it (other fronts can't take them); its regrouping can't take the last defender of a province next to enemy ground (nor one of no more than the enemy divisions next to it), the divisions walling in a pocket, "
-            + "a reserve or a division that arrived this week, and no division on or right behind a line with enemy divisions near is strategically redeployed to another front. Free divisions walk back into empty line provinces (ports, victory points, river banks, cities and mountains first), "
-            + "the same front's divisions first (one from another front is held there). A country with divisions to spare keeps reserves a province behind its line and a second division behind key line provinces; "
-            + "ready reserves counterattack break-ins near them (enemy troops inside, ground lost in the last two days, a landing) and go back to their post. "
-            + "One short of divisions for its line doesn't start attacks and stops the running offensives of its thinly held fronts, unless it outguns the enemy there two to one. "
-            + "Divisions worn out by fighting rest behind the line (a quarter of those around at most), and divisions in a salient whose way back is closing under an enemy at least as strong pull out, where another of ours holds their province; "
-            + "neither where the AI outguns the enemy two to one. Rested divisions, and reserves the line moved away from, go back on their own order. "
-            + "Newly deployed divisions go where they are needed most first: the grad's holes (DefensivePostures), else empty line provinces, then the most thinly held front. "
-            + "Against enemies that hold no port (so can't land), the AI keeps no coast and home garrisons: those divisions stay on the land front. For a month after its line was short and while a war on its home land border is on or coming (a justification, war goal, focus or war preparation either way), they keep a division per home port (its naval bases on core ground), as before a land war; at war on a land line (its own or an ally's homeland), they take a tenth to a third; from 1939 to 1942 these grow (35 % to half; 35 % at least before a land war). "
-            + "A front already twice the enemy keeps one per province, so its spare divisions can go where the line is short. Offensives that lose most of their attacks, or push a division into a salient "
-            + "whose way back closes, are called off; army HQs stay off the fronts.");
+            "At war, every province facing the enemy keeps a division, holes are refilled, spare divisions counterattack break-ins, worn-out ones rest. "
+            + "Short of divisions, the AI starts no attacks.");
         _beachDefense = Config.Bind("AI", "BeachDefense", true,
-            "Naval landings are answered at once: free divisions near the beachhead (ground the enemy took from the sea in the last ten days, or a small enemy pocket on the coast) wall it in and attack into it; "
-            + "vanilla leaves it alone until the front collapses.");
+            "Free divisions near a beachhead (ground the enemy took from the sea in the last 10 days) wall it in and attack it at once.");
         _axis = Config.Bind("AI", "BreakthroughAxis", true,
-            "The AI's local attacks keep to a breakthrough axis: while the AI's own armoured spearhead (the game's force concentration) attacks, where its path crosses the enemy line, moving forward with it; "
-            + "otherwise the theatre's thinnest enemy sector (few divisions, no forts, open terrain), held three days and moved on only once taken. Off the axis, only attacks that pin enemy divisions next to it (they can't shift into the breakthrough while under attack). "
-            + "Its close air support backs battles on the axis first.");
+            "Local attacks and close air support keep to one axis: the armoured spearhead, else the theatre's thinnest enemy sector.");
         _exploit = Config.Bind("AI", "Exploitation", true,
-            "Through a gap in the enemy line (empty enemy ground no enemy division covers), fresh mobile divisions of the AI drive up to four provinces deep "
-            + "to the most valuable province there (a capital, victory points, a supply hub, airfields), off their battle plan for a week; two at most per target, four per country every three hours. "
-            + "Vanilla only takes the next province, so an empty capital behind a broken line stays untaken. Needs HoldTheLine.");
+            "Fresh mobile divisions drive up to 4 provinces through gaps in the enemy line to a valuable target. Needs HoldTheLine.");
         _pincers = Config.Bind("AI", "Pincers", true,
-            "Needs BreakthroughAxis. Where the enemy masses divisions on the line (3+ in a province, twice the line's average), the AI's axis becomes two arms: "
-            + "the thinnest enemy sector on each side of the mass, 2-5 line provinces away, so the attacks close behind it; kept three days while both arms' targets are still the enemy's.") && _axis;
+            "Where the enemy masses divisions, the axis splits into two arms that close behind them. Needs BreakthroughAxis.") && _axis;
         _feints = Config.Bind("AI", "Feints", true,
-            "Needs BreakthroughAxis. Before a new main push (a thin sector or a pincer), the AI's local attacks first hit, for a day and a half, the enemy line province with the most divisions "
-            + "at least five provinces away, so its reserves move there; the push waits meanwhile.") && _axis;
+            "Before a new main push, the AI attacks a crowded enemy province 5+ provinces away for 36 hours. Needs BreakthroughAxis.") && _axis;
         _timing = Config.Bind("AI", "OffensiveTiming", true,
-            "Needs HoldTheLine. The AI starts a battle plan's offensive only once its divisions are ready: not while they average under 60% organisation, "
-            + "nor while over 30% of them are still on their way to the line, nor while the enemy holds over 70% of the air over most of them, nor while most of them stand in mud; "
-            + "nor while the line ahead is fortified (half its provinces at fort level 3+) and they don't outgun it two to one, nor while one of them stands in a salient whose way back is closing, "
-            + "nor for three days after an offensive of that army lost most of its attacks, nor while the game's own combat sums (battle odds) say it loses more of its attacks than it wins.") && _holdLine;
+            "A battle plan's offensive waits until its divisions are ready and the battle odds favour it. Needs HoldTheLine.") && _holdLine;
         _attackTargets = Config.Bind("AI", "AttackTargets", true,
-            "The AI's local attacks pick their target instead of at random: provinces that cut off enemy divisions first, then valuable ones (victory points, capitals, supply hubs, airfields, resources, "
-            + "empty or worn-out defences; dug-in defenders count against), then ones that shorten the front. Next to a pocket of its own divisions, the province that opens a corridor to it "
-            + "comes first (also breakouts from inside), ahead of pocket closing when at least as many of its divisions are trapped as the attack would cut off. "
-            + "Fresh divisions also take empty enemy provinces next to the line, where another of ours stays.");
+            "Local attacks pick pocket-closing, then valuable, then front-shortening targets instead of random ones.");
         _armorTerrain = Config.Bind("AI", "ArmorTerrain", true,
-            "Armored and motorized divisions don't make local attacks into terrain that cripples them (forest, hills, marsh...) or across a river into mountains, marsh, jungle or cities.");
+            "Armored and motorized divisions make no local attacks into terrain that cripples them.");
         _airRetreat = Config.Bind("AI", "AirRetreat", true,
-            "The AI pulls its planes out of regions where it is losing the air war badly (low air superiority, heavy losses, few kills) and uses them where it can win.");
+            "The AI pulls planes out of regions where it is losing the air war badly.");
         _bombingTargets = Config.Bind("AI", "BombingTargets", true,
-            "The AI's strategic bombers go for the enemy regions next to its land front first (the factories, supply hubs and airfields feeding the battle): they ask for twice the planes there, "
-            + "while regions far behind the front get half the planes and a lower priority.");
+            "Strategic bombers get twice the planes for enemy regions next to the land front, half for those far behind it.");
         var airTraining = Config.Bind("AI", "AirTraining", true,
-            "The AI trains its green air wings (under the second experience level) on the training mission instead of flying them where nothing happens: at peace any wing it would send on a mission, "
-            + "at war fighters it would send to patrol a land region no enemy plane flies in; wings with no mission at all train too (daily, at war as well), carrier wings never. "
-            + "At most half of a country's wings train at once; trained ones go back to the AI's missions. A wing isn't flown back to the base it left this week (vanilla flipped wings between two bases daily).");
+            "Green air wings train instead of flying where nothing happens; half the wings at most.");
         var armyTraining = Config.Bind("AI", "ArmyTraining", true,
-            "AI armies with nothing to do train their divisions up to regular: at peace any army, at war armies holding no front (garrisons, reserves), "
-            + "while none of their divisions fights, stands next to enemy ground or is under 70 % strength; none while the AI expects a war (a war preparation strategy, a focus aimed either way). "
-            + "Vanilla stops every exercise once a war starts and never trains armies on no front.");
+            "Idle AI armies (at war: those holding no front) train their divisions up to regular.");
         var navalTraining = Config.Bind("AI", "NavalTraining", true,
-            "At peace, AI task forces no naval objective takes train until their ships are regulars, instead of waiting in port (vanilla stops training once world tension passes 50 %); "
-            + "none while the AI expects a war.");
+            "At peace, idle AI task forces train until their ships are regulars instead of waiting in port.");
         var shoreBombardment = Config.Bind("AI", "ShoreBombardment", true,
-            "At war, AI task forces with guns or carriers go to the sea next to the country's coastal land battles and hold there, where their shore bombardment (or the carriers' wings) "
-            + "weakens the enemy divisions. Taken before the naval AI's objectives do, off patrol, strike force, hold or training (never invasion support, convoys, raiding or mines): one per battle no other covers, "
-            + "within 6 sea provinces; a week at the battle, up to two weeks waiting at sea for the next, halved (4+ ships) when a second battle has none. Vanilla keeps them on its objectives or sends them to port.");
+            "At war, AI task forces with guns or carriers hold the sea next to coastal land battles and bombard them.");
         _breakOff = Config.Bind("AI", "BreakOffLosingAttacks", true,
-            "An AI attack the attacker is losing (under 40 % of the battle against half again as many defenders, or under 25 %) is broken off and that province isn't attacked again for three days, "
-            + "unless it closes a pocket, opens the way to a pocket of the AI's own or is a feint drawing the enemy's reserves; divisions another plugin runs (breakouts, pinning attacks, operations) are left alone. "
-            + "Vanilla fights such battles to the last organisation point.");
+            "Losing AI attacks are broken off, and the province isn't attacked again for 3 days.");
         var stableLeaders = Config.Bind("AI", "StableLeaders", true,
-            "The AI doesn't take a general or field marshal from an army or army group he commands: vanilla's daily leader choice took them from each other's groups "
-            + "and back again (a group left without a leader took the next best, even one leading elsewhere), so every army changed its leader every day or two.");
+            "The AI doesn't take a general or field marshal from an army or army group he commands.");
         var productionLines = Config.Bind("AI", "ProductionLines", true,
-            "The AI keeps factories on production lines that have built up efficiency: a small cut (up to a quarter) to equipment whose lines average 35 %+ efficiency is held for a while "
-            + "and the factories come off the smallest increases elsewhere; vanilla moves them to other equipment, where they start over at 10 %. Big cuts and full stops go through.");
+            "Small factory cuts to production lines with 35 %+ efficiency are held off for StickyDays.");
         var stickyDays = Math.Clamp(Config.Bind("AI", "StickyDays", 30,
-            "Days a small cut to an efficient production line is held; if the AI still wants it after that, it goes through."), 1, 365);
+            "Days a small cut to an efficient production line is held off (1-365)."), 1, 365);
         _supplyAware = Config.Bind("AI", "SupplyAwareAttacks", true,
-            "The AI's local attacks skip provinces its divisions couldn't be supplied in once taken: supply only flows through provinces of ours or our allies, and the attack's own province gets too little while no other of ours next to the target has some to spare. Pocket-closing targets and the corridor to a pocket of ours are still taken.");
+            "Local attacks skip provinces that couldn't be supplied once taken.");
         _supplyShare = Math.Clamp(Config.Bind("AI", "SupplyAwareMinPercent", 25,
-            "Supply (% of what the attacking province needs) it must get, or another province of ours next to the target must have to spare, for a local attack."), 1, 200);
+            "Supply (% of need) the attacking province must get, or a neighbour of the target must spare (1-200)."), 1, 200);
         _strategicInvasions = Config.Bind("AI", "StrategicInvasions", true,
-            "The AI picks the beach for a naval invasion by what is there: thinly held coast near victory points, capitals, supply hubs, airfields and resources first, "
-            + "beaches with enemy divisions nearby, land forts or coastal bunkers last. A planned landing waits (a week at most) while the enemy divisions around its beach outnumber half the landing. "
-            + "The sea regions on a planned landing's route get twice the fighters the air AI wants there (100 at least) and twice the naval bombers.");
+            "Naval invasions pick thinly held, valuable beaches, wait while the beach is crowded, and get fighter and naval bomber cover.");
         _postures = Config.Bind("AI", "DefensivePostures", true,
-            "An AI country facing a much stronger enemy (twice its share of power along the line, or 1.6x while it lost line provinces in the last week) gives up exposed ground and holds its grad: "
-            + "the most defensible short line between that enemy and its capital (rivers, mountains, marsh, forests, hills, cities and forts in front, few directions to be attacked from), redrawn weekly, "
-            + "or one line back once the enemy breaks in. Its divisions walk there and stay (victory point cities get one more), it starts no offensives (landings still go), and it attacks only "
-            + "fought-out enemy stacks next to the line, with two fresh divisions or more (reserves behind the grad too), while single divisions pin the enemy stacks that could come to their aid; worn-out attackers break off. "
-            + "Once every enemy it fell back from stays under 80 % of its power for a week (a month after falling back at the earliest), its divisions go back on their orders, and for a month only twice its strength "
-            + "puts it back on a grad. Out of contact, the posture stays. Needs HoldTheLine.") && _holdLine;
+            "Facing a much stronger enemy, the AI falls back to a defensible line (grad) and counterattacks only fought-out enemies. Needs HoldTheLine.") && _holdLine;
         var encircle = Config.Bind("AI", "Encirclement", true,
-            "The breakthrough axis goes for enemy salients first: where enemy ground bulges into the AI's line through a neck of one to three provinces, and taking the neck cuts off 3+ enemy divisions "
-            + "for less than it costs, the local attacks and close air support of both flanks go for the neck instead of pushing the salient head-on; kept until the pocket closes, a week at most. Needs BreakthroughAxis.") && _axis;
+            "The axis goes for the neck of enemy salients holding 3+ divisions. Needs BreakthroughAxis.") && _axis;
         var railGuns = Config.Bind("AI", "RailwayGuns", true,
-            "The AI's railway guns go to the armies on its breakthrough axis first and stay there: those armies are served first and other armies can't take their guns. Needs BreakthroughAxis.") && _axis;
+            "Railway guns go to the armies on the breakthrough axis first and stay there. Needs BreakthroughAxis.") && _axis;
         var supplyHubs = Config.Bind("AI", "SupplyHubs", true,
-            "Where an AI country's divisions are low on supply, the railway from the supply hub feeding them to the capital is upgraded a level (one a week, the same hub's again after 60 days; a railway level costs little next to a hub). "
-            + "From 1941 on, where the divisions of an AI country with 60+ civilian factories starve with no supply hub within 3 provinces, it also builds one (railway-connected provinces first); checked weekly, two a month at most. "
-            + "A hub costs 20000, so earlier or poorer it doesn't. Vanilla's AI only upgrades and links the hubs it has.");
+            "Where AI divisions are low on supply, the railway to their hub is upgraded; from 1941 rich countries also build new hubs.");
         var groundCrews = Config.Bind("AI", "GroundCrews", true,
-            "The AI uses More Ground Crews (+10 % air efficiency in a region for 20 command power, given back when turned off): every two days, in the regions where its wings fought hardest in the last three days "
-            + "(10+ planes lost and shot down where enemy planes are active), two at most, while 50 command power is left after the cost; off again where its wings stopped fighting for a week, or one a pass while command power is under 50. Vanilla's AI never turns them on.");
+            "The AI turns on More Ground Crews in the regions where its air wings fight hardest.");
 
         _log = Log;
         ResolveShared();
         _game = new PerGame(() =>
         {
-            // Everything cached across games must go: a new world frees the old one's fronts,
-            // provinces and units, and a cached pointer into it is a crash.
+            // A new world frees the old one's objects: every cached pointer must go.
             Sent.Clear();
             Gap.Clear();
             Posted.Clear();

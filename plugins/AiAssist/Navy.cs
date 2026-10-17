@@ -13,9 +13,9 @@ public unsafe partial class AiAssist
     private const int FleetOfTaskForce = 0x340, MissionOfTaskForce = 0x374, ParentOfTaskForce = 0x4B0, ActivityOfTaskForce = 0x4B8;
     private const int HoldMission = 0, NavalTrainingMission = 7, ReserveFleetMission = 8;   // NNavalMission::EMissionType
     private const int NavalCommandSize = 0x48, StopAtMaxOfNavalCommand = 0x44;              // CNavalMissionSetTypeCommand, CNavalMissionMoveCommand
-    private const int MaxBombardSteps = 6;                                                   // sea provinces from the task force (by sea: around a peninsula is far)
-    private const int BombardStayHours = 7 * 24;  // a task force sent to bombard stays put that long: battles flicker hourly, and it sailed to and fro
-    private const int BombardWaitHours = 14 * 24; // with no battle in reach it waits on hold where it is that long, instead of vanilla sending it to port
+    private const int MaxBombardSteps = 6;                                                   // reach, in sea provinces
+    private const int BombardStayHours = 7 * 24;  // stays at a battle that long: battles flicker hourly
+    private const int BombardWaitHours = 14 * 24; // with no battle in reach, waits on hold at sea that long instead of going to port
 
     [Function(CallingConventions.Microsoft)] public delegate void UnassignedTaskForcesFn(nint slots, nint tag);
     [Function(CallingConventions.Microsoft)] public delegate int FilterTaskForcesFn(nint list, nint unused);
@@ -33,9 +33,9 @@ public unsafe partial class AiAssist
     private const int ShipsOfTaskForce = 0x348, MoveShipsSize = 0x58;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int Tag, int Sea), int> Claimed = new(); // sea a split-off half is meant for -> hour
     private static int _fleetsSplit;
-    // task force -> where it was sent, when, whose (each country covers its own battles: two navies off one coast both bombard)
+    // task force -> sea it was sent to, hour, tag (each country covers its own battles)
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Province, int Hour, int Tag)> Bombarding = new();
-    private const int MinSplitShips = 4; // halves of two ships at least: a fleet isn't shredded into single ships
+    private const int MinSplitShips = 4; // each half keeps two ships at least
     private static int _fleetsTraining, _fleetsBombarding;
     private static bool _navalTraining, _shoreSupport;
 
@@ -50,7 +50,7 @@ public unsafe partial class AiAssist
         _moveShips = (delegate* unmanaged<nint, nint, nint, byte, int, byte, nint>)Sig.Find(Signatures.MoveShips);
         _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
-        Allocator.Free(Allocator.AllocZeroed(NavalCommandSize)); // resolves the heap functions here, not racing on AI threads
+        Allocator.Free(Allocator.AllocZeroed(NavalCommandSize)); // resolve the heap functions here, not on AI threads
         if (bombard)
             _filterTaskForces = Patches.Hook<FilterTaskForcesFn>(Sig.Find(Signatures.FilterTaskForces), (list, unused) =>
             {
@@ -66,11 +66,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The naval AI's task forces no objective took, before vanilla puts them on hold and sends them home (fleets idle in port
-    /// all war, and at peace once world tension passes 50 %, where vanilla stops training): at peace those that can still
-    /// gain experience train (until their ships are regulars); at war those with guns go to the sea next to a coastal battle
-    /// of ours, where ships on hold bombard the enemy (vanilla never sends them). Those taken are removed from the list, so
-    /// vanilla's hold doesn't follow. AI worker thread.
+    /// Task forces no naval objective took, before vanilla sends them to port. At peace, those that can still gain
+    /// experience train; at war, those with guns or carriers go bombard a coastal battle. Taken ones leave the list.
+    /// AI worker thread.
     /// </summary>
     private static void Navy(nint slots, int tag)
     {
@@ -80,7 +78,7 @@ public unsafe partial class AiAssist
         if (diplomacy == 0) return;
         var atWar = _atWarAny(diplomacy, 0) != 0;
         if (atWar ? !_shoreSupport : !_navalTraining) return;
-        if (!atWar && WarComing(diplomacy)) return; // ships in training hold a fifth of their organisation
+        if (!atWar && WarComing(diplomacy)) return; // training ships have low organisation
         var byRef = TaskForcesByRef(country);
         var targets = atWar ? BombardTargets(country, tag) : [];
         var data = *(nint**)slots;
@@ -96,11 +94,9 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// At war, before the naval AI's objectives take their task forces: one task force with guns or carriers per coastal battle
-    /// of ours no other one covers is taken off its patrol, strike force, hold or training (never invasion support, convoys,
-    /// raiding or mines) and held at the sea next to the battle, where ships on hold bombard it and carriers' wings reach it;
-    /// the ones already there stay ours. Vanilla's objectives never see them (removed from the list, no objective kept), and
-    /// vanilla kept its battle fleets at sea or in port far from the coast its army fought on. AI worker thread.
+    /// At war, before the naval objectives take task forces: one with guns or carriers per uncovered coastal battle of ours is
+    /// taken off patrol, strike force, hold or training (never invasion support, convoys, raiding or mines) and sent to bombard.
+    /// Ones already bombarding stay ours. Taken ones leave the list. AI worker thread.
     /// </summary>
     // ponytail: no look at enemy fleets; add the strategic navy's region danger if battle fleets get caught off the coast.
     private static void TakeForShore(nint list)
@@ -144,7 +140,7 @@ public unsafe partial class AiAssist
         *(int*)(list + 0xC) = kept;
     }
 
-    /// <summary>The country's task forces by their CRef id (the naval AI's slots hold CRefs).</summary>
+    /// <summary>The country's task forces by CRef id (the naval AI's slots hold CRefs).</summary>
     private static Dictionary<long, nint> TaskForcesByRef(nint country)
     {
         var byRef = new Dictionary<long, nint>();
@@ -155,7 +151,7 @@ public unsafe partial class AiAssist
         return byRef;
     }
 
-    /// <summary>A carrier among its ships (an air base on the ship).</summary>
+    /// <summary>Has a carrier (a ship with an air base).</summary>
     private static bool HasCarrier(nint tf)
     {
         foreach (var ship in Native.PdxArray(tf + ShipsOfTaskForce))
@@ -163,12 +159,12 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    /// <summary>Not a reserve fleet's, no part detached from another, out of combat and on its mission (not repairing, refitting).</summary>
+    /// <summary>Not in a reserve fleet, not detached, out of combat and not repairing or refitting.</summary>
     private static bool Idle(nint tf) =>
         *(int*)(tf + MissionOfTaskForce) != ReserveFleetMission && *(long*)(tf + ParentOfTaskForce) == 0
         && *(int*)(tf + CombatOfTaskForce) <= 0 && *(int*)(tf + ActivityOfTaskForce) == 0;
 
-    /// <summary>Puts a task force that can still gain experience on training (stopping once its ships are regulars); whether taken.</summary>
+    /// <summary>Trains a task force that can still gain experience, until its ships are regulars. Whether taken.</summary>
     private static bool TrainNavy(nint tf, int tag)
     {
         var fleet = *(nint*)(tf + FleetOfTaskForce);
@@ -182,16 +178,16 @@ public unsafe partial class AiAssist
         return true;
     }
 
-    /// <summary>One of the tag's task forces holds at or heads for the sea, sent within BombardStayHours.</summary>
+    /// <summary>One of the tag's task forces was sent to the sea within BombardStayHours.</summary>
     private static bool Covered(int tag, int sea, int hour) =>
         Bombarding.Any(b => b.Value.Tag == tag && b.Value.Province == sea && hour - b.Value.Hour is >= 0 and < BombardStayHours);
 
-    private const int CombatsOfGameState = 0x268, ProvinceOfCombat = 0x38; // CPdxArray<CCombat*>; the battle's province (the defender's)
+    private const int CombatsOfGameState = 0x268, ProvinceOfCombat = 0x38; // CPdxArray<CCombat*>; defender's province
     [VTable] public const string LandCombat = "CLandCombat";
 
     /// <summary>
-    /// Sea provinces next to the provinces of our land battles (only there do ships bombard: an attacker's own province is
-    /// not the battle's), by how many of our fighting divisions stand in or next to the battle.
+    /// Sea provinces next to our land battles (the defender's province; only it gets bombarded), weighted by our fighting
+    /// divisions in or next to the battle, heaviest first.
     /// </summary>
     private static List<(int Sea, int Weight)> BombardTargets(nint country, int tag)
     {
@@ -217,36 +213,35 @@ public unsafe partial class AiAssist
 
     // ponytail: no look at enemy fleets on the way or at the target; add the strategic navy's region danger if fleets sail into them.
     /// <summary>
-    /// Sends a task force with guns or carriers (halved when a second battle has none) to the busiest bombardment sea within reach, on hold (only ships on hold bombard); one
-    /// already there or on its way stays. Whether taken.
+    /// Sends a task force with guns or carriers on hold (only ships on hold bombard) to the nearest uncovered battle sea in
+    /// reach; split in two when a second battle has none. One already there or on its way stays. Whether taken.
     /// </summary>
     private static bool Bombard(nint tf, int tag, List<(int Sea, int Weight)> targets)
     {
         var hour = Game.Hour;
         var on = *(int*)(tf + MissionOfTaskForce) == HoldMission;
         var ours = Bombarding.TryGetValue(tf, out var sent) && hour - sent.Hour >= 0;
-        // On its way, or there; of several at one battle only one stays while another battle has none.
+        // Of several at one battle, only one stays while another battle has none.
         var doubled = ours && Bombarding.Any(b => b.Key < tf && b.Value.Tag == tag && b.Value.Province == sent.Province && hour - b.Value.Hour is >= 0 and < BombardStayHours);
         if (on && ours && hour - sent.Hour < BombardStayHours && !(doubled && targets.Any(t => t.Sea != sent.Province
             && !Covered(tag, t.Sea, hour)))) return true;
         if (targets.Count == 0) return on && ours && hour - sent.Hour < BombardWaitHours; // battles pause: it waits at sea, not in port
         long guns;
         _shoreBombardment(tf, &guns);
-        if (guns <= 0 && !HasCarrier(tf)) return false; // carriers: their wings reach the battle's land region from there
+        if (guns <= 0 && !HasCarrier(tf)) return false; // a carrier's wings reach the battle from there
         var here = *(nint*)(tf + LocationOfTaskForce);
         if (here == 0) return false;
         if (on && targets.Any(t => t.Sea == Game.Id(here)))
         {
-            Bombarding[tf] = (Game.Id(here), hour, tag); // bombarding: its wait for the next battle counts from now
+            Bombarding[tf] = (Game.Id(here), hour, tag); // the wait for the next battle counts from now
             return true;
         }
         var steps = SeaSteps(here, MaxBombardSteps);
         var covered = Bombarding.Where(b => b.Key != tf && b.Value.Tag == tag && hour - b.Value.Hour is >= 0 and < BombardStayHours).Select(b => b.Value.Province).ToHashSet();
-        var reach = targets.Where(t => steps.ContainsKey(t.Sea)).OrderBy(t => covered.Contains(t.Sea)).ThenBy(t => steps[t.Sea]).ToList(); // the nearest battle no other one covers
+        var reach = targets.Where(t => steps.ContainsKey(t.Sea)).OrderBy(t => covered.Contains(t.Sea)).ThenBy(t => steps[t.Sea]).ToList(); // uncovered first, then nearest
         var sea = reach.FirstOrDefault().Sea;
         if (sea == 0) return on && ours && hour - sent.Hour < BombardWaitHours;
-        // The move is checked first: the commands run later, on the main thread, so a refused move must not leave a hold or a
-        // split behind it (the task force back with the naval AI, half of it parked).
+        // Check the move first: commands run later on the main thread, and a refused move must not leave a hold or split behind.
         var move = Allocator.AllocZeroed(NavalCommandSize);
         _navalMove(move, tf, sea, 0);
         if (!Commands.CanExecute(move))
@@ -265,7 +260,7 @@ public unsafe partial class AiAssist
             }
         }
         var other = reach.FirstOrDefault(t => t.Sea != sea && !covered.Contains(t.Sea) && !(Claimed.TryGetValue((tag, t.Sea), out var c) && hour - c is >= 0 and < BombardStayHours)).Sea;
-        if (other != 0 && Split(tf, tag)) Claimed[(tag, other)] = hour; // the half left where it is takes that battle next pass
+        if (other != 0 && Split(tf, tag)) Claimed[(tag, other)] = hour; // the half left behind takes that battle next pass
         if (!Post(move, tag)) return false;
         Bombarding[tf] = (sea, hour, tag);
         Interlocked.Increment(ref _fleetsBombarding);
@@ -273,8 +268,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Splits the task force in two halves of about equal bombardment (ships dealt alternately, strongest first): the second
-    /// becomes a new task force where it is, for another coastal battle. Whether the command went out.
+    /// Splits off half the ships (dealt alternately, strongest bombardment first) as a new task force where it is.
+    /// Whether the command went out.
     /// </summary>
     private static bool Split(nint tf, int tag)
     {
@@ -288,7 +283,7 @@ public unsafe partial class AiAssist
         return true;
     }
 
-    /// <summary>Sea provinces reachable from <paramref name="from"/> by sea within <paramref name="max"/> steps, with their steps (a port: its sea neighbours are step 1).</summary>
+    /// <summary>Sea provinces within <paramref name="max"/> steps of <paramref name="from"/> by sea, with their step count.</summary>
     private static Dictionary<int, int> SeaSteps(nint from, int max)
     {
         var steps = new Dictionary<int, int> { [Game.Id(from)] = 0 };
@@ -308,7 +303,7 @@ public unsafe partial class AiAssist
         return steps;
     }
 
-    /// <summary>Posts an AI command through PostAICommand if it can run (else frees it); whether it went out.</summary>
+    /// <summary>Posts an AI command if it can run, else frees it. Whether it went out.</summary>
     private static bool Post(nint cmd, int tag)
     {
         if (!Commands.CanExecute(cmd))

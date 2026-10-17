@@ -4,8 +4,7 @@ namespace AiAssist;
 
 public unsafe partial class AiAssist
 {
-    // ---- Hold the line's bookings and posts: sending divisions, taking them off their orders and back, reserves and the second
-    //      line, and which divisions are free to go ----
+    // ---- Hold the line: sending divisions, taking them off their orders and back, posts, and which divisions are free ----
 
     /// <summary>Drops the bookings whose time is up (game hours): a sent division is free again, a hole may be refilled. Main thread.</summary>
     private static void Expire(long hour)
@@ -16,9 +15,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Moves a division to the province and books it (game hours): the division is left alone while it walks, the province isn't
-    /// sent another meanwhile. A post sent elsewhere stops being one unless <paramref name="keep"/> (the callers that post it
-    /// re-post it). Main thread.
+    /// Moves a division and books both (game hours): the division is left alone while it walks, the province gets no other.
+    /// A moved post stops being one unless <paramref name="keep"/>. Main thread.
     /// </summary>
     private static bool Send(nint unit, int province, long hour, long gapHours, bool keep = false, bool attack = false)
     {
@@ -46,7 +44,7 @@ public unsafe partial class AiAssist
         return true;
     }
 
-    /// <summary>Off every order of its army, the order it was on remembered (unless already) to put it back (<see cref="Return"/>). Main thread.</summary>
+    /// <summary>Takes the division off its army's orders, remembering the first one for <see cref="Return"/>. Main thread.</summary>
     private static void TakeOff(nint unit, bool remember = true)
     {
         var group = Division.Group(unit);
@@ -70,8 +68,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// A division we let go goes back on the order we took it off (the game's own assign command), if it is still in that army
-    /// and the order still exists; otherwise vanilla's regrouping has it. Callers pass a live division of the tag. Main thread.
+    /// Puts a division we let go back on the order we took it off, if it is still in that army and the order exists; otherwise
+    /// vanilla's regrouping takes it. <paramref name="unit"/> must be a live division of the tag. Main thread.
     /// </summary>
     private static void Return(nint unit, int tag)
     {
@@ -82,8 +80,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// A country with divisions to spare posts reserves a province behind its line (never on a grad's given-up side): the posts
-    /// covering the most line provinces (key ground first) each get a division, off its orders, which stays until the front moves.
+    /// Posts reserves a province behind the line (not on a grad's given-up side) when the country has divisions to spare. The
+    /// posts covering the most line provinces (key ground first) each get a division, off its orders, until the front moves.
     /// </summary>
     private void Reserve(nint country, int tag, HashSet<nint> line, int hour)
     {
@@ -114,8 +112,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// Depth defence: line provinces worth holding (Key 25+: rivers, cities, mountains, victory points, ports) get a second division
-    /// on a safe province right behind them, up to as many as the country keeps reserves, most important first.
+    /// Second line: key line provinces (<see cref="Key"/> 25+) get a division on a safe province right behind them, most
+    /// important first, up to the country's reserve count.
     /// </summary>
     private void Depth(nint country, int tag, HashSet<nint> line, int hour)
     {
@@ -142,7 +140,7 @@ public unsafe partial class AiAssist
         }
     }
 
-    /// <summary>Whether the post still does its job: a reserve or second line stays behind the line, a helper on it; a garrison while the grad stands.</summary>
+    /// <summary>Whether the post still does its job: a reserve or second line behind the line, a helper on it, a garrison while the grad stands.</summary>
     private static bool PostHolds(nint country, int tag, Posting post)
     {
         if (post.Kind == PostKind.Garrison) return true; // the grad's: let go when it is (Unpin)
@@ -157,7 +155,7 @@ public unsafe partial class AiAssist
         return guard != 0 && Province.Controller(guard) == tag && Province.NextToEnemy(country, tag, guard);
     }
 
-    /// <summary>The tag's grad is gone: its posts stop being ones and go back on their orders.</summary>
+    /// <summary>Called when the tag's grad is gone: its posts go back on their orders.</summary>
     private static void Unpin(nint country, int tag)
     {
         HashSet<nint>? units = null;
@@ -169,8 +167,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The tag's posts that are no longer its divisions (died, merged: their memory may be another unit's now) are dropped; ones
-    /// whose post no longer backs the line (<see cref="PostHolds"/>) go back on their orders.
+    /// Drops the tag's posts and remembered orders whose division is gone (dead or merged); posts that no longer hold
+    /// (<see cref="PostHolds"/>) go back on their orders.
     /// </summary>
     private static void PrunePosted(nint country, int tag)
     {
@@ -186,14 +184,14 @@ public unsafe partial class AiAssist
             if (home.Tag == tag && !(units ??= [.. Game.Units(country)]).Contains(unit)) Home.Remove(unit);
     }
 
-    /// <summary>What holding this province of ours is worth: a port (the fleet and supply), victory points, a river in front of it, city or mountain ground.</summary>
+    /// <summary>What holding this province of ours is worth: a port above all, then victory points, a river in front, city or mountain ground.</summary>
     private static int Key(nint country, int tag, nint province)
     {
         var port = Province.BuildingLevel(province, Buildings.NavalBaseSlot);
         if (port > 0) return 1000 + port;
         var key = 3 * Math.Min(Province.VictoryPoints(province), 30);
         if ((Province.TerrainCategory(province) & (Province.Mountain | Province.Urban)) != 0) key += 25;
-        // The wall around an enemy pocket (Yantai's six divisions in one province): a hole there lets it break out.
+        // Part of the wall around an enemy pocket: a hole here lets it break out.
         if (Game.Neighbours(province).Any(id => Game.Province(id) is var e && e != 0 && Province.Divisions(e) > 0 && Province.Encircled(country, tag, e))) key += KeyHole;
         foreach (var id in Game.Neighbours(province))
         {
@@ -206,8 +204,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// The nearest free, rested division of the tag within radius provinces of ours, not standing on the line itself, or 0; one
-    /// of <paramref name="prefer"/>'s armies (the same front's) first, wherever it is in range; a post of ours only with <paramref name="reserves"/>.
+    /// The nearest free, rested division of the tag within radius provinces of ours, off the line, or 0. One of
+    /// <paramref name="prefer"/>'s armies wins anywhere in range; posts count only with <paramref name="reserves"/>.
     /// </summary>
     private static nint Helper(int tag, nint target, HashSet<nint> line, int radius, bool reserves = true, HashSet<nint>? prefer = null)
     {
@@ -226,8 +224,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>
-    /// A line province with a division to spare for a hole: three of ours or more (two stay), or two with no enemy divisions
-    /// next to it (vanilla stacks its attacks there while other stretches stand empty).
+    /// A line province with a division to spare for a hole: three of ours or more, or two with no enemy divisions next to it.
+    /// Vanilla stacks divisions there while other stretches stand empty.
     /// </summary>
     private static bool Crowded(int tag, nint province)
     {
@@ -238,20 +236,17 @@ public unsafe partial class AiAssist
         return ours >= 3 || ours == 2 && country != 0 && !Province.EnemyDivisionsNext(country, tag, province);
     }
 
-    /// <summary>
-    /// A land division of the tag (not lent, not an HQ) that can take orders now: not fighting, retreating or embarked, not one
-    /// we sent or rest, nor another plugin's.
-    /// </summary>
+    /// <summary>A land division of the tag (not lent, not an HQ) that can take orders now and isn't sent, resting or another plugin's.</summary>
     private static bool Movable(nint unit, int tag) =>
         Division.Ready(unit, tag) && !Sent.ContainsKey(unit) && !Resting.ContainsKey(unit) && !Jobs.Taken(unit, Id);
 
-    /// <summary>Our divisions with a job (posted, resting, walking somewhere for us), for the other plugins to leave alone.</summary>
+    /// <summary>Publishes our posted, resting and sent divisions so other plugins leave them alone.</summary>
     private static void ShareJobs() => Jobs.Set(Id, Posted.Keys.Concat(Resting.Keys).Concat(Sent.Keys));
 
-    /// <summary>Another plugin (FrontLine) runs the AI's rotation, escape, reserves, second line and local attacks: ours stand aside.</summary>
+    /// <summary>Another plugin (FrontLine) runs the AI's front micro, so ours stands aside.</summary>
     private static bool MicroElsewhere => Jobs.AiMicro is { } owner && owner != Id;
 
-    /// <summary>A movable division that stands idle, rested enough to go somewhere.</summary>
+    /// <summary>A movable division standing idle with enough organisation to go somewhere.</summary>
     private static bool Spare(nint unit, int tag) => Movable(unit, tag) && !Division.Walking(unit) && Percent(Division.Organisation(unit)) >= MinBackfillOrg;
 
     private const int TagOfGroup = 0x3C; // COrdersGroup: owner tag
@@ -263,7 +258,7 @@ public unsafe partial class AiAssist
         return group != 0 && *(int*)(group + TagOfGroup) == tag ? group : 0;
     }
 
-    /// <summary>The division is a member of one of its army's (or army group's) orders.</summary>
+    /// <summary>Whether the division is on one of its army's or army group's orders.</summary>
     private static bool OnOrder(nint unit, nint group)
     {
         var member = unit + MemberOfUnit;
@@ -274,7 +269,7 @@ public unsafe partial class AiAssist
         return false;
     }
 
-    /// <summary>An order command posted as the AI posts: Execute (on), Delete.</summary>
+    /// <summary>Posts an order command (e.g. Execute, Delete) the way the AI does.</summary>
     private static bool PostOrderCommand(string className, long group, int order, int argument) =>
         Commands.TryPost(Commands.NewOrderCommand(className, group, order, argument), true);
 }

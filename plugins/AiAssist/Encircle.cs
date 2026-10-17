@@ -5,27 +5,27 @@ namespace AiAssist;
 
 public partial class AiAssist
 {
-    // ---- Encirclement: an enemy salient is cut at its neck from both flanks instead of pushed head-on (part of the breakthrough axis) ----
+    // ---- Encirclement: the breakthrough axis cuts an enemy salient at its neck instead of pushing it head-on ----
 
-    private const int SalientHours = 7 * 24, SalientSearchHours = 24; // a neck is kept a week at most; searched (and re-checked) daily
-    private const int MaxSalient = 30, MinTrapped = 3, MaxNecks = 80;     // provinces a pocket may have; enemy divisions it must cut off; neck candidates
+    private const int SalientHours = 7 * 24, SalientSearchHours = 24; // a neck is kept a week at most; searched and re-checked daily
+    private const int MaxSalient = 30, MinTrapped = 3, MaxNecks = 80;     // max pocket provinces; min enemy divisions cut off; max neck candidates
 
     private static bool _encircle;
     private static int _salients, _closed;
-    // general -> its salient: checked when, for which tag and world (Game.Generation), since when, its neck (none: no salient found
-    // at Hour), and the axis core around the neck. Ids only, never changed once published.
+    // general -> its salient: last check, tag, world (Game.Generation), since, neck (empty: none found), and the axis core around
+    // the neck. Province ids only; an entry is never changed once published.
     private static readonly ConcurrentDictionary<nint, (int Hour, int Tag, int World, int Since, int[] Neck, HashSet<int>? Core)> Salients = new();
 
     private void LoadEncircle() => _encircle = true;
 
     /// <summary>
-    /// The theatre's enemy salient to cut off today, or null: kept while what is left of its neck still cuts off a pocket worth
-    /// it (re-checked daily) for a week at most, else the best one on its line (searched once a day). AI thread of the general.
+    /// The enemy salient to cut off today, or null. A salient is kept for a week at most while what is left of its neck still
+    /// traps enough (re-checked daily); otherwise the best one on the line is searched, once a day. AI thread of the general.
     /// </summary>
     private static (int[] Neck, HashSet<int> Core)? Salient(nint general, nint country, int tag, HashSet<nint> enemyLine, int hour)
     {
         var world = Game.Generation;
-        if (!Salients.ContainsKey(general)) // a new general: drop the dead ones' (generals come and go all game)
+        if (!Salients.ContainsKey(general)) // a new general: drop stale entries
             foreach (var (g, old) in Salients)
                 if (old.World != world || hour - old.Hour is < 0 or >= SalientHours) Salients.TryRemove(g, out _);
         if (Salients.TryGetValue(general, out var s) && s.Tag == tag && s.World == world && hour - s.Hour >= 0)
@@ -49,7 +49,7 @@ public partial class AiAssist
             Salients[general] = (hour, tag, world, hour, [], null);
             return null;
         }
-        var core = new HashSet<int>(neck); // the neck and the ground on both sides of it: our flanks attack into it from there
+        var core = new HashSet<int>(neck); // the neck and its neighbours, where our flanks attack from
         foreach (var id in neck)
             if (Game.Province(id) is var p && p != 0) core.UnionWith(Game.Neighbours(p));
         Salients[general] = (hour, tag, world, hour, neck, core);
@@ -58,10 +58,9 @@ public partial class AiAssist
     }
 
     /// <summary>
-    /// The best neck among the enemy provinces on our line: one province, two next to each other, or three in a row (the middle
-    /// one may be off our line: Cuenca's bulge had a neck three wide), whose taking cuts off the
-    /// most enemy divisions (2 per division) for the least defence (<see cref="Province.AttackWeight"/>, from our easiest side); null
-    /// when none cuts off <see cref="MinTrapped"/> divisions for more than it costs.
+    /// The best neck among the enemy provinces on our line: one province, two adjacent, or three in a row (the middle one may
+    /// be off our line). Score: 2 per enemy division cut off minus the defence (<see cref="Province.AttackWeight"/> from our
+    /// easiest side). Null when none cuts off <see cref="MinTrapped"/> divisions with a positive score.
     /// </summary>
     // ponytail: necks of up to three provinces in a row, pockets up to MaxSalient provinces; a wider neck is missed.
     private static int[]? Search(nint country, int tag, HashSet<nint> enemyLine)
@@ -93,7 +92,7 @@ public partial class AiAssist
         }
     }
 
-    /// <summary>One search's view of the map around a theatre's line: neighbours and sides, read once per province.</summary>
+    /// <summary>One search's view of the map: each province's side is read once.</summary>
     private sealed class SalientMap(nint country, int tag)
     {
         private readonly Dictionary<int, int> _sides = [];
@@ -132,15 +131,15 @@ public partial class AiAssist
     }
 }
 
-/// <summary>The flood fill behind salient detection, apart from the game's memory (tests\Signatures.Tests\SalientFillTests.cs).</summary>
+/// <summary>The flood fill behind salient detection, free of game memory (tests\Signatures.Tests\SalientFillTests.cs).</summary>
 public static class SalientFill
 {
-    public const int None = -1, Ours = 0, Theirs = 1, Neutral = 2; // sides: sea or wasteland, ours or allied, enemy-held, neutral land
+    public const int None = -1, Ours = 0, Theirs = 1, Neutral = 2; // sea or wasteland, ours or allied, enemy-held, neutral land
 
     /// <summary>
-    /// Enemy divisions cut off once the <paramref name="neck"/> is ours: in the regions of enemy land next to it that close within
-    /// <paramref name="maxSize"/> provinces without neutral land, provided another region next to it stays open (the neck is what
-    /// links them to the enemy's main ground: no pocket already). 0 otherwise.
+    /// Enemy divisions cut off once the <paramref name="neck"/> is ours: those in the enemy regions next to it that close within
+    /// <paramref name="maxSize"/> provinces without touching neutral land. 0 unless another region next to the neck stays open
+    /// (otherwise it is a pocket already).
     /// </summary>
     public static int Cut(int[] neck, Func<int, int[]> neighbours, Func<int, int> side, Func<int, int> divisions, int maxSize)
     {
