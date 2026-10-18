@@ -353,7 +353,6 @@ Single player only: the game has no command to reorder operatives, so the agency
 ## Loader: game fixes
 - **Intelligence agency:** fixes a crash on loading a save after the game removed an operative from the wrong agency (error.log: `RemoveOperative: ... not found in agency=---`).
 - **Division stats:** fixes a crash when hovering a stat of a division template deleted while its view stayed open.
-- **Production lines:** dragging a line near the top or bottom of the list scrolls it, so a line can be moved to a place not shown (vanilla scrolled only past the list's edge, and none below it).
 
 ## Loader: mimalloc
 On by default: the game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap.
