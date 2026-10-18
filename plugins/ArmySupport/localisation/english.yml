@@ -22,3 +22,5 @@ l_english:
     com.green1052.armysupport.AutoTransports.desc:0 "A paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.\nWorks in multiplayer."
     com.green1052.armysupport.AreaDrop:0 "Area paradrop (Ctrl+Alt+D)"
     com.green1052.armysupport.AreaDrop.desc:0 "Paint an area defence over the target states with the paratroopers' army and tick what to take (victory points, ports, airbases...), then press Ctrl+Alt+D: matching provinces become paradrop destinations, one per division.\nWorks in multiplayer."
+    com.green1052.armysupport.AutoSupport:0 "Auto invasion support"
+    com.green1052.armysupport.AutoSupport.desc:0 "A naval invasion with no task force on naval invasion support gets your idle (holding) task forces on that mission over the seas by its port and beaches.\nWorks in multiplayer."

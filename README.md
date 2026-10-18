@@ -177,6 +177,8 @@ Settings: every threshold, each feature on/off.
   - One division per destination (shared out when there are fewer destinations); the area defence order is deleted.
   - They start from the army's paradrop airbase, else the nearest airbase with transports on the paradrop mission. With none, idle transports are sent there: press again once they arrive.
 - **Auto paradrop transports** (`AutoTransports`, on): a paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.
+- **Auto invasion support** (`AutoSupport`, on): a naval invasion with no task force on naval invasion support gets your idle (holding, not fighting) task forces on that mission over the sea regions by its port and beaches.
+  - Several beaches per invasion are vanilla: keep clicking beaches after the first (clicking one again removes it).
 - **Army organizer** (`Organize`, on): select divisions and press **Ctrl+Alt+G**.
   - They are split into full armies of nearby divisions; an army already at least half full stays as it is.
   - Each new army gets the best idle general and joins the army group most of its divisions came from (or a new one under the best idle field marshal).
