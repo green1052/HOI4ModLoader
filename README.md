@@ -44,6 +44,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 | Performance | Targeted decisions look for new targets every few days; optional frame cap at speeds 4-5 | Single player only |
 | Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them; finished operations clear themselves | Single player only |
+| Interface | Reorder the production screen's design list by dragging | ✅ |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show their position as a gold badge (`[31]` and up past 30); agency upgrades show `N` or `NxL` in a number box.
@@ -336,6 +337,9 @@ Single player only (it changes when the game state updates).
 Single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game).
 - In the intelligence screen, drag an operative in the bottom bar to another place, as army cards are dragged: it follows the mouse and the others make room.
 - A finished operation clears itself from the operations list `DismissDays` (7) game days after it finished, as closing its overview does; its outcome was already applied. 0: never.
+
+### Interface
+- **Design list:** in the production screen, drag a design in the list you pick new production from to reorder it (vanilla's own row drag, as the production lines have). The order is kept per country in `HOI4ModLoader\cache\interface_designs.txt`; designs filtered out keep their places.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join.
