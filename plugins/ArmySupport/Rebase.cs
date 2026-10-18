@@ -54,6 +54,14 @@ public unsafe partial class ArmySupport
     private void LoadRebase(int coverage)
     {
         _coverage = coverage * Native.FixedPoint / 100;
+        ResolveAir();
+        MainThread.Every(TimeSpan.FromSeconds(10), Rebase);
+    }
+
+    /// <summary>The air functions rebasing and paradrop transports share.</summary>
+    private void ResolveAir()
+    {
+        if (_transfer != null) return;
         _ = Sig.FindAll(Game.StrategicAirSig, 2);
         _inRange = (delegate* unmanaged<nint, nint, nint, long, int, int>)Sig.Find(Signatures.ProvincesInRange);
         _range = (delegate* unmanaged<nint, long*, long*>)Sig.Find(Signatures.GetRange);
@@ -62,7 +70,6 @@ public unsafe partial class ArmySupport
         _baseOf = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.AirBaseOfWing);
         _regionToState = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.RegionToState);
         _transfer = (delegate* unmanaged<nint, nint, nint, byte, nint, int, nint>)Sig.Find(Signatures.TransferCommand);
-        MainThread.Every(TimeSpan.FromSeconds(10), Rebase);
     }
 
     private void Rebase()

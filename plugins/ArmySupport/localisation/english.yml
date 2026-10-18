@@ -16,3 +16,9 @@ l_english:
     com.green1052.armysupport.AutoAces.desc:0 "Puts your idle aces on air wings without a living ace, once a day: wings on a mission first, then the biggest.\nAlso takes fallen aces off their wings; vanilla leaves them there, blocking the slot (every country's in single player).\nWorks in multiplayer."
     com.green1052.armysupport.Organize:0 "Organize armies (Ctrl+Alt+G)"
     com.green1052.armysupport.Organize.desc:0 "Ctrl+Alt+G with divisions selected splits them into armies of the game's army size, neighbours together.\n- Each army gets the best unassigned general\n- They join the army group most divisions came from, or a new one under the best unassigned field marshal"
+    com.green1052.armysupport.SplitDrops:0 "Paradrop several destinations"
+    com.green1052.armysupport.SplitDrops.desc:0 "With several paratrooper divisions on a paradrop, click more destinations after the first: the divisions are shared evenly over them.
+Works in multiplayer."
+    com.green1052.armysupport.AutoTransports:0 "Auto paradrop transports"
+    com.green1052.armysupport.AutoTransports.desc:0 "A paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.
+Works in multiplayer."

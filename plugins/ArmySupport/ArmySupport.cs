@@ -4,7 +4,7 @@ namespace ArmySupport;
 
 /// <summary>
 /// Army helpers, one file each: field marshal attachments, railway gun placement, airbase capacity, auto rebase, auto
-/// ground crews, auto aces and the Ctrl+Alt+G army organizer.
+/// ground crews, auto aces, paradrops and the Ctrl+Alt+G army organizer.
 /// </summary>
 [Plugin("com.green1052.armysupport", "Army Support", "1.0.0", GameVersion = "1.19.3")]
 public partial class ArmySupport : Plugin
@@ -25,6 +25,10 @@ public partial class ArmySupport : Plugin
             "Auto ground crews never spends command power below this."), 0, 1000);
         var aces = Config.Bind("Air", "AutoAces", true,
             "Puts your idle aces on air wings without a living ace, wings on a mission first. Also takes fallen aces off their wings (every country's in single player).");
+        var splitDrops = Config.Bind("Paradrop", "SplitDrops", true,
+            "With several paratrooper divisions on a paradrop, each further destination click takes its share of them.");
+        var transports = Config.Bind("Paradrop", "AutoTransports", true,
+            "A paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.");
         var organize = Config.Bind("Organize", "Organize", true,
             "Ctrl+Alt+G with divisions selected splits them into armies of the game's army size, each under the best idle general, in their army group or a new one.");
 
@@ -34,6 +38,7 @@ public partial class ArmySupport : Plugin
         if (organize) LoadOrganize();
         if (groundCrews) LoadGroundCrews(crewsReserve);
         if (aces) LoadAces();
+        if (splitDrops || transports) LoadParadrop(splitDrops, transports);
         if (!Multiplayer) LoadRailwayGuns(frontPenalty, noSea); // changes the game
     }
 }

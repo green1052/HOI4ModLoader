@@ -170,6 +170,9 @@ Settings: every threshold, each feature on/off.
 - **Auto ground crews** (`AutoGroundCrews`, off): turns More Ground Crews on in the two regions where your wings fight hardest.
   - Only while command power stays above `GroundCrewsReserve` (50).
   - Turned off where the fighting stops for three days. Regions you turn off yourself are left alone.
+- **Paradrop to several destinations** (`SplitDrops`, on): select several paratrooper divisions, press the paradrop button, click the airbase, then click destinations one after another.
+  - Each further destination gets its share as a new paradrop from the same airbase; the divisions end up evenly spread.
+- **Auto paradrop transports** (`AutoTransports`, on): a paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.
 - **Army organizer** (`Organize`, on): select divisions and press **Ctrl+Alt+G**.
   - They are split into full armies of nearby divisions; an army already at least half full stays as it is.
   - Each new army gets the best idle general and joins the army group most of its divisions came from (or a new one under the best idle field marshal).
