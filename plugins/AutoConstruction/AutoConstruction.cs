@@ -59,7 +59,7 @@ public unsafe partial class AutoConstruction : Plugin
     private const int CoresOfState = 176;
     private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
     private const int ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: its container, its type
-    private const int Lines = 112, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
+    private const int Lines = 112, FactoriesOfLine = 0x18, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
     private const int Items = 1440, WindowOfItem = 16, TypeOfItem = 32; // construction view building buttons
     private const int Location = 56, Building = 60, Levels = 72, Insertion = 76; // CAddConstructionCommand
     private const byte AtEnd = 1;
@@ -84,9 +84,12 @@ public unsafe partial class AutoConstruction : Plugin
     private readonly HashSet<nint> _failed = [];                             // types whose last try found nowhere to build (logged once)
     private PerGame _game = null!;
     private bool _reportedBox;
+    private int _ahead;
 
     public override void Load()
     {
+        _ahead = Math.Max(0, Config.Bind("Construction", "QueueAhead", 2,
+            "Lines kept waiting in the queue beyond what idle civilian factories work on, so a finished line is replaced at once."));
         var supply = Config.Bind("Supply", "AutoSupply", true,
             "Where your divisions are low on supply, upgrade a saturated hub's railway, connect a cut-off hub, or build a new hub.");
         var production = Config.Bind("Production", "AutoProduction", true,
@@ -211,7 +214,7 @@ public unsafe partial class AutoConstruction : Plugin
         var country = Game.Country(tag);
         if (country == 0) return;
         var now = Environment.TickCount64;
-        var room = Staffable(country);
+        var room = Staffable(country) + Math.Max(0, _ahead - Waiting(country));
         foreach (var ((owner, type), target) in _targets)
         {
             if (owner != tag) continue;
@@ -242,6 +245,18 @@ public unsafe partial class AutoConstruction : Plugin
         var idle = (int)((*(long*)(production + CivilianFactories) - *(long*)(production + DamagedFactories)) / Native.FixedPoint)
                    - *(int*)(production + OtherFactories) - *(int*)(production + ConstructionFactories);
         return idle <= 0 ? 0 : (idle + *_maxFactoriesPerLine - 1) / *_maxFactoriesPerLine;
+    }
+
+    /// <summary>Construction lines (not repairs) with no civilian factory on them yet.</summary>
+    private static int Waiting(nint country)
+    {
+        var production = *(nint*)(country + ProductionOfCountry);
+        if (production == 0) return 0;
+        var lineVTable = Sig.VTable(Signatures.BuildingLine);
+        var waiting = 0;
+        foreach (var line in Native.PdxArray(production + Lines))
+            if (*(nint*)line == lineVTable && *(byte*)(line + RepairLine) == 0 && *(int*)(line + FactoriesOfLine) == 0) waiting++;
+        return waiting;
     }
 
     /// <summary>Levels of <paramref name="type"/> built in the country's states, plus those queued (not repairs) if <paramref name="queued"/>.</summary>
