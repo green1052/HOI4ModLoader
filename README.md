@@ -55,7 +55,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 - Setting: `PoliticalPower` (on).
 
 ### AutoConstruction
-In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1.
+In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1, **Alt+click** to turn it off and take its lines not started yet out of the queue.
 - The button shows how many are still to be built as `+N`.
 - Targets are kept per country for the session, across loads.
 - Missing levels are queued one per state (or province), only as many as your idle civilian factories can staff. The rest follow as factories free up, with `QueueAhead` (2) more lines waiting so a finished one is replaced at once.

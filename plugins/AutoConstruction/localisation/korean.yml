@@ -1,6 +1,6 @@
 ﻿l_korean:
     com.green1052.autoconstruction.name:0 "자동 건설"
-    com.green1052.autoconstruction.desc:0 "건설 탭에서 건물별 목표 개수를 정하면 모자란 만큼 좋은 주부터 짓습니다.\n- 건물 Shift+클릭 +1, Ctrl+Shift+클릭 +5, Ctrl+클릭 -1\n- 보급이 부족한 곳에 철도·보급 허브 자동 건설\n- 장비가 남는 라인의 군수 공장을 모자란 라인으로 이동\n멀티플레이에서도 동작."
+    com.green1052.autoconstruction.desc:0 "건설 탭에서 건물별 목표 개수를 정하면 모자란 만큼 좋은 주부터 짓습니다.\n- 건물 Shift+클릭 +1, Ctrl+Shift+클릭 +5, Ctrl+클릭 -1, Alt+클릭 끄기(아직 시작 안 한 작업은 대기열에서 삭제)\n- 보급이 부족한 곳에 철도·보급 허브 자동 건설\n- 장비가 남는 라인의 군수 공장을 모자란 라인으로 이동\n멀티플레이에서도 동작."
     com.green1052.autoconstruction.QueueAhead:0 "미리 넣어 둘 작업 수"
     com.green1052.autoconstruction.QueueAhead.desc:0 "놀고 있는 민간 공장이 맡을 수 있는 것보다 이만큼 더 대기열에 넣어 둡니다. 작업이 끝나면 바로 다음 작업이 이어받아 공장이 놀지 않습니다(유휴 공장 알림 없음)."
     com.green1052.autoconstruction.AutoSupply:0 "자동 보급"

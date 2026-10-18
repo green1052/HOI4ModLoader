@@ -38,13 +38,16 @@ public static class Signatures
     [Signature] public const string ConstructionSaturated = "48 B8 09 E1 D1 C6 11 6B F1 29 48 F7 A9 78 03 00 00 4C 8B C2 49 C1 F8 0E 49 8B C0 48 C1 E8 3F 4C 03 C0 48 8B 41 70 44 2B 81 B0 03 00 00 44 2B 81 98 03 00 00 48 63 49 7C";
 
     [VTable] public const string ConstructionCommand = "CAddConstructionCommand";
+
+    /// <summary>Removes levels of a construction line, as its cancel button does: +0x28 the line's CRef (line+0x08), +0x30 levels.</summary>
+    [VTable] public const string RemoveConstructionCommand = "CRemoveConstructionCommand";
     [VTable] public const string BuildingReference = "CBuildingReference";
     [VTable] public const string BuildingLine = "CBuildingProductionLine";
 }
 
 /// <summary>
 /// Construction targets per building. In the construction tab, Shift+click a building to raise its target by 1
-/// (Ctrl+Shift: 5), Ctrl+click to lower it; the button shows how many are left to build. While built plus queued is under
+/// (Ctrl+Shift: 5), Ctrl+click to lower it, Alt+click to turn it off and take its lines not started out of the queue; the button shows how many are left to build. While built plus queued is under
 /// the target, more is queued with the construction tab's own command, so multiplayer stays in sync. Best states first:
 /// cores, then higher infrastructure (lower for infrastructure itself), then more free slots. Also runs AutoSupply.cs and
 /// AutoProduction.cs.
@@ -59,7 +62,7 @@ public unsafe partial class AutoConstruction : Plugin
     private const int CoresOfState = 176;
     private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
     private const int ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: its container, its type
-    private const int Lines = 112, FactoriesOfLine = 0x18, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
+    private const int Lines = 112, RefOfLine = 0x08, FactoriesOfLine = 0x18, ProgressOfLine = 0x38, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
     private const int Items = 1440, WindowOfItem = 16, TypeOfItem = 32; // construction view building buttons
     private const int Location = 56, Building = 60, Levels = 72, Insertion = 76; // CAddConstructionCommand
     private const byte AtEnd = 1;
@@ -126,6 +129,14 @@ public unsafe partial class AutoConstruction : Plugin
             var key = (Tag: Game.ControlledTag, Type: *(nint*)(item + TypeOfItem));
             var type = key.Type;
             _game.Check();
+            if (type != 0 && Gui.AltHeld && !Gui.ShiftHeld && !Gui.CtrlHeld) // Alt+click: target off, its waiting lines out
+            {
+                ClearQueued(key.Tag, type);
+                _targets.Remove(key);
+                SaveTargets();
+                ShowTarget(item);
+                return 0;
+            }
             // A plain click, or Ctrl+click without a target to lower, is the game's.
             if (type == 0 || !Gui.ShiftHeld && !(Gui.CtrlHeld && _targets.ContainsKey(key))) return _click!.OriginalFunction(item);
             var country = Game.Country(key.Tag);
@@ -245,6 +256,24 @@ public unsafe partial class AutoConstruction : Plugin
         var idle = (int)((*(long*)(production + CivilianFactories) - *(long*)(production + DamagedFactories)) / Native.FixedPoint)
                    - *(int*)(production + OtherFactories) - *(int*)(production + ConstructionFactories);
         return idle <= 0 ? 0 : (idle + *_maxFactoriesPerLine - 1) / *_maxFactoriesPerLine;
+    }
+
+    /// <summary>Cancels the country's lines of <paramref name="type"/> not started yet (no progress), as their cancel buttons do.</summary>
+    private void ClearQueued(int tag, nint type)
+    {
+        var country = Game.Country(tag);
+        if (country == 0) return;
+        var removed = 0;
+        foreach (var (line, _) in ConstructionLines(country, type))
+        {
+            if (*(byte*)(line + RepairLine) != 0 || *(long*)(line + ProgressOfLine) != 0) continue;
+            var cmd = Commands.New(Signatures.RemoveConstructionCommand, 0x38, 0, 0);
+            *(long*)(cmd + 0x28) = *(long*)(line + RefOfLine);
+            *(int*)(cmd + 0x30) = *(int*)(line + LevelsOfLine);
+            if (Commands.TryPost(cmd)) removed++;
+        }
+        _sent.Remove(type);
+        Log.Info($"{Name(type)}: target off, {removed} line(s) not started yet taken out of the queue");
     }
 
     /// <summary>Construction lines (not repairs) with no civilian factory on them yet.</summary>
