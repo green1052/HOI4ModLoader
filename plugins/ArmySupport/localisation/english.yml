@@ -24,3 +24,5 @@ l_english:
     com.green1052.armysupport.AreaDrop.desc:0 "Paint an area defence over the target states with the paratroopers' army and tick what to take (victory points, ports, airbases...), then press Ctrl+Alt+D: matching provinces become paradrop destinations, one per division.\nWorks in multiplayer."
     com.green1052.armysupport.AutoSupport:0 "Auto invasion support"
     com.green1052.armysupport.AutoSupport.desc:0 "A naval invasion with no task force on naval invasion support gets your idle (holding) task forces on that mission over the seas by its port and beaches.\nWorks in multiplayer."
+    com.green1052.armysupport.SplitInvasions:0 "Invasion to several beaches"
+    com.green1052.armysupport.SplitInvasions.desc:0 "With several divisions on a naval invasion, click more beaches after the first: each takes its share as another invasion from the same port.\nWorks in multiplayer."

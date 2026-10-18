@@ -31,6 +31,8 @@ public partial class ArmySupport : Plugin
             "A paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.");
         var areaDrop = Config.Bind("Paradrop", "AreaDrop", true,
             "Ctrl+Alt+D turns the selected army's area defence into paradrops on the painted states' provinces that match its ticked settings.");
+        var splitInvasions = Config.Bind("Invasion", "SplitInvasions", true,
+            "With several divisions on a naval invasion, each further beach click takes its share of them as another invasion from the same port.");
         var invasionSupport = Config.Bind("Invasion", "AutoSupport", true,
             "A naval invasion with no task force on naval invasion support gets your idle (holding) task forces on that mission over the seas by its port and beaches.");
         var organize = Config.Bind("Organize", "Organize", true,
@@ -44,6 +46,7 @@ public partial class ArmySupport : Plugin
         if (aces) LoadAces();
         if (splitDrops || transports || areaDrop) LoadParadrop(splitDrops, transports);
         if (areaDrop) LoadAreaDrop();
+        if (splitInvasions) LoadInvasionSplit();
         if (invasionSupport) LoadInvasionSupport();
         if (!Multiplayer) LoadRailwayGuns(frontPenalty, noSea); // changes the game
     }

@@ -1,4 +1,6 @@
 using HOI4ModLoader;
+using Reloaded.Hooks.Definitions;
+using Reloaded.Hooks.Definitions.X64;
 
 namespace ArmySupport;
 
@@ -10,12 +12,27 @@ public static partial class Signatures
 
     /// <summary>Adds a strategic region (+0x30: its id) to a task force's mission (+0x28: its CRef, the task force's +0x08).</summary>
     [VTable] public const string AddNavalRegion = "CNavalMissionAddRegionCommand";
+
+    /// <summary>Battle plan tool click in naval invasion mode (tool, ...) -> bool consumed. tool+552: the invasion being edited.</summary>
+    [Signature] public const string InvasionToolClick = "48 8B C4 48 89 58 ? 4C 89 48 ? 48 89 48 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 ? 48 81 EC B0 00 00 00";
+
+    /// <summary>A naval invasion may land on the province (order, int province id, ...) -> bool.</summary>
+    [Signature] public const string InvasionTargetValid = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 30 8B FA";
+
+    /// <summary>
+    /// COrderSetInvasionSourceCommand ctor (mem[0x60], group, int sourceProvince, bool bestConvoys, CPdxArray&lt;CArmy*&gt;* units,
+    /// int orderId, int): order id 0 makes a new invasion from the port with those divisions (and the tool edits that one).
+    /// </summary>
+    [Signature] public const string InvasionSourceCommand = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 4C 24 ? 56 57 41 55 41 56 41 57 48 83 EC 30 41 0F B6 D9";
+
+    [VTable] public const string AddInvasionTarget = "CAddNavalInvasionTargetCommand";
 }
 
 /// <summary>
-/// Auto invasion support: a naval invasion of the player's with no task force on naval invasion support gets the idle
-/// ones (holding, not in combat) on that mission over the sea regions next to its port and its beaches. Vanilla commands,
-/// so multiplayer works. Several beaches per invasion are vanilla: click more of them.
+/// Naval invasions. Several beaches: with several divisions on an invasion, each further beach click makes another
+/// invasion from the same port, the divisions shared evenly over the beaches. Auto support: an invasion of the player's
+/// with no task force on naval invasion support gets the idle ones (holding, not in combat) on that mission over the sea
+/// regions next to its port and its beaches. Vanilla commands, so multiplayer works.
 /// </summary>
 public unsafe partial class ArmySupport
 {
@@ -25,9 +42,90 @@ public unsafe partial class ArmySupport
     private const int ParentOfTaskForce = 0x4B0, ActivityOfTaskForce = 0x4B8;
     private const int HoldMission = 0, InvasionSupportMission = 9, NavalCommandSize = 0x48, AddRegionSize = 0x38, CRefOfTaskForce = 0x08;
 
+    private const int InvasionMode = 3, InvasionOfTool = 552, InvasionSourceSize = 0x60;
+
+    [Function(CallingConventions.Microsoft)] public delegate byte InvasionToolClickFn(nint tool, nint a2, nint a3, nint a4, nint a5);
+
     private delegate* unmanaged<nint, nint, int, nint> _setNavalMission;
+    private IHook<InvasionToolClickFn>? _invasionToolClick;
+    private delegate* unmanaged<nint, int, nint, byte> _invasionTargetValid;
+    private delegate* unmanaged<nint, nint, int, byte, nint, int, int, nint> _invasionSourceCommand;
+
+    // The invasion being split: its orders (the tool moves to each new one), group and port, divisions per beach.
+    private readonly HashSet<int> _landingOrders = [];
+    private nint _landingGroup;
+    private int _landingSource;
+    private readonly List<(int Beach, List<nint> Units)> _landings = [];
     private readonly HashSet<int> _supported = []; // invasion order ids given task forces
     private PerGame _invasionGame = null!;
+
+    private void LoadInvasionSplit()
+    {
+        _invasionTargetValid = (delegate* unmanaged<nint, int, nint, byte>)Sig.Find(Signatures.InvasionTargetValid);
+        _invasionSourceCommand = (delegate* unmanaged<nint, nint, int, byte, nint, int, int, nint>)Sig.Find(Signatures.InvasionSourceCommand);
+        _invasionToolClick = Patches.Hook<InvasionToolClickFn>(Sig.Find(Signatures.InvasionToolClick), (tool, a2, a3, a4, a5) =>
+        {
+            var consumed = false;
+            Log.Guard("invasion split", () => consumed = SplitInvasion(tool));
+            return consumed ? (byte)1 : _invasionToolClick!.OriginalFunction(tool, a2, a3, a4, a5);
+        });
+    }
+
+    /// <summary>
+    /// A beach click on an invasion that already has one: the new beach gets its share of the divisions, taken from the beaches
+    /// holding the most, as a new invasion from the same port. True: the click is handled.
+    /// </summary>
+    private bool SplitInvasion(nint tool)
+    {
+        if (*(int*)(tool + ModeOfTool) != InvasionMode) return false;
+        var order = *(nint*)(tool + InvasionOfTool);
+        var group = *(nint*)(tool + GroupOfTool) is var g && g != 0 ? g : *(nint*)(tool + ArmyGroupOfTool);
+        var province = *(nint*)(tool + ProvinceOfTool);
+        if (order == 0 || group == 0 || province == 0 || *(int*)(order + SourceOfOrder) is var source && source <= 0) return false;
+        var beaches = Native.PdxArray<int>(order + TargetsOfOrder);
+        if (beaches.Length == 0) return false; // the first beach: vanilla sets it
+        var beach = Game.Id(province);
+        if (beach == source) return false;     // vanilla: clicking the port again deletes the invasion
+
+        if (group != _landingGroup || !_landingOrders.Contains(Order.Id(order))) // a new invasion: start from the order as it is
+        {
+            var units = new List<nint>();
+            foreach (var member in Order.Members(order)) if (member != 0) units.Add(member - MemberOfUnit);
+            (_landingGroup, _landingSource) = (group, source);
+            _landingOrders.Clear();
+            _landingOrders.Add(Order.Id(order));
+            _landings.Clear();
+            _landings.Add((beaches[0], units));
+        }
+        if (_landings.Any(l => l.Beach == beach)) return true;
+        if (_invasionTargetValid(order, beach, 0) == 0) return false; // vanilla refuses it as usual
+        var divisions = _landings.Sum(l => l.Units.Count);
+        if (divisions <= _landings.Count)
+        {
+            Log.Info($"invasion: {divisions} division(s) already on {_landings.Count} beaches, none left for province {beach}");
+            return true;
+        }
+
+        var share = new List<nint>();
+        for (var want = divisions / (_landings.Count + 1); share.Count < want;)
+        {
+            var fullest = _landings.MaxBy(l => l.Units.Count).Units;
+            share.Add(fullest[^1]);
+            fullest.RemoveAt(fullest.Count - 1);
+        }
+        foreach (var unit in share) Commands.Unassign(unit, group);
+        var country = Game.Country(Game.ControlledTag);
+        if (country == 0) return false;
+        var cmd = Allocator.AllocZeroed(InvasionSourceSize);
+        Native.WithPdxArray(share.ToArray(), units => _invasionSourceCommand(cmd, group, _landingSource, 0, units, 0, 0));
+        if (!Commands.TryPost(cmd)) return false;
+        _nextOrderId = Math.Max(_nextOrderId, *(int*)(country + OrderCounterOfCountry)) + 1; // the new invasion's id when it runs
+        Commands.TryPost(Commands.NewOrderCommand(Signatures.AddInvasionTarget, *(long*)(group + OrdersGroup.RefOffset), _nextOrderId, beach));
+        _landingOrders.Add(_nextOrderId);
+        _landings.Add((beach, share));
+        Log.Info($"invasion: {share.Count} division(s) to province {beach}; {_landings.Count} beaches for {divisions}");
+        return true;
+    }
 
     private void LoadInvasionSupport()
     {
