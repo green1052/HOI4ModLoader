@@ -23,11 +23,18 @@ public static class Signatures
     [VTable] public const string ItemGlue = "?$CLegacyButtonObserverGlue@VCOperativeBottomBarItem@@";
 
     [VTable] public const string Item = "COperativeBottomBarItem";
+
+    /// <summary>
+    /// Clears a finished operation from the operations list, as closing its overview does: frees operatives still tied to
+    /// it and removes it. Its outcome was applied when it finished. +0x28 operation CRef, +0x30 tag, +0x34 refund.
+    /// </summary>
+    [VTable] public const string DeleteOperation = "CDeleteOperationCommand";
 }
 
 /// <summary>
-/// Drag an operative in the intelligence screen's bottom bar to move it, as army cards are dragged: it follows the mouse and
-/// the others make room. The game has no command for this, so the agency's own list is reordered: single player only.
+/// The intelligence screen. Drag an operative in the bottom bar to move it, as army cards are dragged: it follows the mouse
+/// and the others make room. The game has no command for this, so the agency's own list is reordered: single player only.
+/// Finished operations clear themselves from the operations list a few days after they finished.
 /// </summary>
 [Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
 public unsafe class Intelligence : Plugin
@@ -42,6 +49,11 @@ public unsafe class Intelligence : Plugin
     private const int MouseUp = 1, MouseDown = 2, Click = 5;
     private const int DragPixels = 4;
     private const float Ease = 0.35f; // share of the way to its place an entry moves per frame
+    // Country: operations manager; its CPdxArray<COperationInstance*> at +0x10. Operation: CRef, finished (awaiting
+    // dismissal), start hour, duration in days. CDeleteOperationCommand: operation CRef, tag, refund.
+    private const int OperationsOfCountry = 0x15A8, InstancesOfOperations = 0x10;
+    private const int RefOfOperation = 0x08, FinishedOfOperation = 0x42, StartOfOperation = 0x70, DaysOfOperation = 0x80;
+    private const int OperationOfCommand = 0x28, TagOfCommand = 0x30, RefundOfCommand = 0x34, DeleteCommandSize = 0x38;
 
     [Function(CallingConventions.Microsoft)] public delegate nint DispatchFn(nint glue, nint ev);
 
@@ -57,9 +69,20 @@ public unsafe class Intelligence : Plugin
     private (int X, int Y) _downAt;
     private bool _dragging;
     private readonly Dictionary<nint, (float X, float Y)> _shown = [];
+    private readonly HashSet<long> _deleted = []; // operations already sent off, until the command runs
+    private PerGame _game = null!;
+    private int _dismissDays, _checkedDay = -1;
 
     public override void Load()
     {
+        _dismissDays = Config.Bind("Intelligence", "DismissDays", 7,
+            "Game days after an operation finished before it clears itself from the operations list (0: never).");
+        _game = new PerGame(() =>
+        {
+            _deleted.Clear();
+            _checkedDay = -1;
+        });
+        if (_dismissDays > 0) MainThread.Every(TimeSpan.FromSeconds(1), () => Log.Guard("operation dismissal", DismissFinished));
         _glueVTable = Sig.VTable(Signatures.ItemGlue);
         _itemVTable = Sig.VTable(Signatures.Item);
         _barRefresh = (delegate* unmanaged<nint, void>)Sig.Find(Signatures.BarRefresh);
@@ -88,6 +111,31 @@ public unsafe class Intelligence : Plugin
             if (dropped) _barRefresh(bar); // back to the normal layout, in the new order
             else if (_dragging) Log.Guard("operative drag", () => Animate(bar));
         });
+    }
+
+    /// <summary>Once a game day: the player's operations finished at least DismissDays ago are cleared, as the overview's close does.</summary>
+    private void DismissFinished()
+    {
+        if (!Game.HasStarted) return;
+        _game.Check();
+        if (Game.Hour / 24 == _checkedDay) return;
+        _checkedDay = Game.Hour / 24;
+        var tag = Game.ControlledTag;
+        var country = Game.Country(tag);
+        var operations = country == 0 ? 0 : *(nint*)(country + OperationsOfCountry);
+        if (operations == 0) return;
+        foreach (var operation in Native.PdxArray(operations + InstancesOfOperations))
+        {
+            if (operation == 0 || *(byte*)(operation + FinishedOfOperation) == 0) continue;
+            var finished = *(int*)(operation + StartOfOperation) + 24 * *(int*)(operation + DaysOfOperation);
+            var reference = *(long*)(operation + RefOfOperation);
+            if (Game.Hour < finished + 24 * _dismissDays || !_deleted.Add(reference)) continue;
+            var cmd = Commands.New(Signatures.DeleteOperation, DeleteCommandSize, 0, 0);
+            *(long*)(cmd + OperationOfCommand) = reference;
+            *(int*)(cmd + TagOfCommand) = tag;
+            *(byte*)(cmd + RefundOfCommand) = 0;
+            if (Commands.TryPost(cmd)) Log.Info("a finished operation cleared from the operations list");
+        }
     }
 
     /// <summary>The entry owning the glue, or 0.</summary>

@@ -1,2 +1,4 @@
 ﻿l_english:
-    com.green1052.intelligence.desc:0 "Drag an operative in the intelligence screen's bottom bar to another place, as army cards are dragged.\nSingle player only."
+    com.green1052.intelligence.desc:0 "The intelligence screen.\n- Drag an operative in the bottom bar to another place, as army cards are dragged\n- Finished operations clear themselves after a few days\nSingle player only."
+    com.green1052.intelligence.DismissDays:0 "Clear finished operations after (days)"
+    com.green1052.intelligence.DismissDays.desc:0 "Game days after an operation finished before it leaves the operations list. 0: never."
