@@ -29,6 +29,8 @@ public partial class ArmySupport : Plugin
             "With several paratrooper divisions on a paradrop, each further destination click takes its share of them.");
         var transports = Config.Bind("Paradrop", "AutoTransports", true,
             "A paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.");
+        var areaDrop = Config.Bind("Paradrop", "AreaDrop", true,
+            "Ctrl+Alt+D turns the selected army's area defence into paradrops on the painted states' provinces that match its ticked settings.");
         var organize = Config.Bind("Organize", "Organize", true,
             "Ctrl+Alt+G with divisions selected splits them into armies of the game's army size, each under the best idle general, in their army group or a new one.");
 
@@ -38,7 +40,8 @@ public partial class ArmySupport : Plugin
         if (organize) LoadOrganize();
         if (groundCrews) LoadGroundCrews(crewsReserve);
         if (aces) LoadAces();
-        if (splitDrops || transports) LoadParadrop(splitDrops, transports);
+        if (splitDrops || transports || areaDrop) LoadParadrop(splitDrops, transports);
+        if (areaDrop) LoadAreaDrop();
         if (!Multiplayer) LoadRailwayGuns(frontPenalty, noSea); // changes the game
     }
 }

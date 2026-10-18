@@ -128,12 +128,6 @@ public unsafe partial class ArmySupport
         var air = country == 0 ? 0 : Game.StrategicAir(tag);
         if (air == 0) return;
         var bases = Native.PdxArray(air + BasesOfAir);
-        var wings = new List<nint>();
-        foreach (var pool in Native.PdxArray(air + PoolsOfAir))
-        foreach (var wing in Native.PdxArray(pool + WingsOfPool))
-            if (wing != 0 && (*(int*)(wing + UnitTransport) != 0 || *(int*)(wing + UnitTransportCapacity) != 0)) wings.Add(wing);
-        if (wings.Count == 0) return;
-
         var groups = new HashSet<nint>();
         foreach (var unit in Game.Units(country))
             if (Division.Group(unit) is var group && group != 0) groups.Add(group);
@@ -144,27 +138,42 @@ public unsafe partial class ArmySupport
             var targets = Native.PdxArray<int>(order + TargetsOfOrder);
             var from = Game.Province(source);
             var to = targets.Length == 0 ? 0 : Game.Province(targets[0]);
-            if (from == 0 || to == 0) continue;
-            var airbase = BaseOf(bases, Province.State(from));
-            var region = *(nint*)(to + RegionOfProvince);
-            if (airbase == 0 || region == 0 || wings.Any(w => _baseOf(w) == airbase && (*(uint*)(w + MissionMask) & ParadropMission) != 0)) continue;
-            var room = _freeCapacity(airbase);
-            var sent = 0;
-            // ponytail: every idle transport that reaches goes; count planes per division if they should be shared out.
-            foreach (var wing in wings.ToList())
-            {
-                if (*(uint*)(wing + MissionMask) != 0 || *(long*)(wing + Destination) != 0 || *(nint*)(wing + AttachedArmy) != 0) continue; // busy
-                long rangeOut;
-                if (_maxSize(wing) > room || _inRange(0, region, airbase, *_range(wing, &rangeOut), 0) == 0) continue;
-                var cmd = Allocator.AllocZeroed(0x48);
-                _transfer(cmd, wing, airbase, 0, region, ParadropMission);
-                if (!Commands.TryPost(cmd)) continue;
-                room -= _maxSize(wing);
-                wings.Remove(wing);
-                sent++;
-            }
-            if (sent > 0) Log.Info($"paradrop: {sent} transport wing(s) to the airbase in province {source} for the drop on {targets[0]}");
+            var airbase = from == 0 ? 0 : BaseOf(bases, Province.State(from));
+            var region = to == 0 ? 0 : *(nint*)(to + RegionOfProvince);
+            if (airbase == 0 || region == 0 || TransportWings(air).Any(w => _baseOf(w) == airbase && (*(uint*)(w + MissionMask) & ParadropMission) != 0)) continue;
+            if (SendTransportsTo(air, airbase, region) is var sent and > 0)
+                Log.Info($"paradrop: {sent} transport wing(s) to the airbase in province {source} for the drop on {targets[0]}");
         }
+    }
+
+    /// <summary>The country's wings that can carry divisions.</summary>
+    private static List<nint> TransportWings(nint air)
+    {
+        var wings = new List<nint>();
+        foreach (var pool in Native.PdxArray(air + PoolsOfAir))
+        foreach (var wing in Native.PdxArray(pool + WingsOfPool))
+            if (wing != 0 && (*(int*)(wing + UnitTransport) != 0 || *(int*)(wing + UnitTransportCapacity) != 0)) wings.Add(wing);
+        return wings;
+    }
+
+    /// <summary>Sends the idle transport wings that fit and reach <paramref name="region"/> to the airbase on the paradrop mission: how many went.</summary>
+    private int SendTransportsTo(nint air, nint airbase, nint region)
+    {
+        var room = _freeCapacity(airbase);
+        var sent = 0;
+        // ponytail: every idle transport that reaches goes; count planes per division if they should be shared out.
+        foreach (var wing in TransportWings(air))
+        {
+            if (*(uint*)(wing + MissionMask) != 0 || *(long*)(wing + Destination) != 0 || *(nint*)(wing + AttachedArmy) != 0) continue; // busy
+            long rangeOut;
+            if (_maxSize(wing) > room || _inRange(0, region, airbase, *_range(wing, &rangeOut), 0) == 0) continue;
+            var cmd = Allocator.AllocZeroed(0x48);
+            _transfer(cmd, wing, airbase, 0, region, ParadropMission);
+            if (!Commands.TryPost(cmd)) continue;
+            room -= _maxSize(wing);
+            sent++;
+        }
+        return sent;
     }
 
     private static nint BaseOf(ReadOnlySpan<nint> bases, nint state)

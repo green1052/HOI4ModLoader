@@ -172,6 +172,10 @@ Settings: every threshold, each feature on/off.
   - Turned off where the fighting stops for three days. Regions you turn off yourself are left alone.
 - **Paradrop to several destinations** (`SplitDrops`, on): select several paratrooper divisions, press the paradrop button, click the airbase, then click destinations one after another.
   - Each further destination gets its share as a new paradrop from the same airbase; the divisions end up evenly spread.
+- **Area paradrop** (`AreaDrop`, on): with the paratroopers' army selected, paint an area defence over the target states and tick its settings, then press **Ctrl+Alt+D**.
+  - Provinces of those states matching a ticked setting (victory points, ports, airbases, borders, forts, coastline; railways: a supply hub) become destinations, empty ones and bigger victory points first; none ticked: all of them.
+  - One division per destination (shared out when there are fewer destinations); the area defence order is deleted.
+  - They start from the army's paradrop airbase, else the nearest airbase with transports on the paradrop mission. With none, idle transports are sent there: press again once they arrive.
 - **Auto paradrop transports** (`AutoTransports`, on): a paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.
 - **Army organizer** (`Organize`, on): select divisions and press **Ctrl+Alt+G**.
   - They are split into full armies of nearby divisions; an army already at least half full stays as it is.
