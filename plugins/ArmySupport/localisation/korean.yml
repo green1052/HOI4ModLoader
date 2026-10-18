@@ -18,8 +18,6 @@
     com.green1052.armysupport.Organize:0 "야전군 편성(Ctrl+Alt+G)"
     com.green1052.armysupport.Organize.desc:0 "사단을 선택하고 Ctrl+Alt+G를 누르면 가까운 사단끼리 야전군 정원에 맞춰 나눠 편성합니다.\n- 야전군마다 보직 없는 장군 중 가장 뛰어난 사람이 지휘\n- 사단 대부분이 속했던 집단군에 넣고, 없으면 새 집단군을 만들어 보직 없는 원수 중 가장 뛰어난 사람에게 맡김"
     com.green1052.armysupport.SplitDrops:0 "공수 목표 여러 곳"
-    com.green1052.armysupport.SplitDrops.desc:0 "공수 사단 여러 개로 공수할 때, 첫 도착지 뒤에 도착지를 더 찍으면 사단을 고르게 나눠 보냅니다.
-멀티플레이에서도 동작."
+    com.green1052.armysupport.SplitDrops.desc:0 "공수 사단 여러 개로 공수할 때, 첫 도착지 뒤에 도착지를 더 찍으면 사단을 고르게 나눠 보냅니다.\n멀티플레이에서도 동작."
     com.green1052.armysupport.AutoTransports:0 "공수 수송기 자동 배치"
-    com.green1052.armysupport.AutoTransports.desc:0 "공수 명령의 출발 공항에 공수 임무 수송기가 없으면, 목표까지 닿는 놀고 있는 수송기 항공단을 보냅니다.
-멀티플레이에서도 동작."
+    com.green1052.armysupport.AutoTransports.desc:0 "공수 명령의 출발 공항에 공수 임무 수송기가 없으면, 목표까지 닿는 놀고 있는 수송기 항공단을 보냅니다.\n멀티플레이에서도 동작."
