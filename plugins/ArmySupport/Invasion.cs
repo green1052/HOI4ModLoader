@@ -43,6 +43,7 @@ public unsafe partial class ArmySupport
     private const int HoldMission = 0, InvasionSupportMission = 9, NavalCommandSize = 0x48, AddRegionSize = 0x38, CRefOfTaskForce = 0x08;
 
     private const int InvasionMode = 3, InvasionOfTool = 552, InvasionSourceSize = 0x60;
+    private const int TerrainOfProvince = 0xB8, TerrainFlags = 0xD2, LandFlag = 1; // CProvince: its terrain, whose flags tell land
 
     [Function(CallingConventions.Microsoft)] public delegate byte InvasionToolClickFn(nint tool, nint a2, nint a3, nint a4, nint a5);
 
@@ -180,6 +181,8 @@ public unsafe partial class ArmySupport
             return; // the next invasion once these are busy
         }
     }
+
+    private static int Flags(nint p) => *(byte*)(*(nint*)(p + TerrainOfProvince) + TerrainFlags);
 
     /// <summary>Adds the strategic region ids of the sea provinces next to the province.</summary>
     private static void SeaRegionsNext(int province, HashSet<int> regions)

@@ -21,8 +21,6 @@
     com.green1052.armysupport.SplitDrops.desc:0 "공수 사단 여러 개로 공수할 때, 첫 도착지 뒤에 도착지를 더 찍으면 사단을 고르게 나눠 보냅니다.\n멀티플레이에서도 동작."
     com.green1052.armysupport.AutoTransports:0 "공수 수송기 자동 배치"
     com.green1052.armysupport.AutoTransports.desc:0 "공수 명령의 출발 공항에 공수 임무 수송기가 없으면, 목표까지 닿는 놀고 있는 수송기 항공단을 보냅니다.\n멀티플레이에서도 동작."
-    com.green1052.armysupport.AreaDrop:0 "지역 공수(Ctrl+Alt+D)"
-    com.green1052.armysupport.AreaDrop.desc:0 "공수 사단이 든 야전군으로 목표 주들에 지역 방어를 칠하고 노릴 것(승점, 항구, 공군 기지 등)을 체크한 뒤 Ctrl+Alt+D를 누르면, 조건에 맞는 프로빈스마다 사단을 하나씩 공수합니다.\n멀티플레이에서도 동작."
     com.green1052.armysupport.AutoSupport:0 "상륙 지원 자동 배치"
     com.green1052.armysupport.AutoSupport.desc:0 "상륙 지원 임무 함대가 없는 상륙 작전이 있으면, 대기 중인 함대를 출발 항구와 상륙 해안 앞 바다에 상륙 지원 임무로 보냅니다.\n멀티플레이에서도 동작."
     com.green1052.armysupport.SplitInvasions:0 "상륙 해안 여러 곳"
