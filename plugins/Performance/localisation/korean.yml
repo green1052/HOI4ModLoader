@@ -1,7 +1,9 @@
 ﻿l_korean:
     com.green1052.performance.name:0 "성능"
-    com.green1052.performance.desc:0 "반복 작업 일부를 덜 자주 해서 게임을 빠르게 합니다. 대신 반영이 조금 늦습니다.\n- 대상 지정 결정이 새 대상을 매일이 아니라 며칠마다 찾음\n- (선택) 배속 4~5에서 화면을 덜 자주 그려 게임 시간이 더 빨리 흐름\n싱글플레이 전용."
+    com.green1052.performance.desc:0 "게임을 빠르게 합니다. 5배속에서는 한 프레임이 게임 시간 1시간이라, 프레임에서 줄인 시간만큼 게임이 빨라집니다.\n- 대상 지정 결정이 새 대상을 매일이 아니라 며칠마다 찾음\n- 배속 4~5에서 지도를 몇 프레임마다 갱신\n- 병렬 작업을 모든 코어가 나눠 맡음(결과는 같음)\n싱글플레이 전용."
     com.green1052.performance.DecisionTargetDays:0 "결정 대상 검색 주기(일)"
     com.green1052.performance.DecisionTargetDays.desc:0 "대상 지정 결정이 새 대상을 이 일수마다 찾습니다(1: 바닐라처럼 매일).\n새로 유효해진 대상은 그만큼 늦게 나타납니다. 무효가 된 대상은 여전히 매일 빠집니다."
+    com.green1052.performance.MapEveryFrames:0 "배속 4~5 지도 갱신 간격(프레임)"
+    com.green1052.performance.MapEveryFrames.desc:0 "배속 4와 5에서 지도(프로빈스 색, 유닛, 아이콘)를 이 프레임 수마다 갱신합니다(1: 바닐라처럼 매 프레임).\n일시정지 중이나 배속 1~3에서는 매 프레임 갱신합니다."
     com.green1052.performance.FastSpeedFrameMs:0 "배속 4~5 화면 갱신 간격(ms)"
-    com.green1052.performance.FastSpeedFrameMs.desc:0 "배속 4와 5에서 화면을 최대 이 간격마다 그립니다(0: 바닐라처럼 매 프레임).\n게임 시간이 더 빨리 흐르지만 지도 갱신은 덜 부드러워집니다."
+    com.green1052.performance.FastSpeedFrameMs.desc:0 "배속 4와 5에서 화면을 최대 이 간격마다 그립니다(0: 바닐라처럼 매 프레임).\n-render_thread 실행 옵션을 쓰면 화면을 게임과 따로 그리므로 효과가 없습니다."

@@ -42,7 +42,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | Fonts | The game's text in an installed font or a .ttf/.otf/.ttc file | ✅ |
 | Reroll | A fresh random seed at every load, so reloading doesn't replay the same dice | Single player only |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
-| Performance | Targeted decisions look for new targets every few days; optional frame cap at speeds 4-5 | Single player only |
+| Performance | Targeted decisions look for new targets every few days; the map updates every few frames at speeds 4-5 | Single player only |
 | Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them; finished operations clear themselves | Single player only |
 
 ### Queues
@@ -330,7 +330,8 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 ### Performance
 Single player only (it changes when the game state updates).
 - **Decision targets** (`DecisionTargetDays`, 3; 1 is vanilla): targeted decisions look for new targets every few days instead of daily. Invalid targets still drop daily.
-- **Frame cap** (`FastSpeedFrameMs`, 0: off): at speeds 4 and 5, the screen is drawn at most every that many milliseconds, leaving more time for the simulation.
+- **Map updates** (`MapEveryFrames`, 3; 1 is vanilla): at speeds 4 and 5 the map (province colours, units, icons) updates every third frame. At speed 5 a frame is a game hour, so this was about 6 % more game time per second in a 1936 save. Paused and at speeds 1-3 it updates every frame.
+- **Frame cap** (`FastSpeedFrameMs`, 0: off): at speeds 4 and 5, the screen is drawn at most every that many milliseconds, leaving more time for the simulation. No effect with the `-render_thread` launch option.
 
 ### Intelligence
 Single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game).
@@ -356,9 +357,10 @@ Single player only: the game has no command to reorder operatives, so the agency
 - **Division stats:** fixes a crash when hovering a stat of a division template deleted while its view stayed open.
 
 ## Loader: mimalloc
-On by default: the game's memory allocations use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap.
-- `[Performance] Mimalloc = False` in `HOI4ModLoader\config\HOI4ModLoader.cfg` turns it off (at the next start).
-- The game sometimes reads memory it just freed, so small blocks are freed a little late and freed memory stays mapped, to avoid crashes.
+Off by default: the game's memory allocations can use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap.
+- `[Performance] Mimalloc = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` turns it on (at the next start).
+- Measured at speed 5 (HOI4 1.19.3, a 1936 save): about 2.5 % slower than the Windows heap, so it stays off.
+- When on: the game sometimes reads memory it just freed, so small blocks are freed a little late and freed memory stays mapped, to avoid crashes.
 
 ## Troubleshooting
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.

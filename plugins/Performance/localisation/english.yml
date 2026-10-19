@@ -1,6 +1,8 @@
 ﻿l_english:
-    com.green1052.performance.desc:0 "Speeds the game up by doing some recurring work less often, at the cost of a short delay.\n- Targeted decisions look for new targets every few days instead of daily\n- Optionally, at speeds 4-5 the screen is drawn less often, so game time runs faster\nSingle player only."
+    com.green1052.performance.desc:0 "Speeds the game up: at speed 5 a frame is a game hour, so time cut from a frame is game time gained.\n- Targeted decisions look for new targets every few days instead of daily\n- At speeds 4-5 the map updates every few frames\nSingle player only."
     com.green1052.performance.DecisionTargetDays:0 "Decision target search (days)"
     com.green1052.performance.DecisionTargetDays.desc:0 "Targeted decisions look for new targets every this many days (1: daily, as vanilla).\nA newly valid target shows up that much later. Targets that became invalid still drop out daily."
+    com.green1052.performance.MapEveryFrames:0 "Map update at speeds 4-5 (frames)"
+    com.green1052.performance.MapEveryFrames.desc:0 "At speeds 4 and 5, the map (province colours, units, icons) updates every this many frames (1: every frame, as vanilla).\nPaused and at speeds 1-3 it updates every frame."
     com.green1052.performance.FastSpeedFrameMs:0 "Frame interval at speeds 4-5 (ms)"
-    com.green1052.performance.FastSpeedFrameMs.desc:0 "At speeds 4 and 5, the screen is drawn at most every this many milliseconds (0: every frame, as vanilla).\nGame time runs faster, but the map updates less smoothly."
+    com.green1052.performance.FastSpeedFrameMs.desc:0 "At speeds 4 and 5, the screen is drawn at most every this many milliseconds (0: every frame, as vanilla).\nHas no effect with the -render_thread launch option, which already draws beside the game."
