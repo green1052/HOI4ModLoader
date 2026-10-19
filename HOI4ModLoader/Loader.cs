@@ -54,8 +54,8 @@ public static class Loader
                 "Also write DEBUG lines to LogOutput.log: every unit move and front change the plugins make. Off: only actions, summaries and errors.");
             MapArrows.Enabled = config.Bind("Debug", "AiActionArrows", false,
                 "Flash a map arrow for each front line action the AI plugins take (encirclements, breakouts, assaults, filling holes).");
-            if (config.Bind("Performance", "Mimalloc", true,
-                "Use mimalloc instead of the Windows heap for the game's memory. Takes effect at the next start."))
+            if (config.Bind("Performance", "Mimalloc", false,
+                "Use mimalloc instead of the Windows heap for the game's memory. Measured slower than the Windows heap at speed 5 (1.19.3). Takes effect at the next start."))
             {
                 Patches.Owner = "HOI4ModLoader"; // never reverted
                 try
