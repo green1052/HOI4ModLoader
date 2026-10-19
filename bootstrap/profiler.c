@@ -1,7 +1,8 @@
 // The profiler's sampling (Profiler.cs starts it and writes the report). Each other thread is sampled in turn, a pass
-// about every millisecond: its instruction pointer and its stack, unwound through hoi4.exe and the system modules.
-// While a thread is suspended, nothing here allocates, locks or runs C#, since the thread may hold that lock. Unwinding
-// stays in modules with static tables: JIT code would need ntdll's locked dynamic tables.
+// about every millisecond: its instruction pointer and its stack, unwound through every loaded module (hoi4.exe, tbb.dll,
+// mimalloc.dll, the system DLLs...). While a thread is suspended, nothing here allocates, locks or runs C#, since the
+// thread may hold that lock. Unwinding stays in modules with static tables: JIT code and hook stubs would need ntdll's
+// locked dynamic tables.
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdint.h>
@@ -11,17 +12,22 @@
 #define MAX_FRAMES 48
 #define MAX_THREADS 256
 #define THREADS_EVERY_MS 200
+#define MAX_MODULES 512
 
 typedef struct { uint64_t key; uint32_t count; } Slot;
 typedef struct { Slot slots[SLOTS]; uint64_t dropped; } Table;
 typedef struct { DWORD id; uint64_t samples, waiting; } ThreadStats;
 
-static Table g_tables[3]; // leaf addresses; hoi4.exe function starts on running stacks; main thread wait callers
+// Leaf addresses; hoi4.exe function starts on running stacks; main thread wait callers; function starts (any module) on
+// the main thread's running stacks.
+static Table g_tables[4];
 static ThreadStats g_threads[MAX_THREADS];
 static int g_threadCount;
 static uint64_t g_samples;
 static DWORD g_main;
-static uint8_t *g_exe, *g_exeEnd, *g_ntdll, *g_ntdllEnd, *g_kernel32, *g_kernel32End, *g_kernelbase, *g_kernelbaseEnd;
+static uint8_t *g_exe, *g_exeEnd, *g_ntdll, *g_ntdllEnd;
+static struct { uint8_t *begin, *end; } g_modules[MAX_MODULES]; // loaded modules, listed when profiling starts
+static int g_moduleCount;
 
 static void Add(Table* table, uint64_t key) {
     size_t i = (key * 0x9E3779B97F4A7C15ull) >> 46;
@@ -33,6 +39,11 @@ static void Add(Table* table, uint64_t key) {
 }
 
 static int In(uint64_t at, uint8_t* begin, uint8_t* end) { return at >= (uint64_t)begin && at < (uint64_t)end; }
+
+static int InModule(uint64_t at) {
+    for (int i = 0; i < g_moduleCount; i++) if (In(at, g_modules[i].begin, g_modules[i].end)) return 1;
+    return 0;
+}
 
 static void ModuleRange(const wchar_t* name, uint8_t** begin, uint8_t** end) {
     *begin = (uint8_t*)GetModuleHandleW(name);
@@ -49,7 +60,7 @@ static ThreadStats* Stats(DWORD id) {
     return &g_threads[MAX_THREADS - 1];
 }
 
-// One sample of a suspended thread. The walk stops at frames outside hoi4.exe and the system modules.
+// One sample of a suspended thread. The walk stops at frames outside the loaded modules.
 static void Record(DWORD id, CONTEXT* ctx) {
     g_samples++;
     ThreadStats* stats = Stats(id);
@@ -61,21 +72,24 @@ static void Record(DWORD id, CONTEXT* ctx) {
     uint64_t seen[MAX_FRAMES];
     int seenCount = 0, mainWaitDone = 0;
     for (int depth = 0; depth < MAX_FRAMES && ctx->Rip; depth++) {
-        if (!In(ctx->Rip, g_exe, g_exeEnd) && !In(ctx->Rip, g_ntdll, g_ntdllEnd) && !In(ctx->Rip, g_kernel32, g_kernel32End)
-            && !In(ctx->Rip, g_kernelbase, g_kernelbaseEnd)) break; // JIT code, hook stub or other module
+        if (!InModule(ctx->Rip)) break; // JIT code or hook stub
         uint64_t image = 0;
         PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry(ctx->Rip, &image, NULL);
-        if (In(ctx->Rip, g_exe, g_exeEnd) && fe) {
+        if (fe) {
             uint64_t begin = image + fe->BeginAddress;
-            if (waiting && id == g_main && !mainWaitDone) { Add(&g_tables[2], begin); mainWaitDone = 1; }
+            int exe = In(ctx->Rip, g_exe, g_exeEnd);
+            if (exe && waiting && id == g_main && !mainWaitDone) { Add(&g_tables[2], begin); mainWaitDone = 1; }
             if (!waiting) {
                 int dup = 0;
                 for (int i = 0; i < seenCount; i++) dup |= seen[i] == begin;
-                if (!dup) { seen[seenCount++] = begin; Add(&g_tables[1], begin); } // inclusive: once per stack
+                if (!dup) { // inclusive: once per stack
+                    seen[seenCount++] = begin;
+                    if (exe) Add(&g_tables[1], begin);
+                    if (id == g_main) Add(&g_tables[3], begin);
+                }
             }
         }
         if (!fe) { // a leaf function: its return address is on top of the stack
-            if (!In(ctx->Rip, g_ntdll, g_ntdllEnd) && !In(ctx->Rip, g_exe, g_exeEnd)) break;
             ctx->Rip = *(uint64_t*)ctx->Rsp;
             ctx->Rsp += 8;
             continue;
@@ -99,8 +113,12 @@ void hm_profile(DWORD ms, DWORD mainThread) {
     static __declspec(align(16)) CONTEXT context;
     ModuleRange(NULL, &g_exe, &g_exeEnd);
     ModuleRange(L"ntdll.dll", &g_ntdll, &g_ntdllEnd);
-    ModuleRange(L"kernel32.dll", &g_kernel32, &g_kernel32End);
-    ModuleRange(L"kernelbase.dll", &g_kernelbase, &g_kernelbaseEnd);
+    g_moduleCount = 0;
+    HANDLE modules = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    MODULEENTRY32W me = {sizeof me};
+    for (BOOL ok = Module32FirstW(modules, &me); ok && g_moduleCount < MAX_MODULES; ok = Module32NextW(modules, &me))
+        g_modules[g_moduleCount].begin = me.modBaseAddr, g_modules[g_moduleCount++].end = me.modBaseAddr + me.modBaseSize;
+    CloseHandle(modules);
     memset(g_tables, 0, sizeof g_tables);
     g_threadCount = 0, g_samples = 0, g_main = mainThread;
     int count = 0;
@@ -136,7 +154,8 @@ void hm_profile(DWORD ms, DWORD mainThread) {
     for (int i = 0; i < count; i++) CloseHandle(threads[i]);
 }
 
-// 0: leaf addresses, 1: hoi4.exe functions on running stacks (inclusive), 2: main thread waits by caller. SLOTS entries.
+// 0: leaf addresses, 1: hoi4.exe functions on running stacks (inclusive), 2: main thread waits by caller, 3: functions
+// of any module on the main thread's running stacks (inclusive). SLOTS entries.
 Slot* hm_profile_table(int which, uint64_t* dropped) {
     *dropped = g_tables[which].dropped;
     return g_tables[which].slots;

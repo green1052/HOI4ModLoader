@@ -7,8 +7,8 @@ namespace HOI4ModLoader.Bootstrap;
 /// Sampling profiler (profiler.c, a pass about every millisecond).
 /// - HOI4ModLoader\profile-startup: profiles the first 150 s into startup-profile.txt.
 /// - Creating HOI4ModLoader\profile-now: profiles the next 60 s into profile-&lt;tick&gt;.txt.
-/// The report lists each thread's running time, the hoi4.exe functions on running stacks (inclusive), and where the main
-/// thread waits.
+/// The report lists each thread's running time, the hoi4.exe functions on running stacks (inclusive), the main thread's
+/// own stacks in every module (tbb.dll's waits for parallel work included), and where the main thread waits.
 /// </summary>
 internal static unsafe class Profiler
 {
@@ -71,6 +71,7 @@ internal static unsafe class Profiler
         foreach (var t in threads.OrderByDescending(t => t.Samples - t.Waiting))
             text.Append($"{t.Id}{(t.Id == _main ? " (main)" : "")}: {t.Samples - t.Waiting} / {t.Samples}\r\n");
         Section(text, "hoi4.exe functions on running stacks (inclusive)", 1, 400);
+        Section(text, "main thread: functions on running stacks, any module (inclusive)", 3, 400);
         Section(text, "main thread waits, by the hoi4.exe function they are called from", 2, 100);
         Section(text, "leaf addresses", 0, 300);
         File.WriteAllText(output, text.ToString());
