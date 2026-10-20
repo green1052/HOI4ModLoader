@@ -106,10 +106,10 @@ public unsafe class Intelligence : Plugin
         _barUpdate = Patches.Hook<BarFn>(Sig.Find(Signatures.BarUpdate), bar =>
         {
             var dropped = false;
-            Log.Guard("operative drag", () => dropped = Drop());
+            if (_pressed != 0) Log.Guard("operative drag", () => dropped = Drop()); // most frames: no press, nothing allocated
             _barUpdate!.OriginalFunction(bar);
             if (dropped) _barRefresh(bar); // back to the normal layout, in the new order
-            else if (_dragging) Log.Guard("operative drag", () => Animate(bar));
+            else if (_dragging) Log.Guard("operative drag", (this, bar), static s => s.Item1.Animate(s.bar));
         });
     }
 

@@ -40,12 +40,24 @@ public sealed class Logger(string source)
     public void Guard(string what, Action action)
     {
         try { action(); }
-        catch (Exception e)
-        {
-            bool first;
-            lock (_failed) first = _failed.Add(what); // AI threads guard too
-            if (first) Error($"{what}: {e}");
-        }
+        catch (Exception e) { Failed(what, e); }
+    }
+
+    /// <summary>
+    /// <see cref="Guard(string, Action)"/> without a closure to allocate: for hooks that run every frame or for every item.
+    /// Pass what the action needs as <paramref name="state"/> (a value tuple) and make the lambda static.
+    /// </summary>
+    public void Guard<T>(string what, T state, Action<T> action)
+    {
+        try { action(state); }
+        catch (Exception e) { Failed(what, e); }
+    }
+
+    private void Failed(string what, Exception e)
+    {
+        bool first;
+        lock (_failed) first = _failed.Add(what); // AI threads guard too
+        if (first) Error($"{what}: {e}");
     }
 
     private void Write(string level, string message)

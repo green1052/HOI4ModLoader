@@ -55,6 +55,7 @@ public unsafe partial class ArmySupport
         if (split)
             _planToolClick = Patches.Hook<PlanToolClickFn>(Sig.Find(Signatures.PlanToolClick), (tool, input, hits) =>
             {
+                if (*(int*)(tool + ModeOfTool) != ParadropMode) return _planToolClick!.OriginalFunction(tool, input, hits); // nothing allocated
                 var consumed = false;
                 Log.Guard("paradrop split", () => consumed = SplitParadrop(tool));
                 return consumed ? (byte)1 : _planToolClick!.OriginalFunction(tool, input, hits);

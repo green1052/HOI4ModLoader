@@ -33,6 +33,8 @@ public static class Loader
     internal static IReadOnlyList<PluginAttribute> Known { get; private set; } = [];
     private static long _reloadAt = long.MaxValue; // a requested reload runs once nothing new was requested for a moment
     private static string _loadedFiles = "", _changedFiles = "";
+    private static FileSystemWatcher? _pluginWatcher;
+    private static volatile bool _pluginsTouched = true; // a DLL in plugins\ was written: check (on the main thread) until it settles
     private static int _generation;
 
     /// <summary>Plugins are loading for the first time, before the game reads its files; false on later (hot) reloads.</summary>
@@ -99,7 +101,18 @@ public static class Loader
 
             Patches.Owner = "HOI4ModLoader";
             if (followMultiplayer) MainThread.Every(TimeSpan.FromMilliseconds(250), FollowMultiplayer);
-            if (hotReload) MainThread.Every(TimeSpan.FromSeconds(1), ReloadIfChanged);
+            if (hotReload)
+            {
+                // Listing the plugin files each second cost the main thread a few ms; the watcher only flags a change.
+                Directory.CreateDirectory(PluginsDir);
+                _pluginWatcher = new FileSystemWatcher(PluginsDir, "*.dll") { NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size };
+                _pluginWatcher.Changed += (_, _) => _pluginsTouched = true;
+                _pluginWatcher.Created += (_, _) => _pluginsTouched = true;
+                _pluginWatcher.Deleted += (_, _) => _pluginsTouched = true;
+                _pluginWatcher.Renamed += (_, _) => _pluginsTouched = true;
+                _pluginWatcher.EnableRaisingEvents = true;
+                MainThread.Every(TimeSpan.FromSeconds(1), ReloadIfChanged);
+            }
             MainThread.Every(TimeSpan.FromMilliseconds(100), () =>
             {
                 if (Environment.TickCount64 < _reloadAt) return;
@@ -140,13 +153,15 @@ public static class Loader
     // prologue; suspend the other threads if that bites.
     private static void ReloadIfChanged()
     {
-        if (Multiplayer) return;
+        if (Multiplayer || !_pluginsTouched) return;
         var files = PluginFiles();
-        if (files == _loadedFiles || files != _changedFiles)
+        if (files == _loadedFiles || files != _changedFiles) // unchanged, or still being written: look again in a second
         {
+            _pluginsTouched = files != _loadedFiles;
             _changedFiles = files;
             return;
         }
+        _pluginsTouched = false;
         Log.Info("plugin files changed: reloading");
         Reload();
     }

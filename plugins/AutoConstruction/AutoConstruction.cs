@@ -156,9 +156,9 @@ public unsafe partial class AutoConstruction : Plugin
         _update = Patches.Hook<ViewFn>(Sig.Find(Signatures.UpdateBuildingItems), view =>
         {
             _update!.OriginalFunction(view);
-            Log.Guard("target labels", () =>
+            Log.Guard("target labels", (this, view), static s =>
             {
-                foreach (var item in Native.PdxArray(view + Items)) ShowTarget(item);
+                foreach (var item in Native.PdxArray(s.view + Items)) s.Item1.ShowTarget(item);
             });
         });
 

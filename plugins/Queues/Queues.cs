@@ -137,7 +137,7 @@ public unsafe class Queues : Plugin
         _techItemBonus = Patches.Hook<EntryFn>(techItemBonus, item =>
         {
             _techItemBonus!.OriginalFunction(item);
-            Log.Guard("tech numbers", () => LabelTech(item));
+            Log.Guard("tech numbers", (this, item), static s => s.Item1.LabelTech(s.item));
         });
         _focusClick = Patches.Hook<FocusClickFn>(focusClick, (view, focus, a3) =>
         {
@@ -151,7 +151,7 @@ public unsafe class Queues : Plugin
         _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
         {
             _focusNodeStates!.OriginalFunction(view, dt, cache);
-            Log.Guard("focus numbers", () => LabelFocuses(view));
+            Log.Guard("focus numbers", (this, view), static s => s.Item1.LabelFocuses(s.view));
         });
         _agencyClick = Patches.Hook<AgencyClickFn>(agencyClick, entry =>
         {
@@ -164,10 +164,10 @@ public unsafe class Queues : Plugin
         _agencyEntryRefresh = Patches.Hook<EntryFn>(agencyEntryRefresh, entry =>
         {
             _agencyEntryRefresh!.OriginalFunction(entry);
-            Log.Guard("agency numbers", () =>
+            Log.Guard("agency numbers", (this, entry), static s =>
             {
-                ShowPosition(*(nint*)(entry + WindowOfEntry), _agency, *(nint*)(entry + UpgradeOfEntry));
-                KeepClickable(entry);
+                s.Item1.ShowPosition(*(nint*)(s.entry + WindowOfEntry), s.Item1._agency, *(nint*)(s.entry + UpgradeOfEntry));
+                KeepClickable(s.entry);
             });
         });
         _agencyWindowRefresh = Patches.Hook<WindowFn>(agencyWindowRefresh, window =>

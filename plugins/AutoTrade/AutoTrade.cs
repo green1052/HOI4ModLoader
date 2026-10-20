@@ -123,7 +123,7 @@ public unsafe partial class AutoTrade : Plugin
         _update = Patches.Hook<UpdateFn>(update, (item, unused) =>
         {
             _update!.OriginalFunction(item, unused);
-            Log.Guard("labels", () => Labels(item));
+            Log.Guard("labels", (this, item), static s => s.Item1.Labels(s.item));
         });
 
         MainThread.Every(TimeSpan.FromSeconds(1), Pump);

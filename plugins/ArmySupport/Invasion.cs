@@ -66,6 +66,8 @@ public unsafe partial class ArmySupport
         _invasionSourceCommand = (delegate* unmanaged<nint, nint, int, byte, nint, int, int, nint>)Sig.Find(Signatures.InvasionSourceCommand);
         _invasionToolClick = Patches.Hook<InvasionToolClickFn>(Sig.Find(Signatures.InvasionToolClick), (tool, a2, a3, a4, a5) =>
         {
+            // Every click of the battle plan tool lands here: the other modes go straight on, with nothing allocated.
+            if (*(int*)(tool + ModeOfTool) != InvasionMode) return _invasionToolClick!.OriginalFunction(tool, a2, a3, a4, a5);
             var consumed = false;
             Log.Guard("invasion split", () => consumed = SplitInvasion(tool));
             return consumed ? (byte)1 : _invasionToolClick!.OriginalFunction(tool, a2, a3, a4, a5);
