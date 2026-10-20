@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <!-- The loader's version: the main menu, the Mods tab and the log show it. -->
-        <Version>1.3.1</Version>
+        <Version>1.3.2</Version>
         <!-- Hosted from native code (bootstrap): emits runtimeconfig.json and copies dependencies. -->
         <EnableDynamicLoading>true</EnableDynamicLoading>
     </PropertyGroup>
