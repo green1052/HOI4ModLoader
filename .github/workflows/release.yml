@@ -43,7 +43,7 @@ jobs:
                 run: |
                     dotnet build HOI4ModLoader.slnx -c Release -p:DeployDir=out
                     if ($LASTEXITCODE) { exit $LASTEXITCODE }
-                    foreach ($file in "out\version.dll", "out\HOI4ModLoader\core\HOI4ModLoader.dll", "out\HOI4ModLoader\core\mimalloc.dll") {
+                    foreach ($file in "out\version.dll", "out\HOI4ModLoader\core\HOI4ModLoader.dll") {
                         if (!(Test-Path $file)) { throw "$file missing" }
                     }
 

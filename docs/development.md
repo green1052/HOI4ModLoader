@@ -3,7 +3,7 @@
 ## Layout
 | Path | What |
 |---|---|
-| `bootstrap/` | `version.dll` proxy: C# compiled with Native AOT (`Boot.cs`: boots .NET 10 through hostfxr just before the game's entry point; the profiler and start-up prefetch) linked with C for what runs on the game's threads (`native.c`: the export forwarders, the entry point hook and the crash handler; the profiler's sampling, the prefetch's file recorder and the mimalloc glue, `allocator.c`). |
+| `bootstrap/` | `version.dll` proxy: C# compiled with Native AOT (`Boot.cs`: boots .NET 10 through hostfxr just before the game's entry point; the profiler and start-up prefetch) linked with C for what runs on the game's threads (`native.c`: the export forwarders, the entry point hook and the crash handler; the profiler's sampling and the prefetch's file recorder). |
 | `HOI4ModLoader/` | The core: plugin loading, patch API, signature scanning, config, logging, game structures, the settings window's Mods tab, the main menu version label. |
 | `plugins/<name>/` | One plugin per folder. |
 | `plugins/<name>/gui/` | (optional) GUI snippets for `[assembly: GuiPatch]`, embedded in the DLL. |
@@ -19,7 +19,6 @@ dotnet build
 - Every build deploys into the game folder (found through Steam's registry entry, or `-p:HOI4Dir=`).
 - With the game running, plugins hot reload; locked core files only warn.
 - `bootstrap` is published (`dotnet publish bootstrap`, Native AOT) when its sources change; it needs the Visual Studio C++ tools for the C compiler and the linker.
-- mimalloc is Microsoft's official release (version and SHA-256 pinned), downloaded at build time; it isn't in the repository.
 
 A release folder (`out\`, relative to the repository). Release builds leave out the `.pdb` symbols (`-p:DeploySymbols=true` keeps them):
 ```
@@ -93,13 +92,6 @@ If a pattern stops matching after a game update, the loader leaves the vanilla f
 - Set `WaitForDebugger = True` in `config\HOI4ModLoader.cfg`, start the game and attach a debugger to `hoi4.exe`: it stops before `Load()`.
 - Rebuilding a plugin with the game running reverts every patch and loads the new DLLs. Plugin state (queues and such) resets. `HotReload = False` turns it off.
 - `HOI4ModLoader\crash.log` (kept across starts, deleted at start once past 1 MB): native faults on a thread inside a hook or timer (the label names the hook the thread is under; the faulting `module+offset` says whose code it was, so a hook's label also covers the game original it calls), faults outside every module (hook stubs), and .NET's own fatal errors with the managed stack. `CrashTest = 1` or `2` under `[Debug]` crashes the game on purpose once, to check it.
-
-## How mimalloc is wired in
-- `hoi4.exe` carries its own allocation functions (`malloc`, `calloc`, `realloc`, `free`, `_msize`; static CRT). Before the game's CRT starts, the loader redirects them to a few lines of native code in `version.dll` (`bootstrap\allocator.c`).
-- Memory allocated before the switch is freed back to the CRT heap, so mixing is safe.
-- The process-wide redirect (ucrtbase) is off (`MIMALLOC_DISABLE_REDIRECT=1`): it doesn't reach the game itself and would only change other DLLs.
-- Off by default (`[Performance] Mimalloc`): measured about 2.5 % slower than the Windows heap at speed 5 (1936 save, restart A/B), most likely the quarantine below. The game has use-after-free bugs the Windows heap tolerates (it leaves a freed block's contents alone); mimalloc writes its free-list pointer over the first qword (a vtable). So `hm_free` quarantines blocks up to 4 KiB: each thread keeps its last 16384 such frees in a ring and frees the oldest as a new one comes in (mimalloc still frees on the freeing thread; the ring is flushed by an FLS callback when the thread exits).
-- Known case, guaranteed beyond the quarantine: ActivateDecision (`Allocator.ActivateDecisionSig`) runs a targeted decision's effect, which can free the decision instance, then calls its vtable. With mimalloc on the loader hooks it and wraps it in `hm_defer(1)` / `hm_defer(0)`: that thread's frees are queued and done when the call returns (nesting counts; the queue is capped, past that frees happen at once).
 
 ## Multiplayer detection
 A session whose server is a `CNetworkServer` (host) or `CProxyServer` (client) is multiplayer. Joining a lobby unloads `AffectsGameState` plugins; returning to single player loads them again.

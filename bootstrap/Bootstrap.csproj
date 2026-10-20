@@ -19,7 +19,7 @@
     <ItemGroup>
         <NativeSource Include="*.c" />
         <NativeObject Include="@(NativeSource->'$(MSBuildProjectDirectory)\$(IntermediateOutputPath)native\%(Filename).obj')" />
-        <!-- Linked in whole (allocator.c's exports are only reached at run time) and called directly, not through LoadLibrary. -->
+        <!-- Linked in and called directly, not through LoadLibrary. -->
         <NativeLibrary Include="@(NativeObject)" />
         <DirectPInvoke Include="native" />
         <!-- NativeAOT brings its own DllMain: native.c's entry point wraps the CRT's and then hooks hoi4.exe's. -->

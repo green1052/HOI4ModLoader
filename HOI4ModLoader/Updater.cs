@@ -40,6 +40,13 @@ internal static class Updater
             catch (Exception e) { Log.Error($"remove {Path.GetFileName(file)}: {e.Message}"); }
         }
 
+        // mimalloc, dropped in 1.3.1: slower than the Windows heap at speed 5.
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(Loader.ModsDir, "core"), "mimalloc*.dll"))
+        {
+            try { File.Delete(file); }
+            catch (Exception) { }
+        }
+
         var leftovers = Directory.EnumerateFiles(Loader.ModsDir, "*.old", SearchOption.AllDirectories)
             .Concat(Directory.EnumerateFiles(Loader.ModsDir, "*.new", SearchOption.AllDirectories))
             .Concat(Directory.EnumerateFiles(Loader.GameDir, "version.dll.*"));

@@ -1,6 +1,6 @@
 // The profiler's sampling (Profiler.cs starts it and writes the report). Each other thread is sampled in turn, a pass
-// about every millisecond: its instruction pointer and its stack, unwound through every loaded module (hoi4.exe, tbb.dll,
-// mimalloc.dll, the system DLLs...). While a thread is suspended, nothing here allocates, locks or runs C#, since the
+// about every millisecond: its instruction pointer and its stack, unwound through every loaded module (hoi4.exe, tbb.dll, the
+// system DLLs...). While a thread is suspended, nothing here allocates, locks or runs C#, since the
 // thread may hold that lock. Unwinding stays in modules with static tables: JIT code and hook stubs would need ntdll's
 // locked dynamic tables.
 #include <windows.h>

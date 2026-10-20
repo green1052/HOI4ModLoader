@@ -356,12 +356,6 @@ Single player only: the game has no command to reorder operatives, so the agency
 - **Intelligence agency:** fixes a crash on loading a save after the game removed an operative from the wrong agency (error.log: `RemoveOperative: ... not found in agency=---`).
 - **Division stats:** fixes a crash when hovering a stat of a division template deleted while its view stayed open.
 
-## Loader: mimalloc
-Off by default: the game's memory allocations can use Microsoft's [mimalloc](https://github.com/microsoft/mimalloc) instead of the Windows heap.
-- `[Performance] Mimalloc = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` turns it on (at the next start).
-- Measured at speed 5 (HOI4 1.19.3, a 1936 save): about 2.5 % slower than the Windows heap, so it stays off.
-- When on: the game sometimes reads memory it just freed, so small blocks are freed a little late and freed memory stays mapped, to avoid crashes.
-
 ## Troubleshooting
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.
 - **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins made for a game version (1.19.3) don't load on another; `[General] IgnoreGameVersion = True` in the plugin's config loads them anyway (may crash).
