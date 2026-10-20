@@ -50,7 +50,7 @@ public unsafe partial class AiAssist
         _moveShips = (delegate* unmanaged<nint, nint, nint, byte, int, byte, nint>)Sig.Find(Signatures.MoveShips);
         _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
-        Allocator.Free(Allocator.AllocZeroed(NavalCommandSize)); // resolve the heap functions here, not on AI threads
+        Allocator.Resolve(); // the heap functions are found here, not on AI threads
         if (bombard)
             _filterTaskForces = Patches.Hook<FilterTaskForcesFn>(Sig.Find(Signatures.FilterTaskForces), (list, unused) =>
             {

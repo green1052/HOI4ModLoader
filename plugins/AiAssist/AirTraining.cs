@@ -40,7 +40,7 @@ public unsafe partial class AiAssist
         _xpLevel = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.WingXpLevel);
         _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
-        Allocator.Free(Allocator.AllocZeroed(SetMissionSize)); // resolves the heap functions here, not on AI threads
+        Allocator.Resolve(); // the heap functions are found here, not on AI threads
         _assignWing = Patches.Hook<AssignWingFn>(Sig.Find(Signatures.AssignWing), (wing, airbase, region, mission, cancelTransfer) =>
         {
             var train = false;

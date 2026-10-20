@@ -33,7 +33,8 @@ public unsafe partial class AiAssist
         _belowMaxLevel = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.BelowMaxLevel);
         _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
-        Commands.Free(Commands.NewOrderCommand("COrderSetTrainingCommand", 0, 0, 0)); // resolves the class and heap here, not on AI threads
+        _ = Sig.VTable("COrderSetTrainingCommand"); // the class and the heap functions are found here, not on AI threads
+        Allocator.Resolve();
         _updateArmyTraining = Patches.Hook<UpdateArmyTrainingFn>(Sig.Find(Signatures.UpdateArmyTraining), (country, haltAll, fronts) =>
         {
             var done = false;
