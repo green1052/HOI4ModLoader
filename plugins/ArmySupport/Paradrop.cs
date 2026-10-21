@@ -2,6 +2,9 @@ using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
+// Key for the battle plan's paradrop button (vanilla has none): G.
+[assembly: GuiPatch("interface/battleplantools.gui", "gui/shortcut_paradrop.gui", After = @"name = ""btn_order_draw_paradrop""")]
+
 namespace ArmySupport;
 
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>

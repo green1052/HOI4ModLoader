@@ -2,6 +2,10 @@ using HOI4ModLoader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
+// Keys for the battle plan's naval invasion buttons (vanilla has none): D, and Ctrl+D with a floating harbour.
+[assembly: GuiPatch("interface/battleplantools.gui", "gui/shortcut_naval_invasion.gui", After = @"name = ""btn_order_draw_naval_inv""")]
+[assembly: GuiPatch("interface/battleplantools.gui", "gui/shortcut_naval_invasion_harbor.gui", After = @"name = ""btn_order_draw_naval_inv_with_harbor""")]
+
 namespace ArmySupport;
 
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>

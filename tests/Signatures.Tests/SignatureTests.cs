@@ -71,5 +71,5 @@ public class SignatureTests
     }
 
     [Fact]
-    public void FoundGuiPatches() => Assert.Equal(5, GuiPatches().Count);
+    public void FoundGuiPatches() => Assert.Equal(8, GuiPatches().Count);
 }

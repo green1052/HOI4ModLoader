@@ -1,6 +1,6 @@
 ﻿l_korean:
     com.green1052.armysupport.name:0 "육군 지원"
-    com.green1052.armysupport.desc:0 "항공단·열차포 배속, 항공단 재배치, 야전군 편성을 돕습니다.\n- 원수 카드 우클릭: 선택한 항공단·열차포를 원수에게 배속\n- 공항 Shift+우클릭: 자리가 남는 만큼만 항공단 이동\n- Ctrl+Alt+G: 선택한 사단을 야전군으로 나눠 편성\n- 자동 재배치, 자동 지상 근무단, 자동 에이스 배치\n멀티에서도 동작합니다(열차포 설정은 싱글 전용)."
+    com.green1052.armysupport.desc:0 "항공단·열차포 배속, 항공단 재배치, 야전군 편성을 돕습니다.\n- 원수 카드 우클릭: 선택한 항공단·열차포를 원수에게 배속\n- 공항 Shift+우클릭: 자리가 남는 만큼만 항공단 이동\n- Ctrl+Alt+G: 선택한 사단을 야전군으로 나눠 편성\n- 전투 계획 단축키: D 상륙, Ctrl+D 부유항 상륙, G 공수\n- 자동 재배치, 자동 지상 근무단, 자동 에이스 배치\n멀티에서도 동작합니다(열차포 설정은 싱글 전용)."
     com.green1052.armysupport.FieldMarshal:0 "원수 배속"
     com.green1052.armysupport.FieldMarshal.desc:0 "항공단이나 열차포를 선택한 채 원수 카드를 우클릭하면 배속합니다.\n싱글에서는 원수에게 직접, 멀티에서는 그 원수의 야전군들에 나눠 배속합니다."
     com.green1052.armysupport.FrontPenalty:0 "열차포: 최전선 감점"
