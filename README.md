@@ -37,7 +37,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | AutoConstruction | Auto construction targets per building, auto supply, auto production | ✅ |
 | AutoTrade | Imports resources you are short of (oil by your fuel), cuts imports you no longer need, draws your trade routes | ✅ |
 | FrontLine | Front line micro (rotation, plugging, cordons, escape, attacks, reserves) plus battle plan and operation (blitz, pincer) hotkeys | ✅ |
-| ArmySupport | Air wings and railway guns for field marshals, railway gun positioning, airbase capacity, auto rebase, auto ground crews, army organizer | ✅ (field marshals: spread over armies; railway gun positioning: single player) |
+| ArmySupport | Air wings and railway guns for field marshals, railway gun positioning, airbase capacity, auto rebase, auto ground crews and aces, paradrops and invasions to several targets with auto support, battle plan keys for them, army organizer | ✅ (field marshals: spread over armies; railway gun positioning: single player) |
 | ChecksumPatcher | Keeps achievements with mods | ✅ |
 | Fonts | The game's text in an installed font or a .ttf/.otf/.ttc file | ✅ |
 | Reroll | A fresh random seed at every load, so reloading doesn't replay the same dice | Single player only |
@@ -335,6 +335,13 @@ Single player only (it changes when the game state updates).
 - **Map updates** (`MapEveryFrames`, 3; 1 is vanilla): at speeds 4 and 5 the map (province colours, units, icons) updates every third frame. At speed 5 a frame is a game hour, so this was about 6 % more game time per second in a 1936 save. Paused and at speeds 1-3 it updates every frame.
 - **Frame cap** (`FastSpeedFrameMs`, 0: off): at speeds 4 and 5, the screen is drawn at most every that many milliseconds, leaving more time for the simulation. No effect with the `-render_thread` launch option.
 
+**Speed tips** (game options, no plugin needed; measured at speed 5 in a 1936 save):
+- At speed 5 the game runs one game hour per frame, and the simulation, not the graphics card, sets the pace. Lowering graphics settings or raising `max_refresh_rate` in `settings.txt` (`Documents\Paradox Interactive\Hearts of Iron IV`) changed nothing there.
+- The `-render_thread` launch option (Steam → Properties → Launch options; DirectX 11) draws the screen beside the next hour's simulation instead of after it. It is an undocumented game option: if you see glitches, take it out.
+- Turn vsync off: with it on, speed 5 waits for the monitor.
+- Autosaves pause the game while they write. Binary saves (`save_as_binary=yes` in `settings.txt`) halve that; a longer autosave interval (Settings → Game) removes most of it.
+- Keep the game window in front: in the background the game slows itself down.
+
 ### Intelligence
 Single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game).
 - In the intelligence screen, drag an operative in the bottom bar to another place, as army cards are dragged: it follows the mouse and the others make room.
@@ -352,7 +359,7 @@ Single player only: the game has no command to reorder operatives, so the agency
 - **Signature cache:** the loader's code lookups are cached per game exe (`HOI4ModLoader\cache\signatures-*.txt`).
 - **Profiler:**
   - An empty `HOI4ModLoader\profile-startup` file makes the next start write `HOI4ModLoader\startup-profile.txt` (the first 150 s).
-  - Creating `HOI4ModLoader\profile-now` while the game runs profiles the next 60 s into `profile-<tick>.txt`.
+  - Creating `HOI4ModLoader\profile-now` while the game runs profiles the next 60 s into `profile-<tick>.txt`, with a section for the main thread alone (it sets the game's speed).
 
 ## Loader: game fixes
 - **Intelligence agency:** fixes a crash on loading a save after the game removed an operative from the wrong agency (error.log: `RemoveOperative: ... not found in agency=---`).
@@ -362,7 +369,7 @@ Single player only: the game has no command to reorder operatives, so the agency
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.
 - **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins made for a game version (1.19.3) don't load on another; `[General] IgnoreGameVersion = True` in the plugin's config loads them anyway (may crash).
 - **The game crashed:** `HOI4ModLoader\crash.log` names the code that faulted (and the plugin hook, if any). Include it with a bug report.
-- **UI elements missing or broken:** other mods replacing the same interface files (settings window, main menu, construction tab, intelligence agency, army group card) can conflict. The loader's versions win.
+- **UI elements missing or broken:** other mods replacing the same interface files (settings window, main menu, construction tab, intelligence agency, army group card, battle plan tools) can conflict. The loader's versions win.
 - **Turning a plugin off:** use the Mods tab, or set `Enabled = False` in `config\<plugin id>.cfg`.
 - **The log:** `HOI4ModLoader\LogOutput.log` rolls over to `LogOutput.old.log` past 20 MB. `[Debug] VerboseLog = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` logs every FrontLine move and AI Assist front change (very long).
 - **What do FrontLine and AI Assist do?** `[Debug] AiActionArrows = True` in `HOI4ModLoader\config\HOI4ModLoader.cfg` flashes a map arrow for each front line action they take. Arrows show once the game has drawn one of its own (select a unit).

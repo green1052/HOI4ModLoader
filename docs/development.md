@@ -62,6 +62,8 @@ public class MyPlugin : Plugin
 - `Config.Bind` settings in any section but `[General]` show in the Mods tab (true/false as checkboxes, numbers with arrows), in the order they're bound; clamp numbers to a sane range.
 - Bind every setting in `Load()`, unconditionally (even a switched-off feature's, before anything that can throw): after a successful load the loader deletes the entries the plugin didn't bind, as settings a newer version dropped. At startup it also deletes `config\com.green1052.*.cfg` files whose plugin is no longer in `plugins\`.
 - Register patches and `MainThread.Every` timers in `Load()`, so a reload cleans them up.
+- Plugins load before the game's CRT has made its heap: `Allocator.Alloc` / `Commands.New` throw in `Load()`. To get the heap functions found before an AI thread needs them, call `Allocator.Resolve()` there.
+- Hooks that run every frame or for every UI item must not allocate (a Gen0 GC stops the main thread, which is the game's speed at speed 5): early-out before anything that captures, and use `Log.Guard(what, (this, x), static s => ...)` rather than a closure.
 - Send game actions with `Commands.New` / `TryPost`: they are the game's own commands, the same the UI sends, so multiplayer stays in sync. Ready-made: `Commands.Move`, `Unassign`, `NewOrderCommand` (battle plan play/stop, order delete...).
 - Game structures more than one plugin reads live in the core, with their offsets and signatures: `Game` (countries, `Hour`, `AtWar`/`Allied`, `StrategicAir`, supply flow), `Province` (fields, terrain, forts, enemy/friendly, pockets, supply starvation), `State`, `Buildings`, `Division` (CArmy), `Order` (COrder), `OrdersGroup`, `ProductionLine`, `AirRegions` (strategic regions, air combat in them), `GroundCrews` (More Ground Crews); `Gui.HotkeyPressed` (Ctrl+Alt+key) and `Gui.Selection`. Their game functions resolve on first use and are safe on the game's AI threads. Add a layout there once a second plugin needs it.
 - Plugin ids look like `com.green1052.<name>`.
@@ -92,6 +94,12 @@ If a pattern stops matching after a game update, the loader leaves the vanilla f
 - Set `WaitForDebugger = True` in `config\HOI4ModLoader.cfg`, start the game and attach a debugger to `hoi4.exe`: it stops before `Load()`.
 - Rebuilding a plugin with the game running reverts every patch and loads the new DLLs. Plugin state (queues and such) resets. `HotReload = False` turns it off.
 - `HOI4ModLoader\crash.log` (kept across starts, deleted at start once past 1 MB): native faults on a thread inside a hook or timer (the label names the hook the thread is under; the faulting `module+offset` says whose code it was, so a hook's label also covers the game original it calls), faults outside every module (hook stubs), and .NET's own fatal errors with the managed stack. `CrashTest = 1` or `2` under `[Debug]` crashes the game on purpose once, to check it.
+
+## Measuring speed
+At speed 5 the game runs one hourly tick per frame on the main thread, so the main thread's time per frame is the game's speed.
+- `HOI4ModLoader\profile-now` (see the README) samples every thread for 60 s, unwinding through hoi4.exe, tbb.dll and the system DLLs; its "main thread" section says where a frame goes. Plugin code is JIT code and stops the unwind: look for the hooks above it.
+- Compare changes by restarting the game on the same save for each variant and reading the game clock (`Game.Hour`) over a fixed time at speed 5: a save replays the same, so 1-2 % differences show. Guesses from the profile alone were often wrong.
+- dotnet-trace's thread-time sampling exaggerates hooks (its suspensions land on their native/managed transitions): use it to find managed code, not to rank it.
 
 ## Multiplayer detection
 A session whose server is a `CNetworkServer` (host) or `CProxyServer` (client) is multiplayer. Joining a lobby unloads `AffectsGameState` plugins; returning to single player loads them again.
