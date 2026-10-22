@@ -1,8 +1,6 @@
-using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using HOI4ModLoader;
 
 namespace DiscordPresence;
@@ -30,12 +28,13 @@ public unsafe class DiscordPresence : Plugin
     private const int Handshake = 0, Frame = 1;
 
     private static readonly int[] MonthDays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    private const int NameOfCountry = 0x10; // std::string: the English name for its current ideology ("German Reich")
+    private const int NameOfCountry = 0x10; // std::string: the name the game shows, for its current ideology ("독일국")
+    private const int HumanControllersOfGameState = 0x388; // CPdxArray<sbyte> by tag: players on each country (gamestate.cpp)
 
     private string _appId = "";
-    private long _started;
+    private long _since;      // when this game (or the main menu) began: Discord counts the time from it
+    private int _generation = -1;
     private int _tagNames;
-    private Dictionary<string, string> _english = [], _local = []; // the game's country name localisation, key -> text
     private volatile string? _wanted;   // the activity the main thread wants shown (JSON)
     private long _lastTick;             // when it last said so (TickCount64)
     private Thread? _worker;
@@ -51,9 +50,6 @@ public unsafe class DiscordPresence : Plugin
             return;
         }
         _tagNames = *(int*)(Sig.Find(Signatures.TagNames) + 17);
-        _started = new DateTimeOffset(Process.GetCurrentProcess().StartTime).ToUnixTimeSeconds();
-        _english = CountryNames("english");
-        _local = Loc.Language == "english" ? _english : CountryNames(Loc.Language);
         MainThread.Every(TimeSpan.FromSeconds(15), Tick);
     }
 
@@ -70,21 +66,31 @@ public unsafe class DiscordPresence : Plugin
     private string Activity()
     {
         string details, state;
+        if (Game.Generation != _generation) // a save loaded, a new game, another country, back to the menu
+            (_generation, _since) = (Game.Generation, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         var country = Game.HasStarted ? Game.Country(Game.ControlledTag) : 0;
         if (country == 0)
             (details, state) = (Loc.Get("com.green1052.discordpresence.Menu", "In the main menu"), "");
         else
         {
             details = CountryName(country, Game.ControlledTag);
-            state = Date(Game.Hour) + (Game.IsMultiplayer ? " · " + Loc.Get("com.green1052.discordpresence.Multiplayer", "Multiplayer") : "");
+            state = Date(Game.Hour) + (Game.IsMultiplayer ? " · " + Loc.Format("com.green1052.discordpresence.Players", "Multiplayer, {0} players", Players()) : "");
         }
         return JsonSerializer.Serialize(new
         {
             details,
             state = state == "" ? null : state,
-            timestamps = new { start = _started },
+            timestamps = new { start = _since },
             assets = new { large_image = Image, large_text = "Hearts of Iron IV" },
         }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+    }
+
+    /// <summary>Players with a country: lockstep game state, the same for the host and every client. Observers aren't counted.</summary>
+    private static int Players()
+    {
+        var players = 0;
+        foreach (var count in Native.PdxArray<sbyte>(Game.State + HumanControllersOfGameState)) players += Math.Max((int)count, 0);
+        return players;
     }
 
     /// <summary>"1936.1.1": the clock counts hours in 365-day years from year -5000.</summary>
@@ -96,29 +102,13 @@ public unsafe class DiscordPresence : Plugin
         return $"{Game.Year}.{month + 1}.{day + 1}";
     }
 
-    /// <summary>
-    /// The name the game shows, in its language: the country holds its English name for its ideology ("German Reich"); the
-    /// localisation key with that English text ("GER_fascism") gives the translation ("독일국"). Mods' names stay English.
-    /// </summary>
+    /// <summary>The country's name as the game shows it (in its language, for its ideology), else its tag.</summary>
     private string CountryName(nint country, int tag)
     {
+        var name = Native.Utf8(Native.MsvcString(country + NameOfCountry));
+        if (name != "") return name;
         var tags = Game.State + _tagNames; // CPdxArray of 32-byte std::strings
-        var text = (uint)tag < (uint)Native.PdxArray(tags).Length ? Native.Utf8(Native.MsvcString(*(nint*)tags + 32 * tag)) : "";
-        var english = Native.Utf8(Native.MsvcString(country + NameOfCountry));
-        foreach (var (key, value) in _english)
-            if (value == english && (key == text || key.StartsWith(text + "_")) && _local.TryGetValue(key, out var local)) return local;
-        return english != "" ? english : _local.GetValueOrDefault(text, text);
-    }
-
-    /// <summary>Country names (`GER_fascism: "German Reich"`) from the game's own localisation files.</summary>
-    private static Dictionary<string, string> CountryNames(string language)
-    {
-        var names = new Dictionary<string, string>();
-        foreach (var file in new[] { "countries", "countries_cosmetic" }.Select(f => Path.Combine(Loader.GameDir, "localisation", language, $"{f}_l_{language}.yml")))
-            if (File.Exists(file))
-                foreach (Match m in Regex.Matches(File.ReadAllText(file), @"(?m)^\s*([A-Z][A-Z0-9]{2}(?:_[a-z_]+)?):\d*\s*""([^""]*)"""))
-                    names.TryAdd(m.Groups[1].Value, m.Groups[2].Value);
-        return names;
+        return (uint)tag < (uint)Native.PdxArray(tags).Length ? Native.Utf8(Native.MsvcString(*(nint*)tags + 32 * tag)) : "";
     }
 
     // ---- Discord IPC: frames of {int32 opcode, int32 length, UTF-8 JSON} ----

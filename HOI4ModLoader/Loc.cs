@@ -48,7 +48,9 @@ public static partial class Loc
         try
         {
             var settings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Paradox Interactive", "Hearts of Iron IV", "settings.txt");
-            var match = Setting().Match(File.ReadAllText(settings));
+            // The game keeps settings.txt open: share it, or the read fails and every translation falls back to English.
+            using var reader = new StreamReader(new FileStream(settings, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+            var match = Setting().Match(reader.ReadToEnd());
             return match.Success ? match.Groups[1].Value : "english";
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return "english"; } // a type initializer must not throw

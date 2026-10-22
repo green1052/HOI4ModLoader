@@ -56,7 +56,7 @@ public static class Loader
                 "Also write DEBUG lines to LogOutput.log: every unit move and front change the plugins make. Off: only actions, summaries and errors.");
             MapArrows.Enabled = config.Bind("Debug", "AiActionArrows", false,
                 "Flash a map arrow for each front line action the AI plugins take (encirclements, breakouts, assaults, filling holes).");
-            Log.Info($"HOI4 {Game.Version}, .NET {Environment.Version}");
+            Log.Info($"HOI4 {Game.Version}, .NET {Environment.Version}, language {Loc.Language}");
             try { Updater.Finish(PluginsDir); } // installs an update staged last session, before plugins load
             catch (Exception e) { Log.Error($"update: {e.Message}"); }
             var updateHours = config.Bind("Update", "CheckHours", 6,
