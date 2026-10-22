@@ -43,7 +43,7 @@ public unsafe class DiscordPresence : Plugin
 
     public override void Load()
     {
-        _appId = Config.Bind("Discord", "ApplicationId", "",
+        _appId = Config.Bind("Discord", "ApplicationId", "1562707563143761940",
             "The Discord application whose name Discord shows as the game (Discord Developer Portal -> New Application -> Application ID).").Trim();
         if (_appId == "")
         {
@@ -140,6 +140,7 @@ public unsafe class DiscordPresence : Plugin
                         pipe ??= Connect();
                         Send(pipe, Frame, $$"""{"cmd":"SET_ACTIVITY","args":{"pid":{{Environment.ProcessId}},"activity":{{want}}},"nonce":"{{Guid.NewGuid()}}"}""");
                         if (Receive(pipe) is var reply && reply.Contains("\"evt\":\"ERROR\"")) Problem($"Discord refused the status: {reply}");
+                        if (shown == null) Problem("showing the status in Discord"); // logged once per connection
                         shown = want;
                     }
                     catch (Exception e) when (e is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException)
