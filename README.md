@@ -44,6 +44,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 | Performance | Targeted decisions look for new targets every few days; the map updates every few frames at speeds 4-5 | Single player only |
 | Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them; finished operations clear themselves | Single player only |
+| DiscordPresence | Your country and the game date in your Discord status | ✅ |
 
 ### Queues
 **Shift+click** to queue, again to unqueue. Queued items show their position as a gold badge (`[31]` and up past 30); agency upgrades show `N` or `NxL` in a number box.
@@ -347,6 +348,12 @@ Single player only: the game has no command to reorder operatives, so the agency
 - In the intelligence screen, drag an operative in the bottom bar to another place, as army cards are dragged: it follows the mouse and the others make room.
 - A finished operation clears itself from the operations list `DismissDays` (7) game days after it finished, as closing its overview does; its outcome was already applied. 0: never.
 
+
+### DiscordPresence
+Your Discord status shows the country you play (its name for its current ideology, in the game's language), the game date, multiplayer, and the time played; the main menu outside a game.
+- Needs the Discord desktop app running on the same PC.
+- `ApplicationId`: Discord shows the status under a Discord application's name. Create one at [discord.com/developers](https://discord.com/developers/applications) (New Application, named e.g. Hearts of Iron IV) and paste its Application ID. Empty: off.
+- The status clears within a minute after the game closes or the plugin is turned off.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join.

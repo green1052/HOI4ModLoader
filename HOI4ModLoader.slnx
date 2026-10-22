@@ -5,6 +5,7 @@
         <Project Path="plugins/AutoConstruction/AutoConstruction.csproj" />
         <Project Path="plugins/AutoTrade/AutoTrade.csproj" />
         <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
+        <Project Path="plugins/DiscordPresence/DiscordPresence.csproj" />
         <Project Path="plugins/Fonts/Fonts.csproj" />
         <Project Path="plugins/FrontLine/FrontLine.csproj" />
         <Project Path="plugins/Intelligence/Intelligence.csproj" />

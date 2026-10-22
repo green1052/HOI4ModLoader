@@ -1,0 +1,7 @@
+﻿l_korean:
+    com.green1052.discordpresence.name:0 "디스코드 상태 표시"
+    com.green1052.discordpresence.desc:0 "지금 하는 게임을 디스코드 상태에 보여 줍니다.\n- 플레이 중인 국가와 게임 날짜(멀티플레이 여부 포함)\n- 게임 밖에서는 메인 메뉴\n디스코드 앱이 켜져 있어야 하고, 애플리케이션 ID 설정이 필요합니다. 멀티플레이에서도 동작."
+    com.green1052.discordpresence.ApplicationId:0 "디스코드 애플리케이션 ID"
+    com.green1052.discordpresence.ApplicationId.desc:0 "디스코드가 이 애플리케이션 이름으로 상태를 보여 줍니다.\ndiscord.com/developers -> New Application(이름: Hearts of Iron IV) -> Application ID를 복사해 넣으세요. 다음 실행이나 플러그인 다시 불러오기 때 적용."
+    com.green1052.discordpresence.Menu:0 "메인 메뉴"
+    com.green1052.discordpresence.Multiplayer:0 "멀티플레이"
