@@ -108,7 +108,7 @@ public partial class AiAssist
                     if (Game.Province(n) is var q && q != 0 && Province.Controller(q) == holder && (!landed || Landed(n, hour)) && beachhead.Add(n)) next.Add(n);
                 frontier = next;
             }
-            foreach (var b in beachhead) seen.Add(b); // also its home coast, so it isn't rescanned
+            foreach (var b in beachhead) if (landed || !Landed(b, hour)) seen.Add(b); // also its home coast; a landing in it still seeds its own
             if (landed || beachhead.Count < BeachheadMax) landings.Add(beachhead);
         }
         return landings;

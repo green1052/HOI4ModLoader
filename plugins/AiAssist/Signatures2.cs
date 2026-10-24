@@ -13,20 +13,10 @@ public static class AiSignatures2
     /// </summary>
     [Signature] public const string RailwayGunScore = "49 8B 45 60 4A 8B 0C F0 48 63 51 5C 85 D2 0F 84 ? ? ? ? 03 DA 89 9D ? ? ? ? 4C 63 C6 48 8B 45 D0 42 89 14 80 41 83 BD 04 01 00 00 00 75 28 48 8B C2 48 0F AF 05 ? ? ? ? 48 69 C8 A0 86 01 00 49 8B C2 48 F7 E9 48 C1 FA 0E 48 8B C2 48 C1 E8 3F 48 03 D0 EB 03 48 8B D7 4B 89 14 C1 49 8B 45 60 48 89 85 50 11 00 00 41 3B F7";
 
-    /// <summary>BuildingContainer::GetFreeLevels(container, type) -> int: max level minus planned (built and queued), shared slots included.</summary>
-    [Signature] public const string FreeLevels = "48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 4C 63 82";
-
-    /// <summary>CCountry::CanBuildInProvince(country, province, type, bool) -> bool.</summary>
-    [Signature] public const string CanBuildInProvince = "48 8B 82 B8 00 00 00 4D 8B D0 4C 8B C1 F6 80 D2 00 00 00 01";
-
     /// <summary>
     /// The AI's railway builder (0x1414E0740), used by its interior minister: (CPdxArray&lt;int&gt;* path, int* tag, int levelsToAdd,
     /// byte mode) -> bool. Path: adjacent province ids; the target level is the lowest (level + levelsToAdd) along it, at most 5.
     /// Posts a CBuildRailwayCommand for the tag.
     /// </summary>
     [Signature] public const string BuildRailway = "4C 8B DC 49 89 5B 10 45 88 4B 20 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 41 0F B6 F1 45 8B F8 4C 8B E2 4C 8B E9 80 3D";
-
-    [VTable] public const string ConstructionCommand = "CAddConstructionCommand";
-    [VTable] public const string BuildingReference = "CBuildingReference";
-    [VTable] public const string BuildingLine = "CBuildingProductionLine";
 }

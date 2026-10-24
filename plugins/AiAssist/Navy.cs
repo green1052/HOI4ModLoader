@@ -182,9 +182,6 @@ public unsafe partial class AiAssist
     private static bool Covered(int tag, int sea, int hour) =>
         Bombarding.Any(b => b.Value.Tag == tag && b.Value.Province == sea && hour - b.Value.Hour is >= 0 and < BombardStayHours);
 
-    private const int CombatsOfGameState = 0x268, ProvinceOfCombat = 0x38; // CPdxArray<CCombat*>; defender's province
-    [VTable] public const string LandCombat = "CLandCombat";
-
     /// <summary>
     /// Sea provinces next to our land battles (the defender's province; only it gets bombarded), weighted by our fighting
     /// divisions in or next to the battle, heaviest first.
@@ -197,15 +194,14 @@ public unsafe partial class AiAssist
                 mine[at] = mine.GetValueOrDefault(at) + 1;
         var weight = new Dictionary<int, int>();
         if (mine.Count == 0) return [];
-        var landCombat = Sig.VTable(LandCombat);
-        foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState).ToArray())
+        foreach (var combat in LandCombat.All())
         {
-            if (combat == 0 || *(nint*)combat != landCombat || *(nint*)(combat + ProvinceOfCombat) is not (var battle and not 0)) continue;
+            if (LandCombat.Location(combat) is not (var battle and not 0)) continue;
             var ours = mine.GetValueOrDefault(battle) // defending
                 + (Province.Enemy(country, tag, battle) ? Game.Neighbours(battle).Sum(id => mine.GetValueOrDefault(Game.Province(id))) : 0); // attacking
             if (ours == 0) continue;
             foreach (var id in Game.Neighbours(battle))
-                if (Game.Province(id) is var sea && sea != 0 && Province.Controller(sea) == 0 && !LandRegion(*(nint*)(sea + RegionOfProvince)))
+                if (Game.Province(id) is var sea && sea != 0 && Province.Controller(sea) == 0 && !LandRegion(Province.StrategicRegion(sea)))
                     weight[id] = weight.GetValueOrDefault(id) + ours;
         }
         return weight.Select(kv => (kv.Key, kv.Value)).OrderByDescending(t => t.Value).ToList();
@@ -293,7 +289,7 @@ public unsafe partial class AiAssist
             var next = new List<nint>();
             foreach (var p in ring)
             foreach (var id in Game.Neighbours(p))
-                if (!steps.ContainsKey(id) && Game.Province(id) is var q && q != 0 && Province.Controller(q) == 0 && !LandRegion(*(nint*)(q + RegionOfProvince)))
+                if (!steps.ContainsKey(id) && Game.Province(id) is var q && q != 0 && Province.Controller(q) == 0 && !LandRegion(Province.StrategicRegion(q)))
                 {
                     steps[id] = step;
                     next.Add(q);

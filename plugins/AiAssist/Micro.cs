@@ -259,34 +259,9 @@ public partial class AiAssist
     /// it, or an enemy-held neighbour reaching into our side (2+ of ours around it, twice the enemy's) that was taken in the last
     /// BreakInHours, landed on, or touches no other enemy ground.
     /// </summary>
-    private static int BreakIn(nint country, int tag, nint p, int hour)
-    {
-        var self = Game.Id(p);
-        if (!Gap.ContainsKey(self) && Hostiles(country, p) > 0) return self;
-        foreach (var id in Game.Neighbours(p))
-        {
-            if (Gap.ContainsKey(id)) continue;
-            var e = Game.Province(id);
-            if (e == 0 || !Province.Enemy(country, tag, e)) continue;
-            var (ours, theirs) = (0, 0);
-            foreach (var n in Game.Neighbours(e))
-            {
-                var q = Game.Province(n);
-                if (q == 0) continue;
-                if (Province.Controller(q) == tag) ours++;
-                else if (Province.Enemy(country, tag, q)) theirs++;
-            }
-            if (ours >= 2 && ours >= 2 * theirs && (theirs == 0 || Taken(id, hour, BreakInHours) || Landed(id, hour))) return id;
-        }
-        return 0;
-    }
+    private static int BreakIn(nint country, int tag, nint p, int hour) =>
+        Province.BreakIn(tag, p, t => Game.AtWar(country, t), Gap.ContainsKey, id => Taken(id, hour, BreakInHours) || Landed(id, hour));
 
     /// <summary>Divisions of countries at war with us in the province.</summary>
-    private static int Hostiles(nint country, nint province)
-    {
-        var n = 0;
-        foreach (var unit in Province.Units(province))
-            if (unit != 0 && Game.AtWar(country, Division.Commander(unit))) n++;
-        return n;
-    }
+    private static int Hostiles(nint country, nint province) => Province.Hostiles(province, t => Game.AtWar(country, t));
 }

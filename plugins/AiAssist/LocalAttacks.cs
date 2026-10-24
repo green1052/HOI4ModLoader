@@ -12,6 +12,9 @@ public unsafe partial class AiAssist
     private static delegate* unmanaged<nint, nint, nint, byte> _cantMove;
     private static nint _pocketCrumb;
     private static int _steered;
+    // The last source province's alternatives: the candidate loop asks once per target, back to back on one thread. Keyed by
+    // tag, not `us`: that is a stack slot of the caller.
+    [ThreadStatic] private static (int Tag, nint From, int Hour, int World, int Pocket, int Relief, int Shortest, double Valuable) _alternatives;
 
     private void LoadPockets()
     {
@@ -49,17 +52,24 @@ public unsafe partial class AiAssist
                 return 1;
             }
             if (!(_attackTargets || _axis)) return 0;
-            var (pocket, relief, shortest, valuable) = (0, 0, int.MaxValue, 0.0);
-            foreach (var id in _attackTargets ? Game.Neighbours(from) : []) // the axis alone needs none of these
+            var (hour, world) = (Game.Hour, Game.Generation);
+            var alt = _alternatives;
+            if (alt.Tag != tag || alt.From != from || alt.Hour != hour || alt.World != world)
             {
-                var c = Game.Province(id);
-                // The alternatives: targets vanilla and the checks above would let through.
-                if (c == 0 || !Province.Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || !Strong(from, c) || RuledOut(me, tag, from, c) != 0) continue;
-                pocket = Math.Max(pocket, Province.Pocket(me, tag, c));
-                relief = Math.Max(relief, Relief(me, tag, c));
-                shortest = Math.Min(shortest, Province.FrontChange(me, tag, c));
-                valuable = Math.Max(valuable, TargetValue(c));
+                alt = (tag, from, hour, world, 0, 0, int.MaxValue, 0.0);
+                foreach (var id in _attackTargets ? Game.Neighbours(from) : []) // the axis alone needs none of these
+                {
+                    var c = Game.Province(id);
+                    // The alternatives: targets vanilla and the checks above would let through.
+                    if (c == 0 || !Province.Enemy(me, tag, c) || !Candidate(from, c) || _cantMove(us, from, c) != 0 || !Strong(from, c) || RuledOut(me, tag, from, c) != 0) continue;
+                    alt.Pocket = Math.Max(alt.Pocket, Province.Pocket(me, tag, c));
+                    alt.Relief = Math.Max(alt.Relief, Relief(me, tag, c));
+                    alt.Shortest = Math.Min(alt.Shortest, Province.FrontChange(me, tag, c));
+                    alt.Valuable = Math.Max(alt.Valuable, TargetValue(c));
+                }
+                _alternatives = alt;
             }
+            var (_, _, _, _, pocket, relief, shortest, valuable) = alt;
             var skip = relief > 0 && relief >= pocket ? Relief(me, tag, to) == 0 // corridor to our pocket
                 : pocket > 0 ? Province.Pocket(me, tag, to) == 0                          // pocket-closing
                 : _axis && !OnAxis(tag, from, to) ? true                         // on the axis

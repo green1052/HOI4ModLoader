@@ -19,7 +19,7 @@ public unsafe partial class AiAssist
     private IHook<BalanceFn>? _armyBalancing;
     private int _raised, _unguarded;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Need)> RaisedAt = new(); // front line section -> last logged
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Need)> Needs = new(); // section -> the week's highest minimum
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Hour, int Tag, int Need)> Needs = new(); // section -> the week's highest minimum; a reallocated section can reuse an address: entries carry their tag
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> UnguardedAt = new(); // tag -> hour last logged
 
     /// <summary>
@@ -267,7 +267,13 @@ public unsafe partial class AiAssist
                 {
                     var entry = data + 16 * i; // {CArmy*, front slot*}
                     var unit = *(nint*)entry;
-                    if (unit != 0 && (Pinned(unit) || FreshlyArrived(unit)) && !OrderlessArmy(unit)) continue;
+                    var pinned = Pinned(unit);
+                    var fresh = !pinned && FreshlyArrived(unit);
+                    if ((pinned || fresh) && !OrderlessArmy(unit))
+                    {
+                        if (fresh) Interlocked.Increment(ref _stationed); // counted where it is left out, not on every check
+                        continue;
+                    }
                     if (kept != i) Buffer.MemoryCopy((void*)entry, (void*)(data + 16 * kept), 16, 16);
                     kept++;
                 }
@@ -384,7 +390,8 @@ public unsafe partial class AiAssist
             }
             // An ally's front overseas (all in allied ground no land route links to ours) wants none, unless the ally is losing
             // ground there and our own line is manned.
-            if (_holdLine && contact.Count > 0 && *(int*)(front + MaxWanted) > 0 && Overseas(country, tag, contact, hour))
+            bool? overseasLine = null; // its land-route search, run once for both checks
+            if (_holdLine && contact.Count > 0 && *(int*)(front + MaxWanted) > 0 && Overseas(country, tag, contact, hour, overseasLine = OverseasLine(country, tag, contact)))
             {
                 DropFront(front);
                 Interlocked.Increment(ref _overseas);
@@ -393,7 +400,7 @@ public unsafe partial class AiAssist
             if (!_holdLine || !hostile || Grads.ContainsKey(tag) // on a grad, it gets the divisions, not the old border
                 || *(nint*)(front + InvasionTarget) != 0
                 || *(byte*)(front + FixedRequest) != 0 || *(byte*)(front + OtherRequest) != 0) continue; // garrisons, invasions and fixed shares: as the game asks
-            KeepMinimum(front, section, tag, enemyHeld, contact, hour);
+            KeepMinimum(front, section, tag, enemyHeld, contact, hour, overseasLine);
             CapToSupply(front, tag, contact, hour);
         }
         if (_axis && spot is { } line && theatre != 0) Anchor(general, theatre, line.Tag, line.Province, line.Weight, line.Line, enemyLine, hour);
@@ -460,8 +467,8 @@ public unsafe partial class AiAssist
     /// The line is all in an ally's ground, which no land route links to ours, and the ally isn't losing ground there while our
     /// own line is manned.
     /// </summary>
-    private static bool Overseas(nint country, int tag, HashSet<nint> contact, int hour) =>
-        OverseasLine(country, tag, contact) && !AllyHome(contact) && !Spare(tag, hour)
+    private static bool Overseas(nint country, int tag, HashSet<nint> contact, int hour, bool? line = null) =>
+        (line ?? OverseasLine(country, tag, contact)) && !AllyHome(contact) && !Spare(tag, hour)
         && !(AllyLosing(country, tag, contact, hour) && !(ShortOfMen.TryGetValue(tag, out var shortAt) && hour - shortAt is >= 0 and < ShortHours));
 
     /// <summary>The line is all in others' ground, which no land route links to ours.</summary>
@@ -536,7 +543,7 @@ public unsafe partial class AiAssist
     /// highest is kept, so fronts don't trade divisions daily. Never more than we have; less on a stronger ally's or an
     /// overseas line.
     /// </summary>
-    private void KeepMinimum(nint front, nint section, int tag, Dictionary<nint, bool> enemyHeld, HashSet<nint> contact, int hour)
+    private void KeepMinimum(nint front, nint section, int tag, Dictionary<nint, bool> enemyHeld, HashSet<nint> contact, int hour, bool? overseasLine)
     {
         var own = contact.Count(p => Province.Controller(p) == tag);
         var helping = own < contact.Count && StrongerOwners(tag, contact);
@@ -551,10 +558,11 @@ public unsafe partial class AiAssist
         // Our own stretch gets its full share, a stronger ally's up to AllyHelpPercent of our divisions.
         if (helping) need = Math.Min(need, Math.Max(1, MaxPerLineProvince * own + ours * AllyHelpPercent / 100));
         // An ally's line overseas (kept while we can spare it): a small expeditionary force, not an army shipped away.
-        if (own == 0 && !AllyHome(contact) && OverseasLine(Game.Country(tag), tag, contact)) need = Math.Min(need, Math.Max(1, ours * OverseasHelpPercent / 100));
+        if (own == 0 && !AllyHome(contact) && (overseasLine ?? OverseasLine(Game.Country(tag), tag, contact))) need = Math.Min(need, Math.Max(1, ours * OverseasHelpPercent / 100));
         need = Math.Min(need, Math.Max(1, ours));
-        if (Needs.TryGetValue(section, out var kept) && hour - kept.Hour is >= 0 and < NeedHours && kept.Need >= need) need = kept.Need;
-        else Needs[section] = (hour, need);
+        if (Needs.TryGetValue(section, out var kept) && kept.Tag == tag && hour - kept.Hour is >= 0 and < NeedHours && kept.Need >= need)
+            need = Math.Min(kept.Need, Math.Max(1, ours)); // still never more than we have now
+        else Needs[section] = (hour, tag, need);
         if (*(int*)(front + MinWanted) >= need) return;
         *(int*)(front + MinWanted) = need;
         *(int*)(front + DesiredWanted) = Math.Max(*(int*)(front + DesiredWanted), need);
@@ -575,6 +583,20 @@ public unsafe partial class AiAssist
         foreach (var (s, at) in RaisedAt) if (hour - at.Hour is < 0 or >= 2 * NeedHours) RaisedAt.TryRemove(s, out _); // fronts are rebuilt: their sections go
         foreach (var (s, need) in Needs) if (hour - need.Hour is < 0 or >= NeedHours) Needs.TryRemove(s, out _);
         foreach (var entry in Line) if (hour - entry.Value.Hour is < 0 or >= LineFreshHours) Line.TryRemove(entry); // matched by value: one refreshed meanwhile stays
+        PublishAxes(); // after this general's Anchor too
+    }
+
+    private static readonly Lock AxisGate = new();
+
+    /// <summary>
+    /// The axes and second arms as an array for <see cref="OnAnyAxis"/>: the CAS hook looks up every target, and enumerating
+    /// the dictionaries allocates. Rebuilt after each change, one at a time, so the last one sees every write before it.
+    /// </summary>
+    private static volatile (int Tag, int Hour, HashSet<int> Core)[] _axisCores = [];
+
+    private static void PublishAxes()
+    {
+        lock (AxisGate) _axisCores = [.. Axes.Select(a => (a.Value.Tag, a.Value.Hour, a.Value.Core)), .. SecondArms.Select(s => (s.Value.Tag, s.Value.Hour, s.Value.Core))];
     }
 
     /// <summary>
@@ -713,14 +735,12 @@ public unsafe partial class AiAssist
     /// <summary>Our stack in <paramref name="from"/> passes vanilla's strength test for a local attack on <paramref name="to"/> (divisions, forts).</summary>
     private static bool Strong(nint from, nint to) => Province.Divisions(from) >= Province.Divisions(to) * (Province.FortLevel(to) / 2 + 1);
 
-    /// <summary>Whether the province is on one of the tag's breakthrough axes of the last two days (CAS backs it).</summary>
+    /// <summary>Whether the province is on one of the tag's breakthrough axes (or second arms) of the last two days (CAS backs it). Allocates nothing.</summary>
     private static bool OnAnyAxis(int tag, int province)
     {
         var hour = Game.Hour;
-        foreach (var (_, axis) in Axes)
-            if (axis.Tag == tag && hour - axis.Hour is >= 0 and < 2 * AxisHours && axis.Core.Contains(province)) return true;
-        foreach (var (_, arm) in SecondArms)
-            if (arm.Tag == tag && hour - arm.Hour is >= 0 and < 2 * AxisHours && arm.Core.Contains(province)) return true;
+        foreach (var (owner, at, core) in _axisCores)
+            if (owner == tag && hour - at is >= 0 and < 2 * AxisHours && core.Contains(province)) return true;
         return false;
     }
 }

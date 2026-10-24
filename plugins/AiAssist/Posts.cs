@@ -184,22 +184,15 @@ public unsafe partial class AiAssist
             if (home.Tag == tag && !(units ??= [.. Game.Units(country)]).Contains(unit)) Home.Remove(unit);
     }
 
-    /// <summary>What holding this province of ours is worth: a port above all, then victory points, a river in front, city or mountain ground.</summary>
+    /// <summary>
+    /// What holding this province of ours is worth (<see cref="Province.KeyValue"/>: a port above all, then victory points, a
+    /// river in front, city or mountain ground), and more as part of the wall around an enemy pocket.
+    /// </summary>
     private static int Key(nint country, int tag, nint province)
     {
-        var port = Province.BuildingLevel(province, Buildings.NavalBaseSlot);
-        if (port > 0) return 1000 + port;
-        var key = 3 * Math.Min(Province.VictoryPoints(province), 30);
-        if ((Province.TerrainCategory(province) & (Province.Mountain | Province.Urban)) != 0) key += 25;
-        // Part of the wall around an enemy pocket: a hole here lets it break out.
-        if (Game.Neighbours(province).Any(id => Game.Province(id) is var e && e != 0 && Province.Divisions(e) > 0 && Province.Encircled(country, tag, e))) key += KeyHole;
-        foreach (var id in Game.Neighbours(province))
-        {
-            var p = Game.Province(id);
-            if (p == 0 || Game.AdjacencyType(province, id) is not (Province.River or Province.LargeRiver) || !Province.Enemy(country, tag, p)) continue; // impassable: no attack at all
-            key += 40; // the enemy has to cross a river to take it
-            break;
-        }
+        var key = Province.KeyValue(tag, province, t => Game.AtWar(country, t));
+        // Part of the wall around an enemy pocket: a hole here lets it break out. Ports rank first as they are.
+        if (key < Province.PortKey && Game.Neighbours(province).Any(id => Game.Province(id) is var e && e != 0 && Province.Divisions(e) > 0 && Province.Encircled(country, tag, e))) key += KeyHole;
         return key;
     }
 

@@ -19,7 +19,7 @@ public unsafe partial class AiAssist
     private const int BackfillHours = 6; // game hours between passes
     private const int ReserveMax = 6, ReservePerLine = 4, ReserveMoves = 2, ReserveRadius = 6;
     private const int DepthKey = 25, MaxDepthPosts = 2, DepthRadius = 4;
-    private const int MemberOfUnit = 0xB8; // CArmy -> its COrdersGroupMember (what COrder members point at)
+    private const int MemberOfUnit = Division.MemberOffset; // CArmy -> its COrdersGroupMember (what COrder members point at)
 
     [Function(CallingConventions.Microsoft)] public delegate byte CollectFn(nint context, nint list);
     private IHook<CollectFn>? _collect;
@@ -57,9 +57,7 @@ public unsafe partial class AiAssist
     {
         if (unit == 0 || Division.Walking(unit)) return false;
         var age = Game.Hour - *(int*)(unit + ArrivalOfUnit);
-        if (age is < 0 or >= FreshHours) return false;
-        Interlocked.Increment(ref _stationed);
-        return true;
+        return age is >= 0 and < FreshHours;
     }
 
     /// <summary>
@@ -103,13 +101,13 @@ public unsafe partial class AiAssist
         if (*(nint*)cmd != _assignVTable) return true;
         var country = Game.Country(tag);
         if (country == 0) return true;
-        var byRef = new Dictionary<long, nint>(); // own divisions by CRef: a stale id resolved blind reads garbage
-        foreach (var u in Game.Units(country)) if (u != 0 && Division.IsLand(u)) byRef[Division.Ref(u)] = u;
+        var own = Game.Units(country); // matched by CRef, no map: a stale id resolved blind reads garbage
         var units = Native.PdxArray<long>(cmd + UnitsOfAssignCommand);
         var kept = 0;
         foreach (var reference in units)
         {
-            var unit = byRef.GetValueOrDefault(reference);
+            nint unit = 0;
+            foreach (var u in own) if (u != 0 && Division.Ref(u) == reference && Division.IsLand(u)) { unit = u; break; }
             // A division in no army always goes: army balancing fills new armies this way, and one kept out is walked back and forth.
             if (unit == 0 || !Division.IsHeadquarters(unit) && (!Pinned(unit) || NextToPocket(unit) || Division.Group(unit) == 0)) units[kept++] = reference;
             else Interlocked.Increment(ref _keptOnLine);

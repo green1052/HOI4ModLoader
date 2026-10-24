@@ -32,12 +32,11 @@ public unsafe partial class AiAssist
         _breakOffHour = hour;
         _game.Check();
         foreach (var (key, at) in LostAttacks) if (hour - at is < 0 or >= BreakOffHours) LostAttacks.TryRemove(key, out _);
-        var landCombat = Sig.VTable(LandCombat);
         var player = Game.ControlledTag;
-        foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState).ToArray())
+        foreach (var combat in LandCombat.All())
         {
-            if (combat == 0 || *(nint*)combat != landCombat || *(nint*)(combat + ProvinceOfCombat) is not (var p and not 0)) continue;
-            var defender = *(nint*)(combat + DefenderOfCombat);
+            if (LandCombat.Location(combat) is not (var p and not 0)) continue;
+            var defender = LandCombat.Defender(combat);
             if (defender == 0) continue;
             var id = Game.Id(p);
             // Attackers: fighting AI divisions next to the battle, headed into it.
@@ -55,9 +54,8 @@ public unsafe partial class AiAssist
                         list.Add(unit);
                     }
             if (attackers.Count == 0) continue;
-            var defenders = *(int*)(defender + DivisionsOfSide + 0xC) + *(int*)(defender + ReservesOfSide + 0xC);
-            long progress;
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress); // the attacker's share
+            var defenders = LandCombat.Divisions(defender).Length + LandCombat.Reserves(defender);
+            var progress = LandCombat.AttackerShare(combat);
             var count = attackers.Values.Sum(l => l.Count);
             var losing = progress * 100 < HopelessProgressPercent * Native.FixedPoint
                          || progress * 100 < LosingProgressPercent * Native.FixedPoint && defenders * 100 >= OutnumberedPercent * count;

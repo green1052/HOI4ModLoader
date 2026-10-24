@@ -94,6 +94,7 @@ public unsafe partial class AiAssist : Plugin
             Known.Clear();
             Axes.Clear();
             SecondArms.Clear();
+            _axisCores = [];
             Feints.Clear();
             Beaches.Clear();
             Routes.Clear();
@@ -211,7 +212,7 @@ public unsafe partial class AiAssist : Plugin
         Add(ref _rested, "rested {0} worn-out division(s)");
         Add(ref _escaped, "pulled {0} division(s) out of closing salients");
         Add(ref _defended, "answered {0} landing(s)");
-        Add(ref _stationed, "left {0} fresh arrival(s) in place");
+        Add(ref _stationed, "left fresh arrivals in place {0} time(s)");
         Add(ref _deployed, "sent {0} new division(s) where they were needed");
         Add(ref _cas, "focused {0} CAS pass(es) on the axis");
         Add(ref _spearheads, "put {0} breakthrough axis/axes on the AI's armoured spearhead");

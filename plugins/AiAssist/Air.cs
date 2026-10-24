@@ -9,9 +9,6 @@ public unsafe partial class AiAssist
     // ---- Air retreat: regions the AI is losing get a lower score, so its allocator moves the planes ----
 
     private const int RegionEntrySize = 0x4E8, RegionOfEntry = 0x00, KindOfEntry = 0x08, ScoreOfEntry = 0x10, IgnoredRegion = 5;
-    private const int SuperiorityRecords = 0xE0, SuperiorityRecordSize = 0xA0, OurSuperiority = 0x00, EnemySuperiority = 0x08;
-    private const int CombatData = 0x170, OwnWings = 0x08, OtherWings = 0x20; // AirRegions.PlanesLost reads them
-    private const int SuperiorityIdOfRegion = 0x60, CombatIdOfRegion = 0x58;
     private const int WindowHours = 168, MinLosses = 20;
     private const long MinShare = 35_000, PullOutShare = 15_000; // our share of the region's air superiority
     private const int LossesPerKillPercent = 150;
@@ -26,7 +23,7 @@ public unsafe partial class AiAssist
     /// <summary>Region scoring hook shared by air retreat, bombing targets and invasion escorts, each under its own setting.</summary>
     private void LoadRegionPriorities()
     {
-        _ = Sig.FindAll(Game.StrategicAirSig, 2)[0] + Sig.Find(AirRegions.RegionAirDataSig) + Sig.Find(AirRegions.RegionCombatDataSig) // the functions the offsets below come from
+        _ = Sig.FindAll(Game.StrategicAirSig, 2)[0] + Sig.Find(AirRegions.RegionAirDataSig) + Sig.Find(AirRegions.RegionCombatDataSig) // the functions AirRegions' offsets come from
             + Sig.Find(Signatures.RegionNeighbours) + Sig.Find(Signatures.StrBombWishes);
         _priorities = Patches.Hook<PrioritiesFn>(Sig.Find(Signatures.UpdateRegionPriorities), (aiObj, country, scratch, buffer, entries, bases, totals, buffer2) =>
         {
@@ -47,8 +44,6 @@ public unsafe partial class AiAssist
         var air = tag == Game.ControlledTag ? 0 : Game.StrategicAir(tag);
         if (air == 0) return;
         var since = Game.Hour - WindowHours;
-        var records = Native.PdxArray<byte>(air + SuperiorityRecords); // only its size and data are used
-        var combat = Native.PdxArray(air + CombatData);
         var data = *(nint*)entries;
         for (int i = 0, n = *(int*)(entries + 0xC); i < n; i++)
         {
@@ -56,17 +51,10 @@ public unsafe partial class AiAssist
             var region = *(nint*)(entry + RegionOfEntry);
             var score = *(long*)(entry + ScoreOfEntry);
             if (region == 0 || score <= 0 || *(int*)(entry + KindOfEntry) == IgnoredRegion) continue;
-            var id = *(int*)(region + SuperiorityIdOfRegion);
-            if (id <= 0 || id >= records.Length) continue;
-            var record = *(nint*)(air + SuperiorityRecords) + (nint)id * SuperiorityRecordSize;
-            long ours = *(long*)(record + OurSuperiority), enemy = *(long*)(record + EnemySuperiority);
-            if (enemy <= 0) continue;
+            if (AirRegions.Superiority(air, region) is not (var ours, var enemy) || enemy <= 0) continue;
             var share = ours * Native.FixedPoint / (ours + enemy);
             if (share >= MinShare) continue;
-            var cid = *(int*)(region + CombatIdOfRegion);
-            var stats = cid > 0 && cid < combat.Length ? combat[cid] : 0;
-            if (stats == 0) continue;
-            long lost = AirRegions.PlanesLost(stats + OwnWings, since), kills = AirRegions.PlanesLost(stats + OtherWings, since);
+            var (lost, kills) = AirRegions.Losses(air, region, since);
             if (lost < MinLosses || lost * 100 < kills * LossesPerKillPercent) continue;
             *(long*)(entry + ScoreOfEntry) = share < PullOutShare ? 0 : score * share / MinShare;
             Interlocked.Increment(ref _pulled);
@@ -113,7 +101,7 @@ public unsafe partial class AiAssist
             foreach (var next in Native.PdxArray(region + NeighboursOfRegion))
             {
                 if (!LandRegion(next)) continue;
-                var j = *(int*)(next + SuperiorityIdOfRegion) - 1; // region id; entry 0 is region 1
+                var j = AirRegions.Id(next) - 1; // entry 0 is region 1
                 if ((uint)j >= (uint)n || ring[j] != 0) continue;
                 ring[j] = (byte)(ring[i] + 1);
                 queue[tail++] = j;
@@ -161,11 +149,10 @@ public unsafe partial class AiAssist
         _tactical = Patches.Hook<TacticalFn>(Sig.Find(Signatures.CollectTacticalTargets), (mission, targets, chanceBase, seed, includeDivisions, firstOnly) =>
         {
             var result = _tactical!.OriginalFunction(mission, targets, chanceBase, seed, includeDivisions, firstOnly);
-            if (targets != 0) // 0: the game only counts the targets
-                Safely(() =>
-                {
-                    if ((*(int*)(mission + MissionBitsOfAirMission) & CasMission) != 0) ConcentrateCas(mission, targets);
-                });
+            // 0 targets: the game only counts them. No closure: every air mission, hourly.
+            if (targets == 0 || !SheepMod.Active || (*(int*)(mission + MissionBitsOfAirMission) & CasMission) == 0) return result;
+            try { ConcentrateCas(mission, targets); }
+            catch (Exception e) { Failed(e); }
             return result;
         });
     }
@@ -182,12 +169,13 @@ public unsafe partial class AiAssist
         var data = (byte*)*(nint*)targets;
         int n = *(int*)(targets + 0xC);
         if (data == null || n < 2) return;
-        var onAxis = new bool[n];
+        Span<bool> onAxis = n <= 1024 ? stackalloc bool[n] : new bool[n];
         var count = 0;
         for (var i = 0; i < n; i++)
             if (OnAnyAxis(tag, *(int*)(data + (nint)i * TargetSize + ProvinceOfTarget))) { onAxis[i] = true; count++; }
         if (count == 0 || count == n) return;
-        var copy = new byte[(nint)n * TargetSize];
+        var size = n * TargetSize;
+        Span<byte> copy = size <= 16384 ? stackalloc byte[size] : new byte[size];
         fixed (byte* dest = copy)
         {
             var k = 0;

@@ -34,6 +34,11 @@ public static class Signatures
 
     [VTable] public const string DeleteOrderCommand = "COrderDeleteCommand";
     [VTable] public const string AssignOrderCommand = "COrderAssignCommand";
+    [VTable] public const string ReplaceRootCommands = "COrderReplaceRootCommands";
+    [VTable] public const string EditRootCommand = "COrderEditRootCommand";
+    [VTable] public const string ArmyGroupCommand = "CArmyGroupCommand";
+    [VTable] public const string RedeploymentCommand = "CStrategicRedeploymentCommand";
+    [VTable] public const string SetTrainingCommand = "COrderSetTrainingCommand";
 
     /// <summary>River crossing in land combat: `mov r8,[rcx+138h]; mov rdx,[rip+RIVER_CROSSING_PENALTY]; cmovnz rdx,[rip+..._LARGE]`.</summary>
     [Signature] public const string RiverPenalty = "4C 8B 81 38 01 00 00 48 8B 15 ? ? ? ? 48 0F 45 15 ? ? ? ?";

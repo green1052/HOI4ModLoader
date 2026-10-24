@@ -8,14 +8,8 @@ public unsafe partial class AiAssist
     //
     // A hub costs 20000, a railway level about 170 + 130 per province: railways any year, hubs only from HubYear with
     // HubCivilianFactories+. Vanilla's interior minister upgrades and links existing hubs but never builds one.
-    // Ported from AutoConstruction's AutoSupply (BuildHub, FeedingNode); layouts for HOI4 1.19.3.
+    // Like AutoConstruction's AutoSupply, on the core's supply network, railways and Construction.
 
-    private const int CountriesOfSupply = 0x108, NetworkOfCountry = 0x80, SupplyNodes = 0xB8, SupplyNodeSize = 0xE8, ProvinceOfNode = 4; // CSupplySystem
-    private const int FlowEntrySize = 16, CountryOfFlowEntry = 2, AmountOfFlowEntry = 8; // Game.EntriesOfFlow: {u16 node, u16 country, pad, i64 amount}
-    private const int RailwaysOfGameState = 0x3E0, RailwayPairs = 0x38;                  // railway info: {int neighbour, int level}
-    private const int ProductionOfCountry = 0xF68, ConstructionLines = 112, BuildingOfLine = 112, ContainerOfBuilding = 472, TypeOfBuilding = 480;
-    private const int TokenOfType = 8, LocationOfCommand = 56, BuildingOfCommand = 60, LevelsOfCommand = 72, InsertionOfCommand = 76, ConstructionCommandSize = 0x50;
-    private const int IsLowSupplySlot = 43; // CArmy vtable
     private const int HubDistance = 3, HubCheckHours = 7 * 24, HubsPerMonth = 2, MonthHours = 30 * 24, StarvingTried = 5;
     private const int HubYear = 1941, HubCivilianFactories = 60;
     private const int MaxRailway = 5, RailwayCooldownHours = 60 * 24;
@@ -24,17 +18,14 @@ public unsafe partial class AiAssist
     private static int _railways;
     private static readonly Dictionary<(int Tag, int Node), int> RailwayPlans = []; // (tag, feeding node province) -> hour its railway was upgraded (main thread)
 
-    private static delegate* unmanaged<nint, nint, int> _freeLevels;
-    private static delegate* unmanaged<nint, nint, nint, byte, byte> _canBuildInProvince;
     private static int _hubs, _hubWorld = -1, _yearLogged = -2;
     private static readonly Dictionary<int, (int Next, List<int> Queued)> HubPlans = []; // tag -> next check, hours hubs were queued (main thread)
 
     private void LoadSupplyHubs()
     {
-        _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(AiSignatures2.FreeLevels);
-        _canBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(AiSignatures2.CanBuildInProvince);
         _buildRailway = (delegate* unmanaged<nint, int*, int, byte, byte>)Sig.Find(AiSignatures2.BuildRailway);
-        _ = Sig.VTable(AiSignatures2.ConstructionCommand) + Sig.VTable(AiSignatures2.BuildingReference) + Sig.VTable(AiSignatures2.BuildingLine);
+        _ = Sig.Find(Construction.FreeLevelsSig) + Sig.Find(Construction.CanBuildInProvinceSig) // the core's, now: a broken one fails the load
+            + Sig.VTable(Construction.CommandClass) + Sig.VTable(Construction.BuildingReference) + Sig.VTable(Construction.LineClass);
         MainThread.Every(TimeSpan.FromSeconds(10), SupplyHubs);
     }
 
@@ -52,10 +43,8 @@ public unsafe partial class AiAssist
             RailwayPlans.Clear();
             _hubWorld = Game.Generation;
         }
-        var supply = Game.Supply;
         var type = Buildings.Type(Buildings.SupplyNodeSlot);
-        var networks = supply == 0 ? 0 : *(nint*)(supply + CountriesOfSupply);
-        if (networks == 0 || type == 0) return;
+        if (Game.Supply == 0 || type == 0) return;
         var (hour, player) = (Game.Hour, Game.ControlledTag);
         var year = Game.Year;
         if (_hubWorld != _yearLogged) Log.Info($"supply hubs: the game's year reads {year} (built from {HubYear}, by countries with {HubCivilianFactories}+ civilian factories)");
@@ -71,8 +60,7 @@ public unsafe partial class AiAssist
             var queued = plan.Queued ?? [];
             queued.RemoveAll(h => hour - h is < 0 or >= MonthHours);
             HubPlans[tag] = (hour + HubCheckHours, queued);
-            var countrySupply = *(nint*)(networks + 8 * Game.TagIndex(tag));
-            var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);
+            var network = Game.SupplyNetwork(tag);
             var starving = network == 0 ? [] : Starving(country);
             if (starving.Count == 0) continue;
             UpgradeRailway(country, tag, network, starving, hour);
@@ -108,7 +96,7 @@ public unsafe partial class AiAssist
         var starving = new Dictionary<nint, int>();
         foreach (var unit in Game.Units(country))
         {
-            if (unit == 0 || !Division.IsLand(unit) || ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) == 0) continue;
+            if (unit == 0 || !Division.IsLand(unit) || !Division.LowSupply(unit)) continue;
             var province = Division.Location(unit);
             if (province != 0) starving[province] = starving.GetValueOrDefault(province) + 1;
         }
@@ -143,18 +131,13 @@ public unsafe partial class AiAssist
     private static int[]? RailwayToCapital(int from, int tag, int capital, out int lowest)
     {
         lowest = 0;
-        var railways = *(nint*)(Game.State + RailwaysOfGameState);
-        if (railways == 0 || InState(from, capital)) return null;
+        if (InState(from, capital)) return null;
         var back = new Dictionary<int, (int From, int Level)> { [from] = (-1, 0) }; // province -> the one before it and the level between
         var queue = new Queue<int>([from]);
         while (queue.TryDequeue(out var id))
         {
-            var info = *(nint*)(*(nint*)(railways + 8) + 8 * id);
-            if (info == 0) continue;
-            var pairs = *(nint*)(info + RailwayPairs);
-            for (int i = 0, n = *(int*)(info + RailwayPairs + 0xC); i < n; i++)
+            foreach (var (next, level) in Province.Railways(id))
             {
-                var (next, level) = (*(int*)(pairs + i * 8), *(int*)(pairs + i * 8 + 4));
                 if (level <= 0 || back.ContainsKey(next) || Game.Province(next) is var p && (p == 0 || Province.Controller(p) != tag)) continue;
                 back[next] = (id, level);
                 if (!InState(next, capital))
@@ -194,21 +177,8 @@ public unsafe partial class AiAssist
     }
 
     /// <summary>The province of our node sending the most supply into the province, or -1.</summary>
-    private static int FeedingNodeProvince(nint network, int province, int tagIndex)
-    {
-        var flow = Game.SupplyFlow(province);
-        if (flow == 0) return -1;
-        var entries = *(nint*)(flow + Game.EntriesOfFlow);
-        (int Node, long Amount) best = (-1, 0);
-        for (int i = 0, n = *(int*)(flow + Game.EntriesOfFlow + 0xC); i < n; i++)
-        {
-            var e = entries + i * FlowEntrySize;
-            if (*(ushort*)(e + CountryOfFlowEntry) != tagIndex || *(long*)(e + AmountOfFlowEntry) <= best.Amount) continue;
-            best = (*(ushort*)e, *(long*)(e + AmountOfFlowEntry));
-        }
-        var nodes = *(nint*)(network + SupplyNodes);
-        return best.Node < 0 || nodes == 0 || best.Node >= *(int*)(network + SupplyNodes + 0xC) ? -1 : *(int*)(nodes + (nint)SupplyNodeSize * best.Node + ProvinceOfNode);
-    }
+    private static int FeedingNodeProvince(nint network, int province, int tagIndex) =>
+        Game.FeedingNode(network, province, tagIndex) is var node && node != 0 ? *(int*)(node + Game.ProvinceOfNode) : -1;
 
     /// <summary>A hub in the starving province's state or next to it (railway-connected provinces first), where none is queued.</summary>
     private static bool BuildHub(nint country, int tag, nint province, nint type, HashSet<nint> building)
@@ -221,16 +191,10 @@ public unsafe partial class AiAssist
             if (Game.Province(id) is var p && p != 0 && !candidates.Contains(p)) candidates.Add(p);
         var best = candidates
             .Where(p => Province.Controller(p) == tag && Province.State(p) is var s && s != 0 && !building.Contains(s)
-                && _canBuildInProvince(country, p, type, 1) != 0 && _freeLevels(Province.Buildings(p), type) > 0)
-            .OrderByDescending(HasRailway).ThenByDescending(p => p == province).ThenBy(Game.Id)
+                && Construction.CanBuildInProvince(country, p, type) && Construction.FreeLevels(Province.Buildings(p), type) > 0)
+            .OrderByDescending(Province.HasRailway).ThenByDescending(p => p == province).ThenBy(Game.Id)
             .FirstOrDefault();
-        if (best == 0) return false;
-        var cmd = Commands.New(AiSignatures2.ConstructionCommand, ConstructionCommandSize, tag, Sig.VTable(AiSignatures2.BuildingReference));
-        *(int*)(cmd + LocationOfCommand) = Game.Id(best);
-        *(int*)(cmd + BuildingOfCommand) = *(int*)(type + TokenOfType);
-        *(int*)(cmd + LevelsOfCommand) = 1;
-        *(byte*)(cmd + InsertionOfCommand) = 1; // at the end of the queue
-        if (!Commands.TryPost(cmd, true)) return false;
+        if (best == 0 || !Construction.Queue(tag, Game.Id(best), type, true)) return false;
         building.Add(Province.State(best));
         Interlocked.Increment(ref _hubs);
         return true;
@@ -240,28 +204,10 @@ public unsafe partial class AiAssist
     private static HashSet<nint> QueuedHubStates(nint country, nint type)
     {
         var states = new HashSet<nint>();
-        var production = *(nint*)(country + ProductionOfCountry);
-        if (production == 0) return states;
-        var lineVTable = Sig.VTable(AiSignatures2.BuildingLine);
-        foreach (var line in Native.PdxArray(production + ConstructionLines))
-        {
-            var b = line != 0 && *(nint*)line == lineVTable ? *(nint*)(line + BuildingOfLine) : 0;
-            var container = b == 0 || *(nint*)(b + TypeOfBuilding) != type ? 0 : *(nint*)(b + ContainerOfBuilding); // Province.Buildings(province)
-            if (container != 0 && Province.State(container - Province.BuildingsOffset) is var s && s != 0) states.Add(s);
-        }
+        foreach (var (_, building) in Construction.Lines(country, type))
+            if (Construction.Container(building) is var container && container != 0 // Province.Buildings(province)
+                && Province.State(container - Province.BuildingsOffset) is var s && s != 0) states.Add(s);
         return states;
-    }
-
-    /// <summary>Whether any railway leaves the province.</summary>
-    private static bool HasRailway(nint province)
-    {
-        var railways = *(nint*)(Game.State + RailwaysOfGameState);
-        var info = railways == 0 ? 0 : *(nint*)(*(nint*)(railways + 8) + 8 * Game.Id(province));
-        if (info == 0) return false;
-        var pairs = *(nint*)(info + RailwayPairs);
-        for (int i = 0, n = *(int*)(info + RailwayPairs + 0xC); i < n; i++)
-            if (*(int*)(pairs + i * 8 + 4) > 0) return true;
-        return false;
     }
 
     /// <summary>Whether a province within <paramref name="max"/> land steps of <paramref name="from"/> matches <paramref name="wanted"/>.</summary>

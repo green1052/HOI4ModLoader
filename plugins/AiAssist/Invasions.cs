@@ -83,7 +83,7 @@ public unsafe partial class AiAssist
                 if (hour - route.Hour is < 0 or >= RouteHours) Routes.TryRemove(key, out _); // a new objective: drop the dead ones
         var regions = Native.PdxArray(objective + RegionsOfObjective);
         var ids = new int[regions.Length];
-        for (var i = 0; i < ids.Length; i++) ids[i] = regions[i] == 0 ? 0 : *(int*)(regions[i] + SuperiorityIdOfRegion);
+        for (var i = 0; i < ids.Length; i++) ids[i] = regions[i] == 0 ? 0 : AirRegions.Id(regions[i]);
         Routes[(tag, objective)] = (hour, ids);
     }
 

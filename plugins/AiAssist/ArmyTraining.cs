@@ -33,7 +33,7 @@ public unsafe partial class AiAssist
         _belowMaxLevel = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.BelowMaxLevel);
         _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
-        _ = Sig.VTable("COrderSetTrainingCommand"); // the class and the heap functions are found here, not on AI threads
+        _ = Sig.VTable(Signatures.SetTrainingCommand); // the class and the heap functions are found here, not on AI threads
         Allocator.Resolve();
         _updateArmyTraining = Patches.Hook<UpdateArmyTrainingFn>(Sig.Find(Signatures.UpdateArmyTraining), (country, haltAll, fronts) =>
         {
@@ -73,7 +73,7 @@ public unsafe partial class AiAssist
                 && units.All(u => !Division.Fighting(u) && Division.Strength(u) >= MinTrainingStrength
                     && Division.Location(u) is var at && at != 0 && !Province.NextToEnemy(country, tag, at));
             if (want == training) continue;
-            var cmd = Commands.NewOrderCommand("COrderSetTrainingCommand", new OrdersGroup(group).Ref, 0, 0);
+            var cmd = Commands.NewOrderCommand(Signatures.SetTrainingCommand, new OrdersGroup(group).Ref, 0, 0);
             *(byte*)(cmd + TrainingOfCommand) = want ? (byte)1 : (byte)0;
             *(byte*)(cmd + StopAtMaxOfCommand) = want ? (byte)1 : (byte)0;
             if (!Post(cmd, *(int*)(group + TagOfGroup))) continue;

@@ -15,7 +15,7 @@ public unsafe partial class AiAssist
     private static void HoldOffensives(nint country, int tag, int hour)
     {
         var done = new HashSet<nint>();
-        foreach (var e in Line.Values)
+        foreach (var (_, e) in Line) // lock-free (Values locks every bucket and copies)
         {
             if (e.Tag != tag || hour - e.Hour is < 0 or >= LineFreshHours) continue;
             var held = e.Provinces.Where(p => Province.Controller(p) == tag).ToHashSet();
@@ -64,10 +64,10 @@ public unsafe partial class AiAssist
 
     private static int _trappedStops;
 
-    private const int DefenderOfCombat = 0x30, DivisionsOfSide = 0x20, ReservesOfSide = 0x100, ProgressSlot = 25;
     private const int LosingProgressPercent = 40, HopelessProgressPercent = 25, OutnumberedPercent = 150, BeatenHours = 72, GroupOfOrder = 0x38;
-    // army -> hour its offensive was called off; keyed by army because the general redraws the front order at once
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, int> Beaten = new();
+    // army -> tag and hour its offensive was called off; keyed by army because the general redraws the front order at once.
+    // A new army can reuse a disbanded one's address: entries carry their tag.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, (int Tag, int Hour)> Beaten = new();
     private static int _beatenStops;
 
     /// <summary>
@@ -77,14 +77,13 @@ public unsafe partial class AiAssist
     /// </summary>
     private static void StopBeatenOffensives(nint country, int tag, int hour)
     {
-        foreach (var (army, at) in Beaten) if (hour - at is < 0 or >= BeatenHours) Beaten.TryRemove(army, out _);
-        var landCombat = Sig.VTable(LandCombat);
+        foreach (var (army, at) in Beaten) if (hour - at.Hour is < 0 or >= BeatenHours) Beaten.TryRemove(army, out _);
         var losing = new HashSet<nint>();  // provinces of battles we attack and are losing
         var winning = new HashSet<nint>();
-        foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState).ToArray())
+        foreach (var combat in LandCombat.All())
         {
-            if (combat == 0 || *(nint*)combat != landCombat || *(nint*)(combat + ProvinceOfCombat) is not (var p and not 0) || !Province.Enemy(country, tag, p)) continue;
-            var defender = *(nint*)(combat + DefenderOfCombat);
+            if (LandCombat.Location(combat) is not (var p and not 0) || !Province.Enemy(country, tag, p)) continue;
+            var defender = LandCombat.Defender(combat);
             if (defender == 0) continue;
             var attackers = 0;
             foreach (var id in Game.Neighbours(p))
@@ -92,9 +91,8 @@ public unsafe partial class AiAssist
                     foreach (var unit in Province.Units(q))
                         if (unit != 0 && Division.Commander(unit) == tag && Division.IsLand(unit) && Division.Fighting(unit)) attackers++;
             if (attackers == 0) continue; // not our attack
-            var defenders = *(int*)(defender + DivisionsOfSide + 0xC) + *(int*)(defender + ReservesOfSide + 0xC);
-            long progress;
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress); // attacker's share
+            var defenders = LandCombat.Divisions(defender).Length + LandCombat.Reserves(defender);
+            var progress = LandCombat.AttackerShare(combat);
             if (progress * 100 < HopelessProgressPercent * Native.FixedPoint
                 || progress * 100 < LosingProgressPercent * Native.FixedPoint && defenders * 100 >= OutnumberedPercent * attackers) losing.Add(p);
             else winning.Add(p);
@@ -117,7 +115,7 @@ public unsafe partial class AiAssist
                             }
                 if (lost.Count == 0 || lost.Count <= won.Count) continue;
                 if (!Commands.TryPost(Commands.NewOrderCommand(Commands.ExecuteOrder, new OrdersGroup(group).Ref, Order.Id(order), 0), true)) continue;
-                Beaten[group] = hour;
+                Beaten[group] = (tag, hour);
                 Interlocked.Increment(ref _beatenStops);
                 _log?.Debug($"#{tag}: calls off an offensive losing {lost.Count} of its {lost.Count + won.Count} attack(s)");
             }
@@ -151,11 +149,11 @@ public unsafe partial class AiAssist
     private void LoadPostAiCommand()
     {
         _findOrder = (delegate* unmanaged<nint, int, nint>)Sig.Find(Signatures.FindOrder);
-        _replaceRootVTable = Sig.VTable("COrderReplaceRootCommands");
-        _editRootVTable = Sig.VTable("COrderEditRootCommand");
-        _armyGroupVTable = Sig.VTable("CArmyGroupCommand");
+        _replaceRootVTable = Sig.VTable(Signatures.ReplaceRootCommands);
+        _editRootVTable = Sig.VTable(Signatures.EditRootCommand);
+        _armyGroupVTable = Sig.VTable(Signatures.ArmyGroupCommand);
         _executeVTable = Sig.VTable(Commands.ExecuteOrder);
-        if (_holdLine) _redeployVTable = Sig.VTable("CStrategicRedeploymentCommand"); // here, not on an AI thread
+        if (_holdLine) _redeployVTable = Sig.VTable(Signatures.RedeploymentCommand); // here, not on an AI thread
         _assignVTable = Sig.VTable(Signatures.AssignOrderCommand);
         _post = Patches.Hook<PostFn>(Sig.Find(Signatures.PostAiCommand), (cmd, tag) =>
         {
@@ -252,7 +250,6 @@ public unsafe partial class AiAssist
     }
 
     private const int MinAttackOrg = 60, MaxGatheringPercent = 30, MaxEnemyAirPercent = 70;
-    private const int RegionOfProvince = 0xC8; // CProvince -> its strategic region
     // Weather manager (gamestate+0x688): 0x180-byte province records by id at +0x10; mud flag at +0x130 (set by set_mud).
     private const int WeatherOfGameState = 0x688, ProvincesOfWeather = 0x10, WeatherRecordSize = 0x180, MudOfWeather = 0x130;
 
@@ -277,18 +274,12 @@ public unsafe partial class AiAssist
     {
         var air = Game.StrategicAir(tag);
         if (air == 0) return 0;
-        var records = Native.PdxArray<byte>(air + SuperiorityRecords);
         int over = 0, counted = 0;
         long shares = 0;
         foreach (var member in members)
         {
             var at = Division.Location(member - MemberOfUnit);
-            var region = at == 0 ? 0 : *(nint*)(at + RegionOfProvince);
-            var id = region == 0 ? 0 : *(int*)(region + SuperiorityIdOfRegion);
-            if (id <= 0 || id >= records.Length) continue;
-            var record = *(nint*)(air + SuperiorityRecords) + (nint)id * SuperiorityRecordSize;
-            long ours = *(long*)(record + OurSuperiority), enemy = *(long*)(record + EnemySuperiority);
-            if (enemy <= 0) continue;
+            if (AirRegions.Superiority(air, at == 0 ? 0 : Province.StrategicRegion(at)) is not (var ours, var enemy) || enemy <= 0) continue;
             counted++;
             var share = enemy * 100 / (ours + enemy);
             shares += share;
@@ -360,7 +351,7 @@ public unsafe partial class AiAssist
             : Outgunned(members, tag) is { } ahead ? ahead
             : PredictedLoss(members, tag) is { } odds ? odds
             : Trapped(members, tag) ? "a division of it stands in a salient whose way back is closing"
-            : Beaten.TryGetValue(*(nint*)(order + GroupOfOrder), out var beaten) && hour - beaten is >= 0 and < BeatenHours ? "its attacks were beaten back in the last three days"
+            : Beaten.TryGetValue(*(nint*)(order + GroupOfOrder), out var beaten) && beaten.Tag == tag && hour - beaten.Hour is >= 0 and < BeatenHours ? "its attacks were beaten back in the last three days"
             : null;
         if (why == null) return true;
         Interlocked.Increment(ref _waited);
