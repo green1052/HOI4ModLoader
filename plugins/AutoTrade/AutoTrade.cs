@@ -29,12 +29,6 @@ public static class Signatures
     [VTable] public const string TradeCommand = "CCreateTradeCommand";
 
     /// <summary>
-    /// Lexer::TokenToString(int token) -> std::string*: a script token's text, under the token table's lock (any thread).
-    /// A CStrategicResource's key ("oil", "steel") is the token at its +0x08.
-    /// </summary>
-    [Signature] public const string TokenToString = "40 53 48 83 EC 30 48 63 D9 80 3D ? ? ? ? 00 75 05 E8 ? ? ? ? 3B 1D ? ? ? ? 7E";
-
-    /// <summary>
     /// AddFuelEffect::Execute: `mov rsi,[rax+1580h]` at +0x2B loads the country's CCountryFuelStatus (+0x08 fuel, +0x10 max
     /// fuel, int64 2^15 fixed point). The offset is read from its disp32 at +0x2E.
     /// </summary>
@@ -67,8 +61,7 @@ public unsafe partial class AutoTrade : Plugin
     private delegate* unmanaged<nint, nint, int> _balance;
     private delegate* unmanaged<nint, long*, nint, long*, long*, nint, void> _maxExport;
     private delegate* unmanaged<long*, nint, long*, long*, int, void> _amountForFactories;
-    private delegate* unmanaged<int, nint> _tokenToString;
-    private const int KeyOfResource = 0x08;
+    private const int KeyOfResource = 0x08; // CStrategicResource: its key's token
 
     // By country tag. Resources are made once at startup, so a pointer names the same resource in every game loaded.
     private readonly HashSet<(int Tag, nint Resource)> _auto = [];
@@ -78,7 +71,7 @@ public unsafe partial class AutoTrade : Plugin
     private long _oilFuel; // the fuel at the last oil decision, for its trend
     private const int OilEveryHours = 7 * 24;
     private bool _alliesFirst;
-    private nint _oil;
+    private nint _oil, _oilDb; // _oilDb: the database global's address until oil is looked up, once a game runs
     private byte[]? _autoPrefix; // "Auto " in the game's language, made once: Labels runs with every redraw of a column
     private const int FuelOfStatus = 0x08, MaxFuelOfStatus = 0x10;
     private const int ItemDatabaseRva = 0x332F088, OilOfDatabase = 0x68; // the strategic resources' database global (HOI4 1.19.3): its oil
@@ -90,15 +83,13 @@ public unsafe partial class AutoTrade : Plugin
         _fuelLow = Math.Clamp(Config.Bind("Fuel", "FuelLowPercent", 50, "With auto trade on oil: each game week, import one more step while fuel is under this share (%) of its maximum and not filling up on its own."), 0, 100);
         _fuelHigh = Math.Clamp(Config.Bind("Fuel", "FuelHighPercent", 90, "With auto trade on oil: each game week, cut oil imports by a step while fuel is at or over this share (%) of its maximum and not falling."), _fuelLow, 100);
         _fuelOfCountry = *(int*)(Sig.Find(Signatures.FuelOfCountry) + 0x2E);
-        var database = *(nint*)(System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress + ItemDatabaseRva);
-        _oil = database == 0 ? 0 : *(nint*)(database + OilOfDatabase);
-        if (_oil == 0) Log.Info("oil: the resource database wasn't found, so oil trades by its balance like the rest");
+        _oilDb = System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress + ItemDatabaseRva; // read in Pump: filled after plugins load
         var iconClick = Sig.Find(Signatures.ResourceIconClick);
         var update = Sig.Find(Signatures.ResourceItemUpdate);
         _balance = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.Balance);
         _maxExport = (delegate* unmanaged<nint, long*, nint, long*, long*, nint, void>)Sig.Find(Signatures.MaxExport);
         _amountForFactories = (delegate* unmanaged<long*, nint, long*, long*, int, void>)Sig.Find(Signatures.AmountForFactories);
-        _tokenToString = (delegate* unmanaged<int, nint>)Sig.Find(Signatures.TokenToString);
+        _ = Sig.Find(Native.TokenToStringSig); // the core's: a broken one fails the load
         RestoreAuto();
         _game = new PerGame(() =>
         {
@@ -162,7 +153,7 @@ public unsafe partial class AutoTrade : Plugin
     /// <summary>The resource's script key ("oil", "steel"), for the log.</summary>
     private string Name(nint resource)
     {
-        var text = Native.MsvcString(_tokenToString(*(int*)(resource + KeyOfResource)));
+        var text = Native.Token(*(int*)(resource + KeyOfResource));
         return text.IsEmpty ? "a resource" : Encoding.ASCII.GetString(text);
     }
 
@@ -179,6 +170,13 @@ public unsafe partial class AutoTrade : Plugin
     {
         if (!Game.HasStarted) return; // menus, lobby, loading: no commands
         _game.Check();
+        if (_oilDb != 0)
+        {
+            var database = *(nint*)_oilDb;
+            _oil = database == 0 ? 0 : *(nint*)(database + OilOfDatabase);
+            _oilDb = 0;
+            if (_oil == 0) Log.Info("oil: the resource database wasn't found, so oil trades by its balance like the rest");
+        }
         var tag = Game.ControlledTag;
         var country = Game.Country(tag);
         if (country == 0) return;
