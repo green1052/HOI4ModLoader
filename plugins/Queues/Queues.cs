@@ -114,6 +114,7 @@ public unsafe class Queues : Plugin
 
     public override void Load()
     {
+        var political = Config.Bind("Queues", "PoliticalPower", true, "Shift+click an idea, law, advisor or decision to take it once you have the political power.");
         var techClick = Sig.Find(Signatures.TechClick);
         var xorTechClick = Sig.Find(Signatures.XorTechClick);
         var focusClick = Sig.Find(Signatures.FocusClick);
@@ -177,8 +178,7 @@ public unsafe class Queues : Plugin
         });
 
         MainThread.Every(TimeSpan.FromMilliseconds(250), Pump);
-        if (Config.Bind("Queues", "PoliticalPower", true, "Shift+click an idea, law, advisor or decision to take it once you have the political power."))
-            new PoliticalQueue(Log).Load();
+        if (political) new PoliticalQueue(Log).Load();
     }
 
     private bool ShiftQueuesTech(nint view, nint ev)

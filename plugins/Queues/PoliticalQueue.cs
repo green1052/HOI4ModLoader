@@ -70,12 +70,12 @@ internal sealed unsafe class PoliticalQueue(Logger log)
     private const int ButtonState = 0xB0, Disabled = 3, ButtonFlags = 0xE4, Clickable = 0x08;
     private const int AddIdeaPay = 56, ReplaceIdeaNew = 56, ReplaceIdeaPay = 64;                 // CAddIdeaCommand, CReplaceIdeaCommand
     private const int TargetedTagOfCmd = 44, TargetedExtraOfCmd = 48, TargetedDecisionOfCmd = 56; // CSelectTargetedDecisionCommand
-    private const long WaitMs = 5_000;                    // after a post: until political power changes, at most this long
+    private const long WaitMs = 5_000;                    // after a post: until political power drops (paid), at most this long
 
     private enum Kind { Idea, Advisor, Decision, TargetedDecision }
 
-    /// <summary>A queued entry. Pointers are game database objects, valid for the whole game.</summary>
-    private sealed record Entry(Kind Kind, nint Item, string Slot = "", int Target = 0, int Extra = 0)
+    /// <summary>A queued entry. Pointers are game database objects, valid for the whole game. A struct: hooks build one per UI item.</summary>
+    private readonly record struct Entry(Kind Kind, nint Item, string Slot = "", int Target = 0, int Extra = 0)
     {
         public nint Occupant { get; init; } // advisors: who held the slot when queued
     }
@@ -118,10 +118,10 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         _ideaUpdate = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.IdeaUpdate), (item, tag, slotIdea) =>
         {
             var result = _ideaUpdate!.OriginalFunction(item, tag, slotIdea);
-            log.Guard("idea numbers", () =>
+            log.Guard("idea numbers", (this, item), static s =>
             {
-                Label(*(nint*)(item + IdeaName), new Entry(Kind.Idea, *(nint*)(item + IdeaOfItem)));
-                Force(item, *(nint*)(item + IdeaButton)); // disabled while unaffordable or not allowed
+                s.Item1.Label(*(nint*)(s.item + IdeaName), new Entry(Kind.Idea, *(nint*)(s.item + IdeaOfItem)));
+                s.Item1.Force(s.item, *(nint*)(s.item + IdeaButton)); // disabled while unaffordable or not allowed
             });
             return result;
         });
@@ -143,13 +143,13 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         {
             var result = _advisorUpdate!.OriginalFunction(item, status, flag);
             _forced.Remove(item); // a refresh runs Update first, then SetUnselectable or SetSelectable
-            log.Guard("advisor numbers", () => LabelAdvisor(item));
+            log.Guard("advisor numbers", (this, item), static s => s.Item1.LabelAdvisor(s.item));
             return result;
         });
         _advisorUnselectable = Patches.Hook<TwoFn>(Sig.Find(PoliticalSignatures.AdvisorUnselectable), (item, iconEnabled) =>
         {
             var result = _advisorUnselectable!.OriginalFunction(item, iconEnabled);
-            log.Guard("advisor buttons", () => Force(item, *(nint*)(item + CharacterButton)));
+            log.Guard("advisor buttons", (this, item), static s => s.Item1.Force(s.item, *(nint*)(s.item + CharacterButton)));
             return result;
         });
 
@@ -167,29 +167,29 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         {
             var entry = TargetedEntry(*(nint*)(item + TargetOfItem));
             if (!Gui.ShiftHeld && _forced.Contains(item)) return 0;
-            if (!Gui.ShiftHeld && entry != null && _queue.RemoveAll(e => Same(e, entry)) > 0) log.Info("targeted decision: taken by hand, unqueued");
-            if (!Gui.ShiftHeld || entry == null) return _targetedDecisionClick!.OriginalFunction(item);
-            Toggle(entry);
-            Label(*(nint*)(item + TargetedDecisionName), entry);
+            if (!Gui.ShiftHeld && entry is { } taken && _queue.RemoveAll(e => Same(e, taken)) > 0) log.Info("targeted decision: taken by hand, unqueued");
+            if (!Gui.ShiftHeld || entry is not { } queued) return _targetedDecisionClick!.OriginalFunction(item);
+            Toggle(queued);
+            Label(*(nint*)(item + TargetedDecisionName), queued);
             return 0;
         });
         _decisionSet = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.DecisionSet), (item, decision, tag) =>
         {
             var result = _decisionSet!.OriginalFunction(item, decision, tag);
-            log.Guard("decision numbers", () =>
+            log.Guard("decision numbers", (this, item, decision), static s =>
             {
-                if (decision != 0) Label(*(nint*)(item + DecisionName), new Entry(Kind.Decision, decision));
-                Force(item, *(nint*)(item + DecisionButton)); // unaffordable: enabled but not clickable; unavailable: disabled
+                if (s.decision != 0) s.Item1.Label(*(nint*)(s.item + DecisionName), new Entry(Kind.Decision, s.decision));
+                s.Item1.Force(s.item, *(nint*)(s.item + DecisionButton)); // unaffordable: enabled but not clickable; unavailable: disabled
             });
             return result;
         });
         _targetedDecisionSet = Patches.Hook<ThreeFn>(Sig.Find(PoliticalSignatures.TargetedDecisionSet), (item, target, tag) =>
         {
             var result = _targetedDecisionSet!.OriginalFunction(item, target, tag);
-            log.Guard("targeted decision numbers", () =>
+            log.Guard("targeted decision numbers", (this, item, target), static s =>
             {
-                if (TargetedEntry(target) is { } entry) Label(*(nint*)(item + TargetedDecisionName), entry);
-                Force(item, *(nint*)(item + DecisionButton));
+                if (TargetedEntry(s.target) is { } entry) s.Item1.Label(*(nint*)(s.item + TargetedDecisionName), entry);
+                s.Item1.Force(s.item, *(nint*)(s.item + DecisionButton));
             });
             return result;
         });
@@ -234,13 +234,14 @@ internal sealed unsafe class PoliticalQueue(Logger log)
     private void LabelAdvisor(nint item)
     {
         var character = *(nint*)(item + CharacterOfItem);
-        if (character != 0) Label(*(nint*)(item + CharacterName), new Entry(Kind.Advisor, character, SlotName(item + SlotOfItem)));
+        if (character != 0) // an empty queue has no slot to match: skip decoding it
+            Label(*(nint*)(item + CharacterName), new Entry(Kind.Advisor, character, _queue.Count == 0 ? "" : SlotName(item + SlotOfItem)));
     }
 
     private void Toggle(Entry entry)
     {
         _game.Check();
-        var index = _queue.FindIndex(e => Same(e, entry));
+        var index = IndexOf(entry);
         if (index >= 0)
         {
             _queue.RemoveAt(index);
@@ -253,12 +254,20 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         }
     }
 
-    private static bool Same(Entry a, Entry b) => a with { Occupant = 0 } == b with { Occupant = 0 };
+    private static bool Same(Entry a, Entry b) =>
+        a.Kind == b.Kind && a.Item == b.Item && a.Slot == b.Slot && a.Target == b.Target && a.Extra == b.Extra; // not Occupant
+
+    private int IndexOf(Entry entry)
+    {
+        for (var i = 0; i < _queue.Count; i++)
+            if (Same(_queue[i], entry)) return i;
+        return -1;
+    }
 
     /// <summary>Puts the entry's queue number before the name box's text, or takes it off if not queued.</summary>
     private void Label(nint box, Entry entry)
     {
-        if (box != 0) Gui.Number(box, _queue.FindIndex(e => Same(e, entry)) + 1);
+        if (box != 0) Gui.Number(box, IndexOf(entry) + 1);
     }
 
     private void Pump()
@@ -272,10 +281,10 @@ internal sealed unsafe class PoliticalQueue(Logger log)
         if (politics == 0) return;
 
         // One at a time: the cost is paid when the command runs (a round trip later in multiplayer), so a second post would
-        // pass the check with the same political power.
+        // pass the check with the same political power. Wait for it to drop: the daily gain alone doesn't mean it was paid.
         var power = *(long*)(politics + PoliticalPower);
         var now = Environment.TickCount64;
-        if (_waiting is { } w && w.PoliticalPower == power && now < w.Until) return;
+        if (_waiting is { } w && power >= w.PoliticalPower && now < w.Until) return;
         _waiting = null;
 
         var active = Native.PdxArray(politics + ActiveIdeas).ToArray();
