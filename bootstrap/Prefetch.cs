@@ -20,7 +20,8 @@ internal static unsafe class Prefetch
     {
         if (File.Exists(Path.Combine(mods, "no-prefetch"))) return;
         var list = Path.Combine(Directory.CreateDirectory(Path.Combine(mods, "cache")).FullName, "prefetch.txt");
-        try { _files = File.ReadAllLines(list).Where(line => line.Length > 0).ToArray(); }
+        // Music is opened at start but streamed a track at a time; read whole it was over half the list's bytes.
+        try { _files = File.ReadAllLines(list).Where(line => line.Length > 0 && !line.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase) && !line.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)).ToArray(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // first start: no list yet
         _deadline = Environment.TickCount64 + PrefetchMs;
         for (var i = 0; i < Readers && _files.Length > 0; i++) new Thread(Read) { IsBackground = true, Name = "HOI4ModLoader prefetch" }.Start();

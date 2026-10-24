@@ -5,7 +5,7 @@ namespace HOI4ModLoader.Bootstrap;
 
 /// <summary>
 /// Sampling profiler (profiler.c, a pass about every millisecond).
-/// - HOI4ModLoader\profile-startup: profiles the first 150 s into startup-profile.txt.
+/// - HOI4ModLoader\profile-startup: the next start profiles its first 150 s into startup-profile.txt (the file is deleted).
 /// - Creating HOI4ModLoader\profile-now: profiles the next 60 s into profile-&lt;tick&gt;.txt.
 /// The report lists each thread's running time, the hoi4.exe functions on running stacks (inclusive), the main thread's
 /// own stacks in every module (tbb.dll's waits for parallel work included), and where the main thread waits.
@@ -42,7 +42,14 @@ internal static unsafe class Profiler
     private static void Run(bool startup)
     {
         // An exception on this thread would end the game, so a failed profile is skipped.
-        try { if (startup) Profile(StartupMs, Path.Combine(_mods, "startup-profile.txt")); }
+        try
+        {
+            if (startup)
+            {
+                File.Delete(Path.Combine(_mods, "profile-startup")); // the next start only, as profile-now
+                Profile(StartupMs, Path.Combine(_mods, "startup-profile.txt"));
+            }
+        }
         catch (Exception) { }
         for (var trigger = Path.Combine(_mods, "profile-now");; Thread.Sleep(1000))
         {
