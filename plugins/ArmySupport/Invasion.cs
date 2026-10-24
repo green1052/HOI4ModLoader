@@ -41,13 +41,12 @@ public static partial class Signatures
 public unsafe partial class ArmySupport
 {
     // Layouts for HOI4 1.19.3.
-    private const int InvasionOrder = 3, RegionsOfGameState = 0x2E0;
+    private const int InvasionOrder = 3;
     private const int FleetsOfCountry = 0x278, TaskForcesOfFleet = 0xB8, CombatOfTaskForce = 0x1B4, MissionOfTaskForce = 0x374;
     private const int ParentOfTaskForce = 0x4B0, ActivityOfTaskForce = 0x4B8;
     private const int HoldMission = 0, InvasionSupportMission = 9, NavalCommandSize = 0x48, AddRegionSize = 0x38, CRefOfTaskForce = 0x08;
 
     private const int InvasionMode = 3, InvasionOfTool = 552, InvasionSourceSize = 0x60;
-    private const int TerrainOfProvince = 0xB8, TerrainFlags = 0xD2, LandFlag = 1; // CProvince: its terrain, whose flags tell land
 
     [Function(CallingConventions.Microsoft)] public delegate byte InvasionToolClickFn(nint tool, nint a2, nint a3, nint a4, nint a5);
 
@@ -68,14 +67,11 @@ public unsafe partial class ArmySupport
     {
         _invasionTargetValid = (delegate* unmanaged<nint, int, nint, byte>)Sig.Find(Signatures.InvasionTargetValid);
         _invasionSourceCommand = (delegate* unmanaged<nint, nint, int, byte, nint, int, int, nint>)Sig.Find(Signatures.InvasionSourceCommand);
+        _splitGame ??= new PerGame(ResetSplits);
+        // Every click of the battle plan tool lands here: the other modes go straight on, with nothing allocated.
         _invasionToolClick = Patches.Hook<InvasionToolClickFn>(Sig.Find(Signatures.InvasionToolClick), (tool, a2, a3, a4, a5) =>
-        {
-            // Every click of the battle plan tool lands here: the other modes go straight on, with nothing allocated.
-            if (*(int*)(tool + ModeOfTool) != InvasionMode) return _invasionToolClick!.OriginalFunction(tool, a2, a3, a4, a5);
-            var consumed = false;
-            Log.Guard("invasion split", () => consumed = SplitInvasion(tool));
-            return consumed ? (byte)1 : _invasionToolClick!.OriginalFunction(tool, a2, a3, a4, a5);
-        });
+            *(int*)(tool + ModeOfTool) == InvasionMode && GuardedSplit("invasion split", SplitInvasion, tool)
+                ? (byte)1 : _invasionToolClick!.OriginalFunction(tool, a2, a3, a4, a5));
     }
 
     /// <summary>
@@ -85,6 +81,7 @@ public unsafe partial class ArmySupport
     private bool SplitInvasion(nint tool)
     {
         if (*(int*)(tool + ModeOfTool) != InvasionMode) return false;
+        _splitGame!.Check();
         var order = *(nint*)(tool + InvasionOfTool);
         var group = *(nint*)(tool + GroupOfTool) is var g && g != 0 ? g : *(nint*)(tool + ArmyGroupOfTool);
         var province = *(nint*)(tool + ProvinceOfTool);
@@ -138,7 +135,7 @@ public unsafe partial class ArmySupport
     {
         _setNavalMission = (delegate* unmanaged<nint, nint, int, nint>)Sig.Find(Signatures.SetNavalMission);
         _invasionGame = new PerGame(_supported.Clear);
-        MainThread.Every(TimeSpan.FromSeconds(10), () => Log.Guard("invasion support", SupportInvasions));
+        MainThread.Every(TimeSpan.FromSeconds(10), SupportInvasions);
     }
 
     private void SupportInvasions()
@@ -188,16 +185,14 @@ public unsafe partial class ArmySupport
         }
     }
 
-    private static int Flags(nint p) => *(byte*)(*(nint*)(p + TerrainOfProvince) + TerrainFlags);
-
     /// <summary>Adds the strategic region ids of the sea provinces next to the province.</summary>
     private static void SeaRegionsNext(int province, HashSet<int> regions)
     {
         var p = Game.Province(province);
-        var all = Native.PdxArray(Game.State + RegionsOfGameState);
+        var all = AirRegions.All;
         if (p == 0) return;
         foreach (var n in Game.Neighbours(p))
-            if (Game.Province(n) is var q && q != 0 && (Flags(q) & LandFlag) == 0 && *(nint*)(q + RegionOfProvince) is var region && region != 0)
+            if (Game.Province(n) is var q && q != 0 && !Province.Enterable(q) && Province.StrategicRegion(q) is var region && region != 0)
                 if (all.IndexOf(region) is var id and >= 0) regions.Add(id);
     }
 }

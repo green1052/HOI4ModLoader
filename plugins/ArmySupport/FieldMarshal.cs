@@ -168,8 +168,16 @@ public unsafe partial class ArmySupport
         _createWingSlots = Patches.Hook<CardFn>(createSlots, card =>
             ArmyCard.AsArmyCard(card, true, () => _createWingSlots!.OriginalFunction(card)));
         _refreshWingSlots = Patches.Hook<CardGroupFn>(refreshSlots, (card, group) =>
-            ArmyCard.AsArmyCard(card, *(nint*)(card + _cardWingGrid) != 0, () => _refreshWingSlots!.OriginalFunction(card, group)));
+        {
+            // Per card: a card without a wing grid runs the game's refresh as is. The capture lives in
+            // RefreshAsArmyCard, since a lambda that captures its parameters allocates on entry.
+            if (*(nint*)(card + _cardWingGrid) == 0) _refreshWingSlots!.OriginalFunction(card, group);
+            else RefreshAsArmyCard(card, group);
+        });
     }
+
+    private void RefreshAsArmyCard(nint card, nint group) =>
+        ArmyCard.AsArmyCard(card, true, () => _refreshWingSlots!.OriginalFunction(card, group));
 
     /// <summary>Multiplayer: attaches the wings to the marshal's armies, a share each.</summary>
     private byte SpreadWings(nint wings, nint group)

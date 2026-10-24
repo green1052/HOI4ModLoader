@@ -35,8 +35,8 @@ public unsafe partial class ArmySupport
 {
     // Layouts for HOI4 1.19.3.
     private const int ModeOfTool = 144, GroupOfTool = 136, ArmyGroupOfTool = 128, OrderOfTool = 560, ProvinceOfTool = 0x268, ParadropMode = 4;
-    private const int ParadropOrder = 4, SourceOfOrder = 184, TargetsOfOrder = 112, InvasionOrders = 0xC8, MemberOfUnit = 0xB8;
-    private const int OrderCounterOfCountry = 0x1B0, RegionOfProvince = 0xC8, SourceCommandSize = 0x50;
+    private const int ParadropOrder = 4, SourceOfOrder = 184, TargetsOfOrder = 112, InvasionOrders = 0xC8, MemberOfUnit = Division.MemberOffset;
+    private const int OrderCounterOfCountry = 0x1B0, SourceCommandSize = 0x50;
     private const int UnitTransport = 0x9E8, UnitTransportCapacity = 0x9DC; // CAirWing: non-zero when it can carry divisions
     private const int ParadropMission = 0x40;
 
@@ -51,23 +51,39 @@ public unsafe partial class ArmySupport
     private nint _dropGroup;
     private readonly List<(int Target, List<nint> Units)> _drops = [];
 
+    // The paradrop and invasion splits' state belongs to one game: a loaded save's order counter may be lower.
+    private PerGame? _splitGame;
+
+    private void ResetSplits()
+    {
+        (_nextOrderId, _dropOrder, _dropGroup, _landingGroup) = (0, -1, 0, 0);
+        _drops.Clear();
+        _landingOrders.Clear();
+        _landings.Clear();
+    }
+
     private void LoadParadrop(bool split, bool transports)
     {
         _targetValid = (delegate* unmanaged<nint, nint, byte>)Sig.Find(Signatures.ParadropTargetValid);
         _sourceCommand = (delegate* unmanaged<nint, nint, int, int, nint, nint>)Sig.Find(Signatures.ParadropSourceCommand);
+        _splitGame ??= new PerGame(ResetSplits);
         if (split)
             _planToolClick = Patches.Hook<PlanToolClickFn>(Sig.Find(Signatures.PlanToolClick), (tool, input, hits) =>
-            {
-                if (*(int*)(tool + ModeOfTool) != ParadropMode) return _planToolClick!.OriginalFunction(tool, input, hits); // nothing allocated
-                var consumed = false;
-                Log.Guard("paradrop split", () => consumed = SplitParadrop(tool));
-                return consumed ? (byte)1 : _planToolClick!.OriginalFunction(tool, input, hits);
-            });
+                *(int*)(tool + ModeOfTool) == ParadropMode && GuardedSplit("paradrop split", SplitParadrop, tool)
+                    ? (byte)1 : _planToolClick!.OriginalFunction(tool, input, hits)); // other modes: nothing allocated
         if (transports)
         {
             ResolveAir();
-            MainThread.Every(TimeSpan.FromSeconds(10), () => Log.Guard("paradrop transports", SendTransports));
+            MainThread.Every(TimeSpan.FromSeconds(10), SendTransports);
         }
+    }
+
+    /// <summary>Runs a split under Log.Guard: true when it handled the click.</summary>
+    private bool GuardedSplit(string what, Func<nint, bool> split, nint tool)
+    {
+        var consumed = false;
+        Log.Guard(what, () => consumed = split(tool));
+        return consumed;
     }
 
     /// <summary>
@@ -77,6 +93,7 @@ public unsafe partial class ArmySupport
     private bool SplitParadrop(nint tool)
     {
         if (*(int*)(tool + ModeOfTool) != ParadropMode) return false;
+        _splitGame!.Check();
         var order = *(nint*)(tool + OrderOfTool);
         var group = *(nint*)(tool + GroupOfTool) is var g && g != 0 ? g : *(nint*)(tool + ArmyGroupOfTool);
         var province = *(nint*)(tool + ProvinceOfTool);
@@ -143,7 +160,7 @@ public unsafe partial class ArmySupport
             var from = Game.Province(source);
             var to = targets.Length == 0 ? 0 : Game.Province(targets[0]);
             var airbase = from == 0 ? 0 : BaseOf(bases, Province.State(from));
-            var region = to == 0 ? 0 : *(nint*)(to + RegionOfProvince);
+            var region = to == 0 ? 0 : Province.StrategicRegion(to);
             if (airbase == 0 || region == 0 || TransportWings(air).Any(w => _baseOf(w) == airbase && (*(uint*)(w + MissionMask) & ParadropMission) != 0)) continue;
             if (SendTransportsTo(air, airbase, region) is var sent and > 0)
                 Log.Info($"paradrop: {sent} transport wing(s) to the airbase in province {source} for the drop on {targets[0]}");
