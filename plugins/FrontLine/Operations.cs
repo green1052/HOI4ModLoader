@@ -133,10 +133,11 @@ public unsafe partial class FrontLine
                 if (path.Count < 2) continue;
                 var pool = op.Pincer ? _pincerArrows : _blitzArrows;
                 var i = op.Pincer ? used.Pincer++ : used.Blitz++;
-                if (i == pool.Count)
+                if (i >= pool.Count) // past the end after a failed Make
                 {
                     var made = op.Pincer ? MapArrows.Make(255, 140, 0) : MapArrows.Make(230, 30, 30);
                     if (made == 0) break;
+                    i = pool.Count;
                     pool.Add(made);
                 }
                 MapArrows.Draw(pool[i], path);
@@ -325,7 +326,7 @@ public unsafe partial class FrontLine
     /// <summary>Returns what ended operations left (Manage may not run), then steps each operation once per game hour.</summary>
     private void RunOperations()
     {
-        if (_operations.Count == 0 && SideOf(Game.ControlledTag).Held.Count == 0) return;
+        if (_operations.Count == 0 && (_micro || SideOf(Game.ControlledTag).Held.Count == 0)) return; // no operation: Manage returns them, with fresh _orders
         var country = Begin(out var tag, out _);
         if (country == 0) return;
         Return(country, tag);
@@ -401,12 +402,8 @@ public unsafe partial class FrontLine
                 && (unit = Freshest(here.Where(u => Candidate(op, u, tag) && !Division.Motorized(u) && Org(u) >= Op.HoldOrg))) != 0);
             if (unit == 0) continue;
             var location = Division.Location(unit);
+            if (!Issue(unit, () => Commands.Move(unit, id))) continue; // refused: nothing booked yet
             Enlist(op, unit, id, 0, true);
-            if (!Issue(unit, () => Commands.Move(unit, id)))
-            {
-                GiveBack(op, unit, tag);
-                continue;
-            }
             _at[location].Remove(unit);
             sent++;
             Log.Info($"{op.Name}: an infantry division goes to hold the corridor at province {id}");

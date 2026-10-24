@@ -2,12 +2,6 @@ using HOI4ModLoader;
 
 namespace FrontLine;
 
-/// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
-public static class Signatures
-{
-    [VTable] public const string LandCombat = "CLandCombat";
-}
-
 /// <summary>
 /// Does the front line micro a player does by hand, with the battle plan UI's own commands (works in multiplayer):
 /// - Rotation: worn divisions in contact rest behind the line while another division of their front holds the province.
@@ -26,13 +20,10 @@ public static class Signatures
 [Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class FrontLine : Plugin
 {
-    // Layouts for HOI4 1.19.3 (the rest are in the loader's Division, Province, Order, OrdersGroup).
-    private const int MemberOfUnit = 0xB8; // CArmy: its COrdersGroupMember
+    // Layouts for HOI4 1.19.3 (the rest are in the loader's Division, Province, Order, OrdersGroup, LandCombat).
+    private const int MemberOfUnit = Division.MemberOffset; // CArmy: its COrdersGroupMember
     private const int BorderWar = 0x1B0;   // COrdersGroup
     private static readonly int[] OrderLists = [OrdersGroup.RootOrdersOffset, 0xB0, 0xC8]; // root (fronts, offensive lines), fallback lines, invasions/paradrops
-    // Combats: array at gamestate +0x268. CLandCombat: defender side, province, vtable slot of the attacker's share. Side: divisions, reserves.
-    private const int CombatsOfGameState = 0x268, DefenderOfCombat = 0x30, ProvinceOfCombat = 0x38, ProgressSlot = 25;
-    private const int DivisionsOfSide = 0x20, ReservesOfSide = 0x100;
     private const int MaxRestSearch = 6, MaxPlugsPerTurn = 2, MaxEscapesPerTurn = 2, MaxAttacksPerTurn = 2;
     private const int MaxSwapsPerArmy = 2;    // sent to rest per turn, so a front never changes all at once
     private const int MaxRestHours = 14 * 24; // then back regardless: supply may never let it recover
@@ -91,7 +82,7 @@ public unsafe partial class FrontLine : Plugin
     private Dictionary<nint, double> _losingNow = [];                          // our defences being lost -> attacker's share (%)
     private long _now;
     private PerGame _game = null!;
-    private bool _rotation, _plugging, _escape, _attack, _fireBrigade, _depth, _shuffle, _ai;
+    private bool _rotation, _plugging, _escape, _attack, _fireBrigade, _depth, _shuffle, _ai, _micro;
     private double _wornOrg, _wornStrength, _returnOrg, _returnStrength, _losing;
     private int _odds;
     private int _maxResting, _plugRadius;
@@ -140,14 +131,13 @@ public unsafe partial class FrontLine : Plugin
             "Single player: AI countries get the same micro (not rotation) and the lure, with the settings above. "
             + "AI Assist's matching features leave these divisions alone; without AI Assist the AI may take them back.");
         var operations = BindOperations();
-        var micro = _rotation || _plugging || _escape || _attack || _fireBrigade || _depth || _shuffle;
-        _ai &= micro && !Multiplayer;
-        Jobs.AiMicro = _ai ? Info.Id : null;
-        if (!micro && !operations) return;
+        _micro = _rotation || _plugging || _escape || _attack || _fireBrigade || _depth || _shuffle;
+        _ai &= _micro && !Multiplayer;
+        if (!_micro && !operations) return;
 
         // Resolve the core's patterns now: a broken one fails the load, not a turn.
         _ = Sig.Find(Commands.AssignSig) + Sig.Find(Commands.UnassignSig) + Sig.Find(Game.IsAtWarWithSig) + Sig.Find(Game.SameOrAlliedSig)
-            + Sig.Find(Province.FortLevelSig) + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig) + Sig.VTable(Signatures.LandCombat);
+            + Sig.Find(Province.FortLevelSig) + Sig.Find(Buildings.FindSig) + Sig.Find(Buildings.DbCallSig) + Sig.VTable(LandCombat.Class);
         _game = new PerGame(() => // one reset for the operations too: they share _held
         {
             _sides.Clear(); // Begin swaps a new side in
@@ -165,7 +155,8 @@ public unsafe partial class FrontLine : Plugin
             _restore = true; // a save loaded or the plugin reloaded: put back what the last game took off its plans
         });
         if (operations) LoadOperations();
-        if (micro) MainThread.Every(TimeSpan.FromSeconds(2), Manage);
+        if (_micro) MainThread.Every(TimeSpan.FromSeconds(2), Manage);
+        Jobs.AiMicro = _ai ? Info.Id : null; // last: a load that throws leaves AI Assist's micro on
     }
 
     private void PollKeys()
@@ -340,21 +331,17 @@ public unsafe partial class FrontLine : Plugin
     /// </summary>
     private Dictionary<nint, double> LosingDefences(int tag)
     {
-        var landCombat = Sig.VTable(Signatures.LandCombat);
         var losing = new Dictionary<nint, double>();
         foreach (var (key, seen) in _orgSeen.ToArray()) if (key.Item1 == tag && Game.Hour - seen.Hour is < 0 or >= 24) _orgSeen.Remove(key); // battles over
-        foreach (var combat in Native.PdxArray(Game.State + CombatsOfGameState))
+        foreach (var combat in LandCombat.All())
         {
-            if (combat == 0 || *(nint*)combat != landCombat) continue;
-            var defender = *(nint*)(combat + DefenderOfCombat);
-            var province = *(nint*)(combat + ProvinceOfCombat);
+            var defender = LandCombat.Defender(combat);
+            var province = LandCombat.Location(combat);
             if (defender == 0 || province == 0) continue;
-            var defending = Native.PdxArray(defender + DivisionsOfSide);
+            var defending = LandCombat.Divisions(defender);
             if (defending.Length == 0 || defending[0] == 0 || Division.Commander(defending[0]) != tag) continue;
-            if (*(int*)(defender + ReservesOfSide + 0xC) > 0) continue; // a reserve already waits to step in
-            long progress;
-            ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress); // attacker's share
-            var share = progress * 100.0 / Native.FixedPoint;
+            if (LandCombat.Reserves(defender) > 0) continue; // a reserve already waits to step in
+            var share = LandCombat.AttackerShare(combat) * 100.0 / Native.FixedPoint;
             var eta = CollapseHours(tag, province, defending);
             if (share >= _losing || eta < EarlyPlugHours) losing[province] = share;
             _eta[province] = eta;
@@ -364,7 +351,7 @@ public unsafe partial class FrontLine : Plugin
 
     private const int EarlyPlugHours = 48, UrgentPlugHours = 24, MotorizedHoursPerProvince = 10, InfantryHoursPerProvince = 20;
     private readonly Dictionary<nint, double> _eta = [];                                // the turn's defences -> hours until their organisation runs out
-    private readonly Dictionary<(int, nint), (int Hour, double Org)> _orgSeen = [];    // (tag, battle province) -> defenders' organisation at the last hour seen
+    private readonly Dictionary<(int, nint), (int Hour, double Org, double Eta)> _orgSeen = []; // (tag, battle province) -> defenders' organisation at the last hour seen, and the eta then
 
     /// <summary>Hours until the defenders' organisation runs out at the rate it fell since the last hour seen; infinite while it holds.</summary>
     private double CollapseHours(int tag, nint province, ReadOnlySpan<nint> defending)
@@ -373,10 +360,12 @@ public unsafe partial class FrontLine : Plugin
         foreach (var unit in defending) if (unit != 0) org += Org(unit);
         var hour = Game.Hour;
         var key = (tag, province);
+        var found = _orgSeen.TryGetValue(key, out var seen);
+        if (found && seen.Hour == hour) return seen.Eta; // a later turn in the same hour: no new sample to compare
         var eta = double.PositiveInfinity;
-        if (_orgSeen.TryGetValue(key, out var seen) && hour - seen.Hour is > 0 and < 24 && seen.Org > org)
+        if (found && hour - seen.Hour is > 0 and < 24 && seen.Org > org)
             eta = org / ((seen.Org - org) / (hour - seen.Hour));
-        if (!_orgSeen.TryGetValue(key, out seen) || seen.Hour != hour) _orgSeen[key] = (hour, org);
+        _orgSeen[key] = (hour, org, eta);
         return eta;
     }
 

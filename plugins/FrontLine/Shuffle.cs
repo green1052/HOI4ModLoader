@@ -90,6 +90,7 @@ public partial class FrontLine
                 // An AI army with only this front: unassigned, the AI's theatre distribution sends them where needed.
                 if (!(main != null ? Commands.Assign(unit, Division.Group(unit), main.Key.Id, _force) : Commands.Unassign(unit, Division.Group(unit), _force))) continue;
                 _pending[unit] = _now + PendingMs;
+                if (_force) _recent[unit] = Game.Hour; // the AI may put it back: don't take it again for RepeatHours
                 moved++;
             }
             if (moved > 0) Log.Debug($"pocket front: {moved} division(s) beyond what a pocket of {enemies} enemy division(s) needs go to {(main != null ? "their army's main front" : "the AI's regrouping")}");

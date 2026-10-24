@@ -20,11 +20,14 @@ public unsafe partial class FrontLine
         var hour = Game.Hour;
         foreach (var (key, at) in _breakouts.ToArray()) if (hour - at is < 0 or >= BreakoutHours) _breakouts.Remove(key);
         var walked = new HashSet<int>();
+        var seen = new HashSet<int>(); // one walk's own: a walk that stopped at MaxCutOff must not wall off the next
         foreach (var unit in units)
         {
             var location = Division.Location(unit);
-            if (location == 0 || walked.Contains(Game.Id(location)) || !Friendly(country, tag, location) || !LowSupply(unit)) continue; // only unsupplied pockets break out (checked below)
-            var region = Province.Region(location, MaxCutOff, p => Friendly(country, tag, p), walked);
+            if (location == 0 || walked.Contains(Game.Id(location)) || !Friendly(country, tag, location) || !Division.LowSupply(unit)) continue; // only unsupplied pockets break out (checked below)
+            seen.Clear();
+            var region = Province.Region(location, MaxCutOff, p => Friendly(country, tag, p), seen);
+            walked.UnionWith(seen);
             if (region == null) continue; // part of the main body
             if (region.Any(p => Game.Neighbours(p).Any(n => Game.Province(n) is var q && q != 0 && Province.Controller(q) == 0)))
                 continue; // on the coast: supplied and reachable by sea, not a pocket
@@ -34,7 +37,7 @@ public unsafe partial class FrontLine
             if (target == 0) continue; // no friendly ground near: an overseas holding
             var inside = region.ToHashSet();
             var trapped = units.Where(u => Division.Location(u) is var l && l != 0 && inside.Contains(l)).ToList();
-            if (trapped.Count(LowSupply) * 2 <= trapped.Count) continue; // still supplied: it holds
+            if (trapped.Count(Division.LowSupply) * 2 <= trapped.Count) continue; // still supplied: it holds
             var breakers = trapped.Where(u => Ready(u, tag) && !Division.Walking(u) && Org(u) >= BreakoutOrg
                                               && !(_held.TryGetValue(u, out var job) && job.Job == Job.Operation)).ToList(); // an operation keeps its own
             if (breakers.Count == 0) continue;
@@ -48,10 +51,6 @@ public unsafe partial class FrontLine
             Log.Debug($"breakout: {breakers.Count} division(s) cut off in {region.Count} province(s) attack toward friendly lines");
         }
     }
-
-    private const int IsLowSupplySlot = 43; // CArmy vtable: the low supply flag the unit icon shows
-
-    private static bool LowSupply(nint unit) => ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) != 0;
 
     /// <summary>The enemy province next to the pocket on the shortest land way to friendly ground outside it (fewest enemy divisions on a tie), or 0.</summary>
     private nint WayOut(nint country, int tag, List<nint> region)
@@ -254,40 +253,13 @@ public unsafe partial class FrontLine
     }
 
     /// <summary>
-    /// A break-in at or next to our province <paramref name="p"/> not yet answered: enemy troops inside it, or an enemy
-    /// neighbour bulging into our side (two or more of our provinces around it, twice the enemy's) that was ours in the last
-    /// two days or touches no enemy ground (a landing, paratroopers). Its id, or 0.
+    /// <see cref="Province.BreakIn"/> not yet answered (<see cref="_sent"/>); recent: ours in the last two days. With the
+    /// turn's wars.
     /// </summary>
-    private int BreakIn(nint country, int tag, nint p)
-    {
-        var self = Game.Id(p);
-        if (!_sent.ContainsKey(self) && Hostiles(country, p) > 0) return self;
-        foreach (var id in Game.Neighbours(p))
-        {
-            if (_sent.ContainsKey(id)) continue;
-            var e = Game.Province(id);
-            if (e == 0 || !Enemy(country, tag, e)) continue;
-            var (ours, theirs) = (0, 0);
-            foreach (var n in Game.Neighbours(e))
-            {
-                var q = Game.Province(n);
-                if (q == 0) continue;
-                if (Province.Controller(q) == tag) ours++;
-                else if (Enemy(country, tag, q)) theirs++;
-            }
-            if (ours >= 2 && ours >= 2 * theirs && (theirs == 0 || _lastSeen.ContainsKey(id))) return id;
-        }
-        return 0;
-    }
+    private int BreakIn(nint country, int tag, nint p) => Province.BreakIn(tag, p, t => AtWar(country, t), _sent.ContainsKey, _lastSeen.ContainsKey);
 
-    /// <summary>Divisions of countries at war with us in the province.</summary>
-    private int Hostiles(nint country, nint province)
-    {
-        var n = 0;
-        foreach (var unit in Province.Units(province))
-            if (unit != 0 && AtWar(country, Division.Commander(unit))) n++;
-        return n;
-    }
+    /// <summary><see cref="Province.Hostiles"/>, with the turn's wars.</summary>
+    private int Hostiles(nint country, nint province) => Province.Hostiles(province, t => AtWar(country, t));
 
     /// <summary>
     /// Fronts with MinReserveLine+ line provinces keep one spare fresh mobile division per ReserveLine of them (MaxReserves at
@@ -468,20 +440,6 @@ public unsafe partial class FrontLine
         }
     }
 
-    /// <summary>What holding this province of ours is worth: a port (the fleet and supply), victory points, a river in front of it, city or mountain ground.</summary>
-    private int Key(nint country, int tag, nint province)
-    {
-        var port = Province.BuildingLevel(province, Buildings.NavalBaseSlot);
-        if (port > 0) return 1000 + port;
-        var key = 3 * Math.Min(Province.VictoryPoints(province), 30);
-        if ((Province.TerrainCategory(province) & (Province.Mountain | Province.Urban)) != 0) key += 25;
-        foreach (var id in Game.Neighbours(province))
-        {
-            var p = Game.Province(id);
-            if (p == 0 || !Enemy(country, tag, p) || Game.AdjacencyType(province, id) is not (Province.River or Province.LargeRiver)) continue; // impassable: no attack at all
-            key += 40; // the enemy has to cross a river to take it
-            break;
-        }
-        return key;
-    }
+    /// <summary><see cref="Province.KeyValue"/> (a port, victory points, a river in front of it, city or mountain ground), with the turn's wars.</summary>
+    private int Key(nint country, int tag, nint province) => Province.KeyValue(tag, province, t => AtWar(country, t));
 }
