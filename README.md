@@ -42,8 +42,8 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | Fonts | The game's text in an installed font or a .ttf/.otf/.ttc file | ✅ |
 | Reroll | A fresh random seed at every load, so reloading doesn't replay the same dice | Single player only |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
-| Performance | Targeted decisions look for new targets every few days; the map updates every few frames at speeds 4-5 | Single player only |
-| Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them; finished operations clear themselves | Single player only |
+| Performance | Targeted decisions look for new targets every few days; the map updates every few frames at speeds 4-5 | ✅ (decision targets: single player) |
+| Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them; finished operations clear themselves | ✅ (operative drag: single player) |
 | DiscordPresence | Your country and the game date in your Discord status | ✅ |
 
 ### Queues
@@ -331,7 +331,7 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 - The AI spends spare command power (keeping 50) on More Ground Crews in its two hardest-fought air regions, which vanilla's AI never uses.
 
 ### Performance
-Single player only (it changes when the game state updates).
+The decision targets are single player only (they change when the game state updates); the map updates and frame cap only change drawing and work in multiplayer too.
 - **Decision targets** (`DecisionTargetDays`, 3; 1 is vanilla): targeted decisions look for new targets every few days instead of daily. Invalid targets still drop daily.
 - **Map updates** (`MapEveryFrames`, 3; 1 is vanilla): at speeds 4 and 5 the map (province colours, units, icons) updates every third frame. At speed 5 a frame is a game hour, so this was about 6 % more game time per second in a 1936 save. Paused and at speeds 1-3 it updates every frame.
 - **Frame cap** (`FastSpeedFrameMs`, 0: off): at speeds 4 and 5, the screen is drawn at most every that many milliseconds, leaving more time for the simulation. No effect with the `-render_thread` launch option.
@@ -344,7 +344,7 @@ Single player only (it changes when the game state updates).
 - Keep the game window in front: in the background the game slows itself down.
 
 ### Intelligence
-Single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game).
+The drag is single player only: the game has no command to reorder operatives, so the agency's list itself is changed (and saved with the game). Clearing finished operations sends the game's own command and works in multiplayer too.
 - In the intelligence screen, drag an operative in the bottom bar to another place, as army cards are dragged: it follows the mouse and the others make room.
 - A finished operation clears itself from the operations list `DismissDays` (7) game days after it finished, as closing its overview does; its outcome was already applied. 0: never.
 
@@ -352,13 +352,13 @@ Single player only: the game has no command to reorder operatives, so the agency
 ### DiscordPresence
 Your Discord status shows the country you play (its name for its current ideology, in the game's language), the game date, multiplayer, and the time played; the main menu outside a game.
 - Needs the Discord desktop app running on the same PC.
-- `ApplicationId`: Discord shows the status under a Discord application's name. Create one at [discord.com/developers](https://discord.com/developers/applications) (New Application, named e.g. Hearts of Iron IV) and paste its Application ID. Empty: off.
+- `ApplicationId`: Discord shows the status under a Discord application's name. It works out of the box with the project's application; to show another name, create one at [discord.com/developers](https://discord.com/developers/applications) (New Application) and paste its Application ID. Empty: off.
 - The status clears within a minute after the game closes or the plugin is turned off.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join.
 - Plugins like the queues and auto construction send the same commands a player's clicks would.
-- These switch off in a multiplayer lobby and back on in single player: field marshals holding air wings and railway guns (spread over his armies instead), railway gun positioning, FrontLine's Apply to AI, and the single-player plugins.
+- These switch off in a multiplayer lobby and back on in single player: field marshals holding air wings and railway guns (spread over his armies instead), railway gun positioning, FrontLine's Apply to AI, Performance's decision targets, Intelligence's operative drag, and the single-player plugins.
 - Settings changed during a multiplayer session, and rebuilt plugin DLLs, take effect back in single player.
 
 ## Loader: start-up speed

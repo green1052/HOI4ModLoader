@@ -92,20 +92,14 @@ public sealed class Fonts : Plugin
         foreach (var file in Directory.GetFiles(cache)) GameFiles.Add($"{dir}/{Path.GetFileName(file)}", file);
     }
 
-    /// <summary>gfx/fonts/&lt;language&gt; for the game's language (pdx_settings.txt), else gfx/fonts.</summary>
-    private static string FontDir()
+    /// <summary>gfx/fonts/&lt;language&gt; for the game's language (<see cref="Loc.Language"/>), else gfx/fonts.</summary>
+    private static string FontDir() => Loc.Language switch
     {
-        var settings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Paradox Interactive", "Hearts of Iron IV", "pdx_settings.txt");
-        var language = File.Exists(settings)
-            ? Regex.Match(File.ReadAllText(settings), "\"language\"\\s*=\\s*\\{\\s*value\\s*=\\s*\"(\\w+)\"").Groups[1].Value : "";
-        return language switch
-        {
-            "l_korean" => "gfx/fonts/korean",
-            "l_japanese" => "gfx/fonts/japanese",
-            "l_simp_chinese" => "gfx/fonts/chinese",
-            _ => "gfx/fonts",
-        };
-    }
+        "korean" => "gfx/fonts/korean",
+        "japanese" => "gfx/fonts/japanese",
+        "simp_chinese" => "gfx/fonts/chinese",
+        _ => "gfx/fonts",
+    };
 
     /// <summary>The GDI face name for a font setting: an installed font's name as is, a font file's family (loaded for this process only).</summary>
     private string Face(string spec)

@@ -1,5 +1,5 @@
 ﻿l_korean:
     com.green1052.intelligence.name:0 "첩보"
-    com.green1052.intelligence.desc:0 "첩보 화면 조작을 돕습니다.\n- 첩보원 초상화 드래그: 육군 카드처럼 순서 변경\n- 끝난 작전은 며칠 뒤 작전 목록에서 저절로 정리\n싱글플레이 전용."
+    com.green1052.intelligence.desc:0 "첩보 화면 조작을 돕습니다.\n- 첩보원 초상화 드래그: 육군 카드처럼 순서 변경\n- 끝난 작전은 며칠 뒤 작전 목록에서 저절로 정리\n드래그는 싱글플레이 전용."
     com.green1052.intelligence.DismissDays:0 "끝난 작전 정리(일)"
     com.green1052.intelligence.DismissDays.desc:0 "작전이 끝나고 이 기간(게임 일수)이 지나면 작전 목록에서 지웁니다. 0이면 지우지 않습니다."

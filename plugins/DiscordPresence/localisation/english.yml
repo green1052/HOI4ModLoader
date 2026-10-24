@@ -1,6 +1,6 @@
 ﻿l_english:
-    com.green1052.discordpresence.desc:0 "Shows what you play in your Discord status.\n- The country you play and the game date (and the players in multiplayer), and the time since you loaded it\n- In the main menu while not in a game\nNeeds the Discord app running and an Application ID (see its setting). Works in multiplayer."
+    com.green1052.discordpresence.desc:0 "Shows what you play in your Discord status.\n- The country you play and the game date (and the players in multiplayer), and the time since you loaded it\n- In the main menu while not in a game\nNeeds the Discord app running. Works in multiplayer."
     com.green1052.discordpresence.ApplicationId:0 "Discord Application ID"
-    com.green1052.discordpresence.ApplicationId.desc:0 "Discord shows the status under this application's name.\ndiscord.com/developers -> New Application (name it Hearts of Iron IV) -> copy the Application ID here. Takes effect at the next start or plugin reload."
+    com.green1052.discordpresence.ApplicationId.desc:0 "Discord shows the status under this application's name: the project's by default. For your own: discord.com/developers -> New Application -> copy the Application ID here. Empty: off.\nTakes effect at the next start or plugin reload."
     com.green1052.discordpresence.Menu:0 "In the main menu"
     com.green1052.discordpresence.Players:0 "Multiplayer, {0} players"

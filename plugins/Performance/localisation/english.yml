@@ -1,5 +1,5 @@
 ﻿l_english:
-    com.green1052.performance.desc:0 "Speeds the game up: at speed 5 a frame is a game hour, so time cut from a frame is game time gained.\n- Targeted decisions look for new targets every few days instead of daily\n- At speeds 4-5 the map updates every few frames\nSingle player only."
+    com.green1052.performance.desc:0 "Speeds the game up: at speed 5 a frame is a game hour, so time cut from a frame is game time gained.\n- Targeted decisions look for new targets every few days instead of daily\n- At speeds 4-5 the map updates every few frames\nThe decision targets are single player only."
     com.green1052.performance.DecisionTargetDays:0 "Decision target search (days)"
     com.green1052.performance.DecisionTargetDays.desc:0 "Targeted decisions look for new targets every this many days (1: daily, as vanilla).\nA newly valid target shows up that much later. Targets that became invalid still drop out daily."
     com.green1052.performance.MapEveryFrames:0 "Map update at speeds 4-5 (frames)"

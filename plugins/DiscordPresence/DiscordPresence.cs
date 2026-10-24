@@ -43,7 +43,7 @@ public unsafe class DiscordPresence : Plugin
     public override void Load()
     {
         _appId = Config.Bind("Discord", "ApplicationId", "1562707563143761940",
-            "The Discord application whose name Discord shows as the game (Discord Developer Portal -> New Application -> Application ID).").Trim();
+            "The Discord application whose name Discord shows as the game: the project's by default, or your own (Discord Developer Portal -> New Application -> Application ID). Empty: off.").Trim();
         if (_appId == "")
         {
             Log.Info("no ApplicationId set: nothing shown (see the plugin's settings)");
@@ -117,13 +117,14 @@ public unsafe class DiscordPresence : Plugin
     {
         NamedPipeClientStream? pipe = null;
         string? shown = null;
-        var retryAt = 0L;
+        long retryAt = 0, sentAt = 0;
         try
         {
             while (Environment.TickCount64 - Interlocked.Read(ref _lastTick) < 60_000)
             {
                 var want = _wanted;
-                if (want != shown && Environment.TickCount64 >= retryAt)
+                // Resent every minute too: a write is the only way a Discord restart is noticed (the menu's text never changes).
+                if ((want != shown || Environment.TickCount64 - sentAt > 60_000) && Environment.TickCount64 >= retryAt)
                 {
                     try
                     {
@@ -131,9 +132,9 @@ public unsafe class DiscordPresence : Plugin
                         Send(pipe, Frame, $$"""{"cmd":"SET_ACTIVITY","args":{"pid":{{Environment.ProcessId}},"activity":{{want}}},"nonce":"{{Guid.NewGuid()}}"}""");
                         if (Receive(pipe) is var reply && reply.Contains("\"evt\":\"ERROR\"")) Problem($"Discord refused the status: {reply}");
                         if (shown == null) Problem("showing the status in Discord"); // logged once per connection
-                        shown = want;
+                        (shown, sentAt) = (want, Environment.TickCount64);
                     }
-                    catch (Exception e) when (e is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+                    catch (Exception e) when (e is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException)
                     {
                         Problem(e.Message);
                         pipe?.Dispose(); // Discord isn't running or went away: try again later
@@ -167,7 +168,7 @@ public unsafe class DiscordPresence : Plugin
                 Receive(pipe); // READY
                 return pipe;
             }
-            catch (Exception e) when (e is IOException or TimeoutException)
+            catch (Exception e) when (e is IOException or TimeoutException or UnauthorizedAccessException) // access denied: Discord runs as administrator
             {
                 pipe.Dispose();
             }

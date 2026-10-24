@@ -34,9 +34,10 @@ public static class Signatures
 /// <summary>
 /// The intelligence screen. Drag an operative in the bottom bar to move it, as army cards are dragged: it follows the mouse
 /// and the others make room. The game has no command for this, so the agency's own list is reordered: single player only.
-/// Finished operations clear themselves from the operations list a few days after they finished.
+/// Finished operations clear themselves from the operations list a few days after they finished (the game's own command:
+/// multiplayer too).
 /// </summary>
-[Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
+[Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.3")]
 public unsafe class Intelligence : Plugin
 {
     // Layouts for HOI4 1.19.3.
@@ -82,7 +83,8 @@ public unsafe class Intelligence : Plugin
             _deleted.Clear();
             _checkedDay = -1;
         });
-        if (_dismissDays > 0) MainThread.Every(TimeSpan.FromSeconds(1), () => Log.Guard("operation dismissal", DismissFinished));
+        if (_dismissDays > 0) MainThread.Every(TimeSpan.FromSeconds(1), DismissFinished);
+        if (Multiplayer) return; // the drag changes the game
         _glueVTable = Sig.VTable(Signatures.ItemGlue);
         _itemVTable = Sig.VTable(Signatures.Item);
         _barRefresh = (delegate* unmanaged<nint, void>)Sig.Find(Signatures.BarRefresh);
@@ -105,8 +107,7 @@ public unsafe class Intelligence : Plugin
         });
         _barUpdate = Patches.Hook<BarFn>(Sig.Find(Signatures.BarUpdate), bar =>
         {
-            var dropped = false;
-            if (_pressed != 0) Log.Guard("operative drag", () => dropped = Drop()); // most frames: no press, nothing allocated
+            var dropped = _pressed != 0 && GuardedDrop(); // most frames: no press, nothing allocated
             _barUpdate!.OriginalFunction(bar);
             if (dropped) _barRefresh(bar); // back to the normal layout, in the new order
             else if (_dragging) Log.Guard("operative drag", (this, bar), static s => s.Item1.Animate(s.bar));
@@ -152,6 +153,14 @@ public unsafe class Intelligence : Plugin
         long at;
         var p = ((delegate* unmanaged<nint, long*, long*>)(*(nint**)input)[MousePositionSlot])(input, &at);
         return ((int)*p, (int)(*p >> 32));
+    }
+
+    /// <summary><see cref="Drop"/> guarded; its closure lives here, so the bar's hook allocates nothing without a press.</summary>
+    private bool GuardedDrop()
+    {
+        var dropped = false;
+        Log.Guard("operative drag", () => dropped = Drop());
+        return dropped;
     }
 
     /// <summary>Follows a press: past a few pixels it is a drag. True once a drag is released (the bar is then refreshed).</summary>

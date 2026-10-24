@@ -36,12 +36,12 @@ public static class Signatures
 /// <summary>
 /// Game speed. At speed 5 a frame is a game hour, so time cut from a frame is game time gained.
 /// - Targeted decisions look for new targets every few days instead of daily, the biggest single cost of a game day.
-///   Invalid targets still drop out daily; timers, missions and forced refreshes are untouched.
+///   Invalid targets still drop out daily; timers, missions and forced refreshes are untouched. Single player only.
 /// - At speeds 4 and 5 the map (province colours, units, icons) updates every few frames.
 /// - Optionally (FastSpeedFrameMs, off by default) the screen is drawn less often at speeds 4 and 5. Input still runs every
 ///   frame.
 /// </summary>
-[Plugin("com.green1052.performance", "Performance", "1.1.0", GameVersion = "1.19.3", AffectsGameState = true)]
+[Plugin("com.green1052.performance", "Performance", "1.1.0", GameVersion = "1.19.3")]
 public unsafe class Performance : Plugin
 {
     [Function(CallingConventions.Microsoft)] public delegate void DecisionTargetsFn(nint decisions, byte force);
@@ -102,7 +102,7 @@ public unsafe class Performance : Plugin
                 if (!_mapSkipped) _mapIcons!.OriginalFunction(icons, view, clock);
             });
         }
-        if (days <= 1) return;
+        if (days <= 1 || Multiplayer) return; // the map and frame hooks only draw; this one changes the game
         _decisionTargets = Patches.Hook<DecisionTargetsFn>(Sig.Find(Signatures.DecisionTargets), (decisions, force) =>
         {
             // The day, not the hour: vanilla's gate inside still picks the country's hour of that day.
