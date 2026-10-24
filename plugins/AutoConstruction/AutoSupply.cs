@@ -31,14 +31,9 @@ public static class SupplySignatures
 /// </summary>
 public unsafe partial class AutoConstruction
 {
-    // Layouts for HOI4 1.19.3.
-    private const int RailwaysOfGameState = 0x3E0;
-    private const int CountriesOfSupply = 0x108, NetworkOfCountry = 0x80;                                 // CSupplySystem (Game.Supply)
-    private const int Nodes = 0xB8, NodeSize = 0xE8, LandNodes = 0x2C0;                                  // supply network
-    private const int ProvinceOfNode = 4, KindOfNode = 8, Capital = 12, SupplyIn = 56, SupplyLeft = 64, Connected = 152, NavalNode = 3;
-    private const int FlowEntrySize = 16, CountryOfEntry = 2, AmountOfEntry = 8;                         // Game.EntriesOfFlow: {u16 node, u16 country, pad, i64 amount}
-    private const int RailwayPairs = 0x38;                                                                // railway info: {int neighbour, int level}
-    private const int IsLowSupplySlot = 43;                                                               // CArmy vtable
+    // Layouts for HOI4 1.19.3 (the network, its nodes and the railways are the loader's: Game.SupplyNetwork, Province.Railways).
+    private const int LandNodes = 0x2C0;                                                                  // supply network: {int province, int node}
+    private const int KindOfNode = 8, Capital = 12, SupplyIn = 56, SupplyLeft = 64, Connected = 152, NavalNode = 3;
     // In game time, so a fix still being built isn't queued again at high speed. A shortage counts after a week (an advance
     // outruns its supply for a few days), a fixed area waits a month, and at most one new hub (cost 20000) is built a month.
     private const int SupplyCooldownHours = 30 * 24, StarvingHours = 7 * 24, HubEveryHours = 30 * 24;
@@ -75,9 +70,7 @@ public unsafe partial class AutoConstruction
         var supply = Game.Supply;
         if (country == 0 || supply == 0 || Buildings.Db == 0) return;
         _supplyNode = Buildings.Type(Buildings.SupplyNodeSlot);
-        var countries = *(nint*)(supply + CountriesOfSupply);
-        var countrySupply = countries == 0 ? 0 : *(nint*)(countries + 8 * Game.TagIndex(tag));
-        var network = countrySupply == 0 ? 0 : *(nint*)(countrySupply + NetworkOfCountry);
+        var network = Game.SupplyNetwork(tag);
         if (network == 0 || _supplyNode == 0) return;
         var now = Game.Hour;
         if (now / 24 == _supplyDay) return; // once a game day
@@ -87,7 +80,7 @@ public unsafe partial class AutoConstruction
         var starving = new Dictionary<nint, int>(); // province -> divisions low on supply there
         foreach (var unit in Game.Units(country))
         {
-            if (!Division.IsLand(unit) || ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) == 0) continue;
+            if (!Division.IsLand(unit) || !Division.LowSupply(unit)) continue;
             var province = Division.Location(unit);
             if (province != 0) starving[province] = starving.GetValueOrDefault(province) + 1;
         }
@@ -113,10 +106,10 @@ public unsafe partial class AutoConstruction
 
     private bool FixSupply(nint country, int tag, nint network, nint province)
     {
-        var node = FeedingNode(network, Game.Id(province), Game.TagIndex(tag));
+        var node = Game.FeedingNode(network, Game.Id(province), Game.TagIndex(tag));
         if (node != 0)
         {
-            var nodeProvince = *(int*)(node + ProvinceOfNode);
+            var nodeProvince = *(int*)(node + Game.ProvinceOfNode);
             if (*(long*)(node + Connected) <= 0 && *(byte*)(node + Capital) == 0) return ConnectRailway(network, tag, nodeProvince);
             var supplied = *(long*)(node + SupplyIn);
             if (supplied > 0 && (supplied - *(long*)(node + SupplyLeft)) * 100 / supplied >= SaturationPercent)
@@ -131,22 +124,6 @@ public unsafe partial class AutoConstruction
             if (Nearest(province, HubDistance, id => id == nodeProvince) >= 0) return false; // near and not saturated: building won't help (disruption)
         }
         return BuildHub(country, tag, network, province);
-    }
-
-    /// <summary>Our node sending the most supply into the province (its supply flow), or 0.</summary>
-    private static nint FeedingNode(nint network, int province, int tagIndex)
-    {
-        var flow = Game.SupplyFlow(province);
-        if (flow == 0) return 0;
-        var entries = *(nint*)(flow + Game.EntriesOfFlow);
-        (int Node, long Amount) best = (-1, 0);
-        for (int i = 0, n = *(int*)(flow + Game.EntriesOfFlow + 0xC); i < n; i++)
-        {
-            var e = entries + i * FlowEntrySize;
-            if (*(ushort*)(e + CountryOfEntry) != tagIndex || *(long*)(e + AmountOfEntry) <= best.Amount) continue;
-            best = (*(ushort*)e, *(long*)(e + AmountOfEntry));
-        }
-        return best.Node < 0 || best.Node >= *(int*)(network + Nodes + 0xC) ? 0 : *(nint*)(network + Nodes) + (nint)NodeSize * best.Node;
     }
 
     private bool UpgradeRail(int tag, nint node, bool naval, int id)
@@ -170,7 +147,7 @@ public unsafe partial class AutoConstruction
         var pairs = *(nint*)(network + LandNodes);
         for (int i = 0, n = *(int*)(network + LandNodes + 0xC); i < n; i++)
         {
-            var node = *(nint*)(network + Nodes) + (nint)NodeSize * *(int*)(pairs + i * 8 + 4);
+            var node = *(nint*)(network + Game.NodesOfNetwork) + (nint)Game.NodeSize * *(int*)(pairs + i * 8 + 4);
             if (*(long*)(node + Connected) > 0 || *(byte*)(node + Capital) != 0) connected.Add(*(int*)(pairs + i * 8));
         }
         var target = Nearest(start, MaxRailSearch, connected.Contains);
@@ -198,33 +175,21 @@ public unsafe partial class AutoConstruction
         foreach (var id in Game.Neighbours(province))
             if (Game.Province(id) is var p && p != 0 && !candidates.Contains(p)) candidates.Add(p);
         var best = candidates
-            .Where(p => Province.Controller(p) == tag && _canBuildInProvince(country, p, _supplyNode, 1) != 0 && _freeLevels(Province.Buildings(p), _supplyNode) > 0)
-            .OrderByDescending(HasRailway).ThenByDescending(p => p == province).ThenBy(Game.Id)
+            .Where(p => Province.Controller(p) == tag && Construction.CanBuildInProvince(country, p, _supplyNode) && Construction.FreeLevels(Province.Buildings(p), _supplyNode) > 0)
+            .OrderByDescending(Province.HasRailway).ThenByDescending(p => p == province).ThenBy(Game.Id)
             .FirstOrDefault();
         if (best == 0) return false;
         var hub = Game.Id(best);
-        if (!PostConstruction(tag, hub, _supplyNode)) return false;
+        if (!Construction.Queue(tag, hub, _supplyNode)) return false;
         _lastHub = Game.Hour;
         Log.Info($"supply: no hub near province {Game.Id(province)}, building one in {hub}");
-        if (!HasRailway(best)) ConnectRailway(network, tag, hub);
+        if (!Province.HasRailway(best)) ConnectRailway(network, tag, hub);
         return true;
     }
 
-    private bool QueuedHubIn(nint country, nint state) => ConstructionLines(country, _supplyNode).Any(line =>
-        *(nint*)(line.Building + ContainerOfBuilding) is var container && container != 0 // Province.Buildings(province)
+    private bool QueuedHubIn(nint country, nint state) => Construction.Lines(country, _supplyNode).Any(line =>
+        Construction.Container(line.Building) is var container && container != 0 // Province.Buildings(province)
         && Province.State(container - Province.BuildingsOffset) == state);
-
-    /// <summary>Any railway out of the province (the railway map's level per neighbour).</summary>
-    private static bool HasRailway(nint province)
-    {
-        var railways = *(nint*)(Game.State + RailwaysOfGameState);
-        var info = railways == 0 ? 0 : *(nint*)(*(nint*)(railways + 8) + 8 * Game.Id(province));
-        if (info == 0) return false;
-        var pairs = *(nint*)(info + RailwayPairs);
-        for (int i = 0, n = *(int*)(info + RailwayPairs + 0xC); i < n; i++)
-            if (*(int*)(pairs + i * 8 + 4) > 0) return true;
-        return false;
-    }
 
     /// <summary>The nearest province (breadth first over adjacency, up to <paramref name="max"/> steps) matching <paramref name="wanted"/>, or -1.</summary>
     private static int Nearest(nint from, int max, Func<int, bool> wanted)

@@ -16,20 +16,11 @@ public static class Signatures
     /// <summary>CCountryConstructionView::UpdateBuildingItems(view): (re)fills the building buttons, every frame while the tab is open.</summary>
     [Signature] public const string UpdateBuildingItems = "48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC D0 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B E9";
 
-    /// <summary>BuildingContainer::GetFreeLevels(container, type) -> int: max level minus planned (built and queued), shared slots included.</summary>
-    [Signature] public const string FreeLevels = "48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 4C 63 82";
-
     /// <summary>CCountry::CanBuildInState(country, state, type, bool) -> bool: what the construction map mode allows.</summary>
     [Signature] public const string CanBuildInState = "48 8B 42 18 4D 8B D0 4C 8B C1 48 8B 08 48 8B 81 B8 00 00 00 F6 80 D2 00 00 00 01";
 
-    /// <summary>CCountry::CanBuildInProvince(country, province, type, bool) -> bool.</summary>
-    [Signature] public const string CanBuildInProvince = "48 8B 82 B8 00 00 00 4D 8B D0 4C 8B C1 F6 80 D2 00 00 00 01";
-
     /// <summary>CState::GetFreeSharedSlots(state) -> int: building slots left for factories, dockyards and the like.</summary>
     [Signature] public const string FreeSharedSlots = "48 89 5C 24 ? 57 48 83 EC 20 33 D2 48 8B D9 E8";
-
-    /// <summary>Lexer: token -> std::string* (a building type's name).</summary>
-    [Signature] public const string TokenToString = "40 53 48 83 EC 30 48 63 D9 80 3D";
 
     /// <summary>
     /// CProductionStatus::IsConstructionSaturated(status) -> bool: the queue takes every free civilian factory. Reads the
@@ -37,12 +28,8 @@ public static class Signatures
     /// </summary>
     [Signature] public const string ConstructionSaturated = "48 B8 09 E1 D1 C6 11 6B F1 29 48 F7 A9 78 03 00 00 4C 8B C2 49 C1 F8 0E 49 8B C0 48 C1 E8 3F 4C 03 C0 48 8B 41 70 44 2B 81 B0 03 00 00 44 2B 81 98 03 00 00 48 63 49 7C";
 
-    [VTable] public const string ConstructionCommand = "CAddConstructionCommand";
-
     /// <summary>Removes levels of a construction line, as its cancel button does: +0x28 the line's CRef (line+0x08), +0x30 levels.</summary>
     [VTable] public const string RemoveConstructionCommand = "CRemoveConstructionCommand";
-    [VTable] public const string BuildingReference = "CBuildingReference";
-    [VTable] public const string BuildingLine = "CBuildingProductionLine";
 }
 
 /// <summary>
@@ -55,17 +42,14 @@ public static class Signatures
 [Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.3")]
 public unsafe partial class AutoConstruction : Plugin
 {
-    // Layouts for HOI4 1.19.3.
-    private const int StatesOfCountry = 0x460, ProductionOfCountry = 0xF68;
+    // Layouts for HOI4 1.19.3 (production status, construction lines and the command: the loader's Construction).
+    private const int StatesOfCountry = 0x460, ProductionOfCountry = Construction.ProductionOfCountry;
     // CProductionStatus: civilian factories (fixed point), those used by construction lines, those used elsewhere (trade, consumer goods).
     private const int CivilianFactories = 0x378, DamagedFactories = 0x390, ConstructionFactories = 0x398, OtherFactories = 0x3B0;
     private const int CoresOfState = 176;
-    private const int TokenOfType = 8, ProvinceLevel = 700;      // CBuildingType: name token; > 0 = built per province (naval base, bunker...)
-    private const int ContainerOfBuilding = 472, TypeOfBuilding = 480; // CBuilding: its container, its type
-    private const int Lines = 112, RefOfLine = 0x08, FactoriesOfLine = 0x18, ProgressOfLine = 0x38, LevelsOfLine = 72, BuildingOfLine = 112, RepairLine = 140; // production status, CBuildingProductionLine
+    private const int ProvinceLevel = 700;                       // CBuildingType: > 0 = built per province (naval base, bunker...)
+    private const int RefOfLine = 0x08, FactoriesOfLine = 0x18, ProgressOfLine = 0x38, LevelsOfLine = 72, RepairLine = 140; // CBuildingProductionLine
     private const int Items = 1440, WindowOfItem = 16, TypeOfItem = 32; // construction view building buttons
-    private const int Location = 56, Building = 60, Levels = 72, Insertion = 76; // CAddConstructionCommand
-    private const byte AtEnd = 1;
     private const long PendingMs = 30_000;
     private const int BigStep = 5;                               // Ctrl+Shift+click
     private const string TargetBox = "hoimod_auto";
@@ -75,10 +59,8 @@ public unsafe partial class AutoConstruction : Plugin
 
     private IHook<ClickFn>? _click;
     private IHook<ViewFn>? _update;
-    private delegate* unmanaged<nint, nint, int> _freeLevels;
-    private delegate* unmanaged<nint, nint, nint, byte, byte> _canBuildInState, _canBuildInProvince;
+    private delegate* unmanaged<nint, nint, nint, byte, byte> _canBuildInState;
     private delegate* unmanaged<nint, int> _freeSharedSlots;
-    private delegate* unmanaged<int, nint> _tokenToString;
     private int* _maxFactoriesPerLine;
 
     // Wanted count. Building types are made once at startup, so a pointer names the same building in every game loaded.
@@ -102,12 +84,10 @@ public unsafe partial class AutoConstruction : Plugin
         _coverDays = Math.Max(0, Config.Bind("Production", "CoverDays", 60, "A short line gets factories only if its own output won't cover the shortage within this many days. A moved factory restarts at base efficiency."));
         _movesPerDay = Math.Max(1, Config.Bind("Production", "MovesPerTurn", 2, "Most factories moved per game day, so lines keep their efficiency."));
 
-        _ = Sig.Find(Buildings.FindSig);
-        _freeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.FreeLevels);
+        _ = Sig.Find(Buildings.FindSig) + Sig.Find(Construction.FreeLevelsSig) + Sig.Find(Construction.CanBuildInProvinceSig) + Sig.Find(Native.TokenToStringSig)
+            + Sig.VTable(Construction.CommandClass) + Sig.VTable(Construction.BuildingReference) + Sig.VTable(Construction.LineClass); // the core's: a broken one fails the load
         _canBuildInState = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInState);
-        _canBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(Signatures.CanBuildInProvince);
         _freeSharedSlots = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FreeSharedSlots);
-        _tokenToString = (delegate* unmanaged<int, nint>)Sig.Find(Signatures.TokenToString);
         var saturated = Sig.Find(Signatures.ConstructionSaturated);
         if (*(uint*)(saturated + 0x41) << 8 != 0x0D8B4400) throw new InvalidOperationException("MAX_CIV_FACTORIES_PER_LINE not found");
         _maxFactoriesPerLine = (int*)(saturated + 0x48 + *(int*)(saturated + 0x44));
@@ -196,7 +176,7 @@ public unsafe partial class AutoConstruction : Plugin
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
-    private string Name(nint type) => Native.Utf8(Native.MsvcString(_tokenToString(*(int*)(type + TokenOfType))));
+    private static string Name(nint type) => Native.Utf8(Native.Token(Construction.Token(type)));
 
     /// <summary>
     /// Shows "+N" in the button's target box: levels still to build for its target; empty without a target. Queued levels
@@ -214,8 +194,16 @@ public unsafe partial class AutoConstruction : Plugin
         }
         if (box == 0) return;
         var country = Game.Country(Game.ControlledTag);
-        var text = _targets.TryGetValue((Game.ControlledTag, type), out var target) && country != 0 ? $"+{Math.Max(0, target - Count(country, type, queued: false))}" : "";
-        if (Native.Utf8(Gui.Text(box)) != text) Gui.SetText(box, text);
+        // Every frame per button: formatted into bytes and compared as is, nothing allocated.
+        Span<byte> text = stackalloc byte[12];
+        var length = 0;
+        if (_targets.TryGetValue((Game.ControlledTag, type), out var target) && country != 0)
+        {
+            text[0] = (byte)'+';
+            Math.Max(0, target - Count(country, type, queued: false)).TryFormat(text[1..], out length);
+            length++;
+        }
+        if (!Gui.Text(box).SequenceEqual(text[..length])) Gui.SetText(box, text[..length]);
     }
 
     private void Pump()
@@ -265,7 +253,7 @@ public unsafe partial class AutoConstruction : Plugin
         var country = Game.Country(tag);
         if (country == 0) return;
         var removed = 0;
-        foreach (var (line, _) in ConstructionLines(country, type))
+        foreach (var (line, _) in Construction.Lines(country, type))
         {
             if (*(byte*)(line + RepairLine) != 0 || *(long*)(line + ProgressOfLine) != 0) continue;
             var cmd = Commands.New(Signatures.RemoveConstructionCommand, 0x38, 0, 0);
@@ -282,9 +270,9 @@ public unsafe partial class AutoConstruction : Plugin
     {
         var production = *(nint*)(country + ProductionOfCountry);
         if (production == 0) return 0;
-        var lineVTable = Sig.VTable(Signatures.BuildingLine);
+        var lineVTable = Sig.VTable(Construction.LineClass);
         var waiting = 0;
-        foreach (var line in Native.PdxArray(production + Lines))
+        foreach (var line in Native.PdxArray(production + Construction.LinesOfProduction))
             if (*(nint*)line == lineVTable && *(byte*)(line + RepairLine) == 0 && *(int*)(line + FactoriesOfLine) == 0) waiting++;
         return waiting;
     }
@@ -300,24 +288,9 @@ public unsafe partial class AutoConstruction : Plugin
             else foreach (var province in State.Provinces(state)) count += Buildings.Level(Province.Buildings(province), type);
         }
         if (!queued) return count;
-        foreach (var (line, _) in ConstructionLines(country, type))
+        foreach (var (line, _) in Construction.Lines(country, type))
             if (*(byte*)(line + RepairLine) == 0) count += *(int*)(line + LevelsOfLine);
         return count;
-    }
-
-    /// <summary>The country's construction lines (repairs too) of <paramref name="type"/>, with the CBuilding each works on.</summary>
-    private static List<(nint Line, nint Building)> ConstructionLines(nint country, nint type)
-    {
-        var lines = new List<(nint, nint)>();
-        var production = *(nint*)(country + ProductionOfCountry);
-        if (production == 0) return lines;
-        var lineVTable = Sig.VTable(Signatures.BuildingLine);
-        foreach (var line in Native.PdxArray(production + Lines))
-        {
-            var building = *(nint*)line == lineVTable ? *(nint*)(line + BuildingOfLine) : 0;
-            if (building != 0 && *(nint*)(building + TypeOfBuilding) == type) lines.Add((line, building));
-        }
-        return lines;
     }
 
     /// <summary>
@@ -328,7 +301,7 @@ public unsafe partial class AutoConstruction : Plugin
     {
         var perProvince = *(int*)(type + ProvinceLevel) > 0;
         // Containers with a construction line of this type.
-        var building = ConstructionLines(country, type).Select(line => *(nint*)(line.Building + ContainerOfBuilding)).ToHashSet();
+        var building = Construction.Lines(country, type).Select(line => Construction.Container(line.Building)).ToHashSet();
 
         var infrastructureType = Buildings.Type(Buildings.InfrastructureSlot); // 0 before the game made its building database
         var places = new List<(nint Container, int Id, int Free, (int, int, int, int) Rank)>();
@@ -339,28 +312,17 @@ public unsafe partial class AutoConstruction : Plugin
             var rank = (Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0,
                 type == infrastructureType ? -infrastructure : infrastructure, // faster construction; infrastructure itself where it's lacking
                 _freeSharedSlots(state), -State.Id(state));
-            if (!perProvince) places.Add((State.Buildings(state), State.Id(state), _freeLevels(State.Buildings(state), type), rank));
+            if (!perProvince) places.Add((State.Buildings(state), State.Id(state), Construction.FreeLevels(State.Buildings(state), type), rank));
             else
                 foreach (var province in State.Provinces(state))
-                    if (_canBuildInProvince(country, province, type, 1) != 0)
-                        places.Add((Province.Buildings(province), Game.Id(province), _freeLevels(Province.Buildings(province), type), rank));
+                    if (Construction.CanBuildInProvince(country, province, type))
+                        places.Add((Province.Buildings(province), Game.Id(province), Construction.FreeLevels(Province.Buildings(province), type), rank));
         }
         var order = places.Where(p => p.Free > 0)
             .OrderBy(p => building.Contains(p.Container)).ThenByDescending(p => p.Rank).ToList();
 
-        var queued = order.Take(wanted).Count(place => PostConstruction(tag, place.Id, type));
+        var queued = order.Take(wanted).Count(place => Construction.Queue(tag, place.Id, type));
         if (queued > 0) Log.Info($"{Name(type)}: queued 1 level in each of {queued} {(perProvince ? "provinces" : "states")}");
         return queued;
-    }
-
-    /// <summary>Queues one level of <paramref name="type"/> at the end of the construction queue, in a state or province (by id).</summary>
-    private static bool PostConstruction(int tag, int location, nint type)
-    {
-        var cmd = Commands.New(Signatures.ConstructionCommand, 0x50, tag, Sig.VTable(Signatures.BuildingReference));
-        *(int*)(cmd + Location) = location;
-        *(int*)(cmd + Building) = *(int*)(type + TokenOfType);
-        *(int*)(cmd + Levels) = 1;
-        *(byte*)(cmd + Insertion) = AtEnd;
-        return Commands.TryPost(cmd);
     }
 }
