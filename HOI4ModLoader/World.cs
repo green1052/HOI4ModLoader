@@ -7,8 +7,9 @@ namespace HOI4ModLoader;
 public static unsafe class Province
 {
     public const int VictoryPointsOffset = 0x38, StaticOffset = 0xB8, StateOffset = 0xC0, UnitsOffset = 0x110, DivisionsOffset = 0x11C;
-    public const int ControllerOffset = 0x188, BuildingsOffset = 0x190;
+    public const int RegionOffset = 0xC8, ControllerOffset = 0x188, BuildingsOffset = 0x190;
     private const int TerrainOfStatic = 0xA8, FlagsOfStatic = 0xD2, CategoryOfTerrain = 0x8C;
+    private const int RailwaysOfGameState = 0x3E0, RailwaysOfInfo = 0x38; // railway map: per province id an info, its railways at +0x38
 
     // CTerrainType+0x8C category bits; adjacency types (Game.AdjacencyType).
     public const int Mountain = 0x8, Urban = 0x10, Marsh = 0x2000, Jungle = 0x10000;
@@ -30,6 +31,29 @@ public static unsafe class Province
 
     /// <summary>Its building container, for <see cref="HOI4ModLoader.Buildings.Find"/>.</summary>
     public static nint Buildings(nint province) => province + BuildingsOffset;
+
+    /// <summary>Its CStrategicRegion (<see cref="AirRegions"/>), or 0.</summary>
+    public static nint StrategicRegion(nint province) => *(nint*)(province + RegionOffset);
+
+    /// <summary>A railway out of a province, as the game stores it: the neighbour's id and its level (0: none).</summary>
+    public readonly record struct Railway(int To, int Level);
+
+    /// <summary>The railways out of province <paramref name="id"/> (the railway map's level per neighbour), empty without a game.</summary>
+    public static ReadOnlySpan<Railway> Railways(int id)
+    {
+        var gs = Game.State;
+        var railways = gs == 0 ? 0 : *(nint*)(gs + RailwaysOfGameState);
+        var info = railways == 0 ? 0 : *(nint*)(*(nint*)(railways + 8) + 8 * id);
+        return info == 0 ? default : Native.PdxArray<Railway>(info + RailwaysOfInfo);
+    }
+
+    /// <summary>Any railway leaves the province.</summary>
+    public static bool HasRailway(nint province)
+    {
+        foreach (var railway in Railways(Game.Id(province)))
+            if (railway.Level > 0) return true;
+        return false;
+    }
 
     /// <summary>Its CTerrainType, or 0.</summary>
     public static nint Terrain(nint province)
@@ -80,6 +104,67 @@ public static unsafe class Province
         return controller == tag || Game.Allied(country, controller);
     }
 
+    // The ones below take the wars as a predicate (tag -> at war with us): FrontLine remembers them for its turn.
+
+    /// <summary>A port's <see cref="KeyValue"/>, plus its level; the rest stays far below.</summary>
+    public const int PortKey = 1000;
+
+    /// <summary>
+    /// What holding <paramref name="tag"/>'s province is worth: a port above all, then victory points, city or mountain
+    /// ground, a river in front of enemy ground.
+    /// </summary>
+    public static int KeyValue(int tag, nint province, Func<int, bool> atWar)
+    {
+        var port = BuildingLevel(province, HOI4ModLoader.Buildings.NavalBaseSlot);
+        if (port > 0) return PortKey + port;
+        var key = 3 * Math.Min(VictoryPoints(province), 30);
+        if ((TerrainCategory(province) & (Mountain | Urban)) != 0) key += 25;
+        foreach (var id in Game.Neighbours(province))
+        {
+            var p = Game.Province(id);
+            if (p == 0 || Game.AdjacencyType(province, id) is not (River or LargeRiver) || Controller(p) is var c && (c == tag || !atWar(c))) continue; // impassable: no attack at all
+            key += 40; // the enemy has to cross a river to take it
+            break;
+        }
+        return key;
+    }
+
+    /// <summary>Divisions of countries at war with us in the province.</summary>
+    public static int Hostiles(nint province, Func<int, bool> atWar)
+    {
+        var n = 0;
+        foreach (var unit in Units(province))
+            if (unit != 0 && atWar(Division.Commander(unit))) n++;
+        return n;
+    }
+
+    /// <summary>
+    /// The id of a break-in at or next to <paramref name="tag"/>'s province <paramref name="p"/> not yet <paramref name="answered"/>,
+    /// or 0: hostile troops inside it, or an enemy neighbour reaching into our side (2+ of ours around it, twice the enemy's)
+    /// that is <paramref name="recent"/> (taken lately, landed on) or touches no other enemy ground.
+    /// </summary>
+    public static int BreakIn(int tag, nint p, Func<int, bool> atWar, Func<int, bool> answered, Func<int, bool> recent)
+    {
+        var self = Game.Id(p);
+        if (!answered(self) && Hostiles(p, atWar) > 0) return self;
+        foreach (var id in Game.Neighbours(p))
+        {
+            if (answered(id)) continue;
+            var e = Game.Province(id);
+            if (e == 0 || Controller(e) is var c && (c == tag || !atWar(c))) continue;
+            var (ours, theirs) = (0, 0);
+            foreach (var n in Game.Neighbours(e))
+            {
+                var q = Game.Province(n);
+                if (q == 0) continue;
+                if (Controller(q) == tag) ours++;
+                else if (atWar(Controller(q))) theirs++;
+            }
+            if (ours >= 2 && ours >= 2 * theirs && (theirs == 0 || recent(id))) return id;
+        }
+        return 0;
+    }
+
     // Loops, not LINQ: these run for every front province, and capturing lambdas allocate.
 
     /// <summary>Next to enemy-held ground.</summary>
@@ -115,11 +200,14 @@ public static unsafe class Province
     public static int Pocket(nint country, int tag, nint target)
     {
         var cut = 0;
-        var seen = new HashSet<int> { Game.Id(target) };
-        foreach (var id in Game.Neighbours(target))
-            if (!seen.Contains(id) && Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)
-                && Region(e, MaxPocket, p => Enemy(country, tag, p), seen) is { } region) // closed and small: cut off
+        var counted = new HashSet<int>();
+        foreach (var id in Game.Neighbours(target)) // a fresh set per walk: one that stops early leaves ids it never expanded
+            if (!counted.Contains(id) && Game.Province(id) is var e && e != 0 && Enemy(country, tag, e)
+                && Region(e, MaxPocket, p => Enemy(country, tag, p), [Game.Id(target)]) is { } region) // closed and small: cut off
+            {
                 cut += region.Sum(Divisions);
+                foreach (var q in region) counted.Add(Game.Id(q));
+            }
         return cut;
     }
 
@@ -129,7 +217,8 @@ public static unsafe class Province
 
     /// <summary>
     /// The provinces connected to <paramref name="start"/> through ones <paramref name="inside"/> accepts, or null if more
-    /// than <paramref name="max"/>. <paramref name="seen"/>: ids to skip; walked ids are added.
+    /// than <paramref name="max"/>. <paramref name="seen"/>: ids to skip; walked ids are added (after a null, only partly
+    /// walked: don't reuse it to skip).
     /// </summary>
     public static List<nint>? Region(nint start, int max, Func<nint, bool> inside, HashSet<int>? seen = null)
     {
@@ -279,7 +368,9 @@ public static unsafe class Division
 {
     public const int KindOffset = 0x08, RefOffset = 0x18, GroupOffset = 0xC0, StatsOffset = 0x138, CombatsOffset = 0x1A8;
     public const int CommanderOffset = 0x1D8, OwnerOffset = 0x1E0, LocationOffset = 0x1F0, PathOffset = 0x200, RetreatingOffset = 0x24C, BusyOffset = 0x2F8;
+    public const int MemberOffset = 0xB8;                       // its COrdersGroupMember, inline (what COrder members point at)
     private const int StrengthSlot = 34, OrganisationSlot = 39; // vtable: (unit, long* out) -> out
+    private const int IsLowSupplySlot = 43;                     // vtable: (unit) -> bool
     private const int Hardness = 0xB8, Armor = 0x298;          // stats
     private const long Armored = 40_000;                       // hardness 0.4
 
@@ -309,6 +400,9 @@ public static unsafe class Division
     public static bool Fighting(nint unit) => *(int*)(unit + CombatsOffset + 0xC) != 0;
 
     public static bool Retreating(nint unit) => *(byte*)(unit + RetreatingOffset) != 0;
+
+    /// <summary>Low on supply: the flag the unit icon shows.</summary>
+    public static bool LowSupply(nint unit) => ((delegate* unmanaged<nint, byte>)(*(nint**)unit)[IsLowSupplySlot])(unit) != 0;
 
     /// <summary>Embarked or otherwise taken up.</summary>
     public static bool Busy(nint unit) => *(nint*)(unit + BusyOffset) != 0;
@@ -357,7 +451,7 @@ public static unsafe class Division
     /// <summary>Strength (equipment and manpower), 1e5 = full.</summary>
     public static long Strength(nint unit) => Ratio(unit, StrengthSlot);
 
-    /// <summary>A rough fighting power: strength %, worth half again with full organisation (0..100).</summary>
+    /// <summary>A rough fighting power: strength %, halved at zero organisation (0..100).</summary>
     public static long Power(nint unit) => Strength(unit) * 100 / Native.FixedPoint * (50 + Organisation(unit) * 100 / Native.FixedPoint / 2) / 100;
 
     private static long Ratio(nint unit, int slot)
@@ -400,6 +494,122 @@ public static unsafe class ProductionLine
     {
         var type = variant == 0 ? 0 : *(nint*)(variant + TypeOfVariant);
         return type == 0 ? 0 : *(nint*)(type + ArchetypeOfType);
+    }
+}
+
+/// <summary>CLandCombat: a land battle, its defending side and the attacker's share. Offsets for HOI4 1.19.3.</summary>
+public static unsafe class LandCombat
+{
+    [VTable] public const string Class = "CLandCombat";
+
+    // Combats (land, naval, air): array at gamestate +0x268. CLandCombat: defender side, province, vtable slot of the
+    // attacker's share. Side: divisions, reserves.
+    private const int CombatsOfGameState = 0x268, DefenderOfCombat = 0x30, ProvinceOfCombat = 0x38, ProgressSlot = 25;
+    private const int DivisionsOfSide = 0x20, ReservesOfSide = 0x100;
+
+    private static class Resolved
+    {
+        public static readonly nint VTable = Sig.VTable(Class);
+    }
+
+    /// <summary>The land battles going on (a snapshot), empty without a game. Any thread that may read the game state.</summary>
+    public static List<nint> All()
+    {
+        var all = new List<nint>();
+        var gs = Game.State;
+        if (gs == 0) return all;
+        foreach (var combat in Native.PdxArray(gs + CombatsOfGameState).ToArray())
+            if (combat != 0 && *(nint*)combat == Resolved.VTable) all.Add(combat);
+        return all;
+    }
+
+    /// <summary>The province fought over (the defender's), or 0.</summary>
+    public static nint Location(nint combat) => *(nint*)(combat + ProvinceOfCombat);
+
+    /// <summary>The defending side, or 0.</summary>
+    public static nint Defender(nint combat) => *(nint*)(combat + DefenderOfCombat);
+
+    /// <summary>A side's divisions in the battle (CArmy*).</summary>
+    public static ReadOnlySpan<nint> Divisions(nint side) => Native.PdxArray(side + DivisionsOfSide);
+
+    /// <summary>A side's reserves waiting to step in.</summary>
+    public static int Reserves(nint side) => *(int*)(side + ReservesOfSide + 0xC);
+
+    /// <summary>The attacker's share of the battle, fixed point (<see cref="Native.FixedPoint"/>: all of it).</summary>
+    public static long AttackerShare(nint combat)
+    {
+        long progress;
+        ((delegate* unmanaged<nint, long*, long*>)(*(nint**)combat)[ProgressSlot])(combat, &progress);
+        return progress;
+    }
+}
+
+/// <summary>
+/// A country's construction: where it may build, its construction lines, and the construction tab's command. Offsets for
+/// HOI4 1.19.3.
+/// </summary>
+public static unsafe class Construction
+{
+    /// <summary>BuildingContainer::GetFreeLevels(container, type) -> int: max level minus planned (built and queued), shared slots included.</summary>
+    [Signature] public const string FreeLevelsSig = "48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 4C 63 82";
+
+    /// <summary>CCountry::CanBuildInProvince(country, province, type, bool) -> bool.</summary>
+    [Signature] public const string CanBuildInProvinceSig = "48 8B 82 B8 00 00 00 4D 8B D0 4C 8B C1 F6 80 D2 00 00 00 01";
+
+    [VTable] public const string CommandClass = "CAddConstructionCommand";
+    [VTable] public const string BuildingReference = "CBuildingReference";
+    [VTable] public const string LineClass = "CBuildingProductionLine";
+
+    /// <summary>CCountry: its production status; that holds the construction lines (CBuildingProductionLine among others).</summary>
+    public const int ProductionOfCountry = 0xF68, LinesOfProduction = 112;
+    private const int BuildingOfLine = 112, ContainerOfBuilding = 472, TypeOfBuilding = 480, TokenOfType = 8;
+    private const int CommandSize = 0x50, LocationOfCommand = 56, BuildingOfCommand = 60, LevelsOfCommand = 72, InsertionOfCommand = 76, AtEnd = 1;
+
+    private static class Resolved
+    {
+        public static readonly delegate* unmanaged<nint, nint, int> FreeLevels = (delegate* unmanaged<nint, nint, int>)Sig.Find(FreeLevelsSig);
+        public static readonly delegate* unmanaged<nint, nint, nint, byte, byte> CanBuildInProvince = (delegate* unmanaged<nint, nint, nint, byte, byte>)Sig.Find(CanBuildInProvinceSig);
+    }
+
+    /// <summary>Levels of <paramref name="type"/> the container can still take (built and queued count).</summary>
+    public static int FreeLevels(nint container, nint type) => Resolved.FreeLevels(container, type);
+
+    /// <summary>The country may build <paramref name="type"/> in the province, as the construction map mode allows.</summary>
+    public static bool CanBuildInProvince(nint country, nint province, nint type) => Resolved.CanBuildInProvince(country, province, type, 1) != 0;
+
+    /// <summary>The building type's script token (its name: <see cref="Native.Token"/>).</summary>
+    public static int Token(nint type) => *(int*)(type + TokenOfType);
+
+    /// <summary>The CBuilding's container (<see cref="Province.Buildings"/>, <see cref="State.Buildings"/>).</summary>
+    public static nint Container(nint building) => *(nint*)(building + ContainerOfBuilding);
+
+    /// <summary>The country's construction lines (repairs too) of <paramref name="type"/>, with the CBuilding each works on.</summary>
+    public static List<(nint Line, nint Building)> Lines(nint country, nint type)
+    {
+        var lines = new List<(nint, nint)>();
+        var production = *(nint*)(country + ProductionOfCountry);
+        if (production == 0) return lines;
+        var lineVTable = Sig.VTable(LineClass);
+        foreach (var line in Native.PdxArray(production + LinesOfProduction))
+        {
+            var building = line != 0 && *(nint*)line == lineVTable ? *(nint*)(line + BuildingOfLine) : 0;
+            if (building != 0 && *(nint*)(building + TypeOfBuilding) == type) lines.Add((line, building));
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// Queues one level of <paramref name="type"/> at the end of the construction queue, in a state or province (by id), with
+    /// the construction tab's command. <paramref name="force"/> for AI countries (see <see cref="Commands.Post(nint, bool)"/>). Main thread.
+    /// </summary>
+    public static bool Queue(int tag, int location, nint type, bool force = false)
+    {
+        var cmd = Commands.New(CommandClass, CommandSize, tag, Sig.VTable(BuildingReference));
+        *(int*)(cmd + LocationOfCommand) = location;
+        *(int*)(cmd + BuildingOfCommand) = Token(type);
+        *(int*)(cmd + LevelsOfCommand) = 1;
+        *(byte*)(cmd + InsertionOfCommand) = AtEnd;
+        return Commands.TryPost(cmd, force);
     }
 }
 

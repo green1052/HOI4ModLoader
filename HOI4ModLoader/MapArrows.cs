@@ -10,8 +10,8 @@ namespace HOI4ModLoader;
 /// </summary>
 public static unsafe class MapArrows
 {
-    /// <summary>CMapArrowManager::CreateArrow(manager, std::string* style, CColor* colour, CColor* colour, {CColor,
-    /// std::string x3}* labels, uint layer) -> CMapArrowObject*, or 0 for an unknown style. Hooked to catch the manager.</summary>
+    /// <summary>CMapArrowManager::CreateArrow(manager, std::string* style, CColor* colour, CColor* colour, std::string[3]*
+    /// labels (96 bytes), uint layer) -> CMapArrowObject*, or 0 for an unknown style. Hooked to catch the manager.</summary>
     [Signature] public const string CreateArrowSig =
         "48 8B C4 48 89 58 10 4C 89 48 20 4C 89 40 18 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 00 00 00 0F 29 70 B8 4C 8B F2 48 63 81 AC 00 00 00";
 
@@ -164,6 +164,12 @@ public static unsafe class MapArrows
     public static void Hide(nint arrow)
     {
         if (Current() && Made.Contains(arrow)) _visible(arrow, 0);
+    }
+
+    /// <summary>Hides every arrow made this game: on a reload, the old plugin instances' arrows have no owner left.</summary>
+    internal static void HideAll()
+    {
+        if (Current()) foreach (var arrow in Made) _visible(arrow, 0);
     }
 
     /// <summary>The province's map position, or (0, 0).</summary>

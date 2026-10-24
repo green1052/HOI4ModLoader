@@ -20,6 +20,16 @@ public class NumberBadgeTests
         Assert.Equal("[Draft] law", Show(Gui.Numbered("[Draft] law"u8, 0, false))); // not a badge
     }
 
+    /// <summary>Gui.Number skips texts whose badge already shows the position, so it reads the number back.</summary>
+    [Fact]
+    public void ReadsTheBadgeBack()
+    {
+        Assert.Equal((18, 3), Gui.Badge(Gui.Numbered("Industry"u8, 3, false)));
+        Assert.Equal((5, 31), Gui.Badge(Gui.Numbered("Industry"u8, 31, false)));
+        Assert.Equal((0, 0), Gui.Badge("Industry"u8));
+        Assert.Equal((0, 0), Gui.Badge("[Draft] law"u8));
+    }
+
     /// <summary>
     /// UTF-8 text (a Korean focus name) gets "[N] ": a lone 0xA3 failed the game's conversion and blanked the name, and a UTF-8 £
     /// showed as text. An older version's UTF-8 icon is taken off.

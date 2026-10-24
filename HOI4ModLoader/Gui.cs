@@ -92,8 +92,22 @@ public static unsafe partial class Gui
     public static void Number(nint box, int position)
     {
         var text = Text(box);
+        // Already shown: allocates nothing, as focus names are numbered every frame. An older version's icon is replaced.
+        if (Badge(text).Shown == Math.Max(position, 0) && !text.StartsWith(NumberIconUtf8)) return;
         var shown = Numbered(text, position);
         if (!text.SequenceEqual(shown)) SetText(box, shown);
+    }
+
+    /// <summary>The badge in front of <paramref name="text"/>: its length and number, (0, 0) for none.</summary>
+    internal static (int Length, int Shown) Badge(ReadOnlySpan<byte> text)
+    {
+        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith(NumberIconUtf8) ? NumberIconUtf8.Length : text.StartsWith("["u8) ? 1 : 0; // the UTF-8 icon: older versions' badges
+        if (open == 0) return (0, 0);
+        var end = open;
+        var shown = 0;
+        while (end < text.Length && char.IsAsciiDigit((char)text[end])) shown = shown * 10 + text[end++] - '0';
+        var close = open == 1 ? "] "u8 : " "u8;
+        return end > open && text[end..].StartsWith(close) ? (end + close.Length, shown) : (0, 0);
     }
 
     /// <summary>
@@ -102,15 +116,7 @@ public static unsafe partial class Gui
     /// </summary>
     internal static byte[] Numbered(ReadOnlySpan<byte> text, int position, bool? utf8 = null)
     {
-        var rest = text;
-        var open = text.StartsWith(NumberIcon) ? NumberIcon.Length : text.StartsWith(NumberIconUtf8) ? NumberIconUtf8.Length : text.StartsWith("["u8) ? 1 : 0; // the UTF-8 icon: older versions' badges
-        if (open > 0)
-        {
-            var end = open;
-            while (end < text.Length && char.IsAsciiDigit((char)text[end])) end++;
-            var close = open == 1 ? "] "u8 : " "u8;
-            if (end > open && text[end..].StartsWith(close)) rest = text[(end + close.Length)..];
-        }
+        var rest = text[Badge(text).Length..];
         return position <= 0 ? [.. rest]
             : position <= NumberIcons && !(utf8 ?? Utf8Text(rest)) ? [.. NumberIcon, .. Encoding.ASCII.GetBytes($"{position} "), .. rest]
             : [.. Encoding.ASCII.GetBytes($"[{position}] "), .. rest];
@@ -253,12 +259,13 @@ public static unsafe partial class Gui
 
     /// <summary>
     /// Ctrl+Alt+<paramref name="key"/> was just pressed with the game focused, once per press. For polling;
-    /// <paramref name="down"/> keeps the key's state from the last poll.
+    /// <paramref name="down"/> keeps the key's state from the last poll. The right Alt doesn't count: AltGr sends Ctrl+right
+    /// Alt, so typing ę or € (AltGr+E) would fire it.
     /// </summary>
     public static bool HotkeyPressed(int key, ref bool down)
     {
         var now = KeyHeld(key);
-        var hit = now && !down && CtrlHeld && AltHeld && GameFocused;
+        var hit = now && !down && CtrlHeld && AltHeld && !KeyHeld(0xA5) && GameFocused; // VK_RMENU
         down = now;
         return hit;
     }

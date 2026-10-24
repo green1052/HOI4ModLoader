@@ -12,8 +12,9 @@ internal static class Updater
 {
     private const string LatestRelease = "https://api.github.com/repos/green1052/HOI4ModLoader/releases/latest";
     private const string PluginsPrefix = "HOI4ModLoader/plugins/";
-    private static readonly string Staged = Path.Combine(Loader.ModsDir, "update", "plugins");
+    internal static readonly string Staged = Path.Combine(Loader.ModsDir, "update", "plugins");
     private static readonly string Shipped = Path.Combine(Loader.ModsDir, "update", "plugins.txt"); // plugins the last update installed
+    private static readonly string Moving = Path.Combine(Loader.ModsDir, "update", "moving");       // the staged plugins are being moved in
     private static readonly Logger Log = new("Updater");
 
     /// <summary>The release installed for the next start (e.g. "v1.2.0"), if any.</summary>
@@ -60,18 +61,24 @@ internal static class Updater
         var names = Directory.GetFiles(Staged).Select(f => Path.GetFileName(f)).ToArray();
         if (names.Length > 0)
         {
-            // Replace the previous release's plugins; keep ones the player added.
-            if (File.Exists(Shipped))
-                foreach (var name in File.ReadAllLines(Shipped).Select(Path.GetFileName).Where(n => !string.IsNullOrWhiteSpace(n)))
-                {
-                    try { File.Delete(Path.Combine(pluginsDir, name!)); }
-                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"update: {name} stays: {e.Message}"); }
-                }
+            // Replace the previous release's plugins; keep ones the player added. Once only: a move that failed midway leaves
+            // the rest for the next start, which must not delete the ones already moved in.
+            if (!File.Exists(Moving))
+            {
+                if (File.Exists(Shipped))
+                    foreach (var name in File.ReadAllLines(Shipped).Select(Path.GetFileName).Where(n => !string.IsNullOrWhiteSpace(n)))
+                    {
+                        try { File.Delete(Path.Combine(pluginsDir, name!)); }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Error($"update: {name} stays: {e.Message}"); }
+                    }
+                File.WriteAllLines(Shipped, names);
+                File.WriteAllText(Moving, "");
+            }
             Directory.CreateDirectory(pluginsDir);
             foreach (var name in names) File.Move(Path.Combine(Staged, name), Path.Combine(pluginsDir, name), true);
-            File.WriteAllLines(Shipped, names);
             Log.Info($"plugins updated: {string.Join(", ", names)}");
         }
+        File.Delete(Moving); // first: a later update must delete this one's plugins again
         Directory.Delete(Staged, true);
     }
 
@@ -142,7 +149,8 @@ internal static class Updater
             {
                 try
                 {
-                    if (File.Exists(file) && File.Exists($"{file}.{stamp}.old")) File.Move(file, file + ".new", true);
+                    // Swapped in (a new file too, so staged plugins don't move in next start); not the one whose rename failed.
+                    if (File.Exists(file) && !File.Exists(file + ".new")) File.Move(file, file + ".new");
                     if (File.Exists($"{file}.{stamp}.old")) File.Move($"{file}.{stamp}.old", file);
                 }
                 catch (Exception e) { Log.Error($"restore {file}: {e.Message}"); }

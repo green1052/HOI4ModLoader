@@ -218,6 +218,7 @@ public static class Loader
     {
         for (var i = Loaded.Count - 1; i >= 0; i--) Patches.Revert(Loaded[i].Info.Id);
         Loaded.Clear();
+        MapArrows.HideAll();
         Jobs.Reset();
         LoadPlugins();
     }
@@ -271,7 +272,8 @@ public static class Loader
         if (AtStartup) // the game reads its interface files once, after this
         {
             GameFiles.Build([typeof(Loader).Assembly, .. found.Values.Where(f => IsEnabled(f.Info.Id)).Select(f => f.Type.Assembly).Distinct()]);
-            if (allRead) RemoveOrphanConfigs(found.Keys); // not on hot reload: a DLL may be mid-copy
+            // Not on hot reload: a DLL may be mid-copy. Nor with plugins still staged: an update that stopped midway.
+            if (allRead && !Directory.Exists(Updater.Staged)) RemoveOrphanConfigs(found.Keys);
         }
         var state = new Dictionary<string, bool?>(); // null while loading, so a dependency cycle fails
         foreach (var id in found.Keys.Order()) Load(id);

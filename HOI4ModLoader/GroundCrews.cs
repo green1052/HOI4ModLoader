@@ -17,6 +17,30 @@ public static unsafe class AirRegions
     /// <summary>Every CStrategicRegion by id (id 0 is none), empty without a game.</summary>
     public static ReadOnlySpan<nint> All => Game.State is var gs && gs != 0 ? Native.PdxArray(gs + RegionsOfGameState) : default;
 
+    /// <summary>The region's id (+0x60), which indexes the air superiority records.</summary>
+    public static int Id(nint region) => *(int*)(region + SuperiorityIdOfRegion);
+
+    /// <summary>
+    /// The air superiority of the country with CStrategicAir <paramref name="air"/> and of its enemies in the region (fixed
+    /// point), or null without a record. Any thread that may read the game state.
+    /// </summary>
+    public static (long Ours, long Enemy)? Superiority(nint air, nint region)
+    {
+        var id = region == 0 ? 0 : Id(region);
+        if (id <= 0 || id >= Native.PdxArray<byte>(air + SuperiorityRecords).Length) return null; // only its size is used
+        var record = *(nint*)(air + SuperiorityRecords) + (nint)id * SuperiorityRecordSize;
+        return (*(long*)(record + OurSuperiority), *(long*)(record + EnemySuperiority));
+    }
+
+    /// <summary>Planes the country with CStrategicAir <paramref name="air"/> lost and shot down in the region since game hour <paramref name="since"/>.</summary>
+    public static (long Lost, long Kills) Losses(nint air, nint region, int since)
+    {
+        var combat = Native.PdxArray(air + CombatData);
+        var cid = *(int*)(region + CombatIdOfRegion);
+        var stats = cid > 0 && cid < combat.Length ? combat[cid] : 0;
+        return stats == 0 ? (0, 0) : (PlanesLost(stats + OwnWings, since), PlanesLost(stats + OtherWings, since));
+    }
+
     /// <summary>
     /// Region id -> planes <paramref name="tag"/> lost and shot down there since game hour <paramref name="since"/>, for
     /// regions with air combat. <paramref name="contested"/>: only regions where the enemy has air superiority. Any thread
@@ -27,24 +51,12 @@ public static unsafe class AirRegions
         var fights = new Dictionary<int, (long, long)>();
         var air = Game.StrategicAir(tag);
         if (air == 0) return fights;
-        var records = Native.PdxArray<byte>(air + SuperiorityRecords); // only its size is used
-        var combat = Native.PdxArray(air + CombatData);
         var regions = All;
         for (var id = 1; id < regions.Length; id++)
         {
             var region = regions[id];
-            if (region == 0) continue;
-            if (contested)
-            {
-                var sid = *(int*)(region + SuperiorityIdOfRegion);
-                if (sid <= 0 || sid >= records.Length) continue;
-                var record = *(nint*)(air + SuperiorityRecords) + (nint)sid * SuperiorityRecordSize;
-                if (*(long*)(record + EnemySuperiority) <= 0) continue;
-            }
-            var cid = *(int*)(region + CombatIdOfRegion);
-            var stats = cid > 0 && cid < combat.Length ? combat[cid] : 0;
-            if (stats == 0) continue;
-            long lost = PlanesLost(stats + OwnWings, since), kills = PlanesLost(stats + OtherWings, since);
+            if (region == 0 || contested && Superiority(air, region) is not { Enemy: > 0 }) continue;
+            var (lost, kills) = Losses(air, region, since);
             if (lost + kills > 0) fights[id] = (lost, kills);
         }
         return fights;

@@ -87,19 +87,21 @@ public sealed unsafe partial class Image
     /// reference that exact string. Throws unless exactly <paramref name="count"/> match.
     /// </summary>
     public nint[] FindAll(string pattern, int count = 1, string? anchor = null) =>
-        [.. Cached((pattern, count, anchor), () => Search(pattern, count, anchor))];
+        [.. Cached((pattern, count, anchor), () => Search(pattern, count, anchor),
+            hits => hits.Length == count && hits.All(h => Matches(Bytes(pattern), h)))];
 
     /// <summary>
     /// Caches a lookup for the whole run, failures too, so a broken signature resolved every frame doesn't rescan the exe.
+    /// A stored hit is used only if <paramref name="valid"/> accepts it, so a damaged cache line is scanned again.
     /// </summary>
-    private T Cached<T>(object key, Func<T> find) where T : notnull
+    private T Cached<T>(object key, Func<T> find, Func<T, bool> valid) where T : notnull
     {
         lock (Gate)
         {
             if (!_lookups.TryGetValue(key, out var result))
             {
                 var name = key.ToString()!; // (pattern, count, anchor) or a class name
-                if (Stored()?.TryGetValue(name, out var line) == true) result = Parse<T>(line);
+                if (Stored()?.TryGetValue(name, out var line) == true && Parse<T>(line) is { } stored && valid((T)stored)) result = stored;
                 else
                 {
                     try
@@ -150,11 +152,44 @@ public sealed unsafe partial class Image
         catch (UnauthorizedAccessException) { }
     }
 
-    private object Parse<T>(string value)
+    /// <summary>A value <see cref="Store"/> wrote, or null if the line is damaged.</summary>
+    private object? Parse<T>(string value)
     {
-        var hits = value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(h => _base + (nint)Convert.ToInt64(h, 16)).ToArray();
+        nint[] hits;
+        try { hits = value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(h => _base + (nint)Convert.ToInt64(h, 16)).ToArray(); }
+        catch (Exception e) when (e is FormatException or OverflowException or ArgumentException) { return null; }
+        if (hits.Length == 0) return null;
         return typeof(T) == typeof(nint[]) ? hits : hits[0];
     }
+
+    /// <summary>Whether <paramref name="pattern"/> matches the shipped code at <paramref name="at"/>.</summary>
+    private bool Matches(int[] pattern, nint at)
+    {
+        foreach (var (start, size, code) in _sections)
+            if (code && at >= start && at + pattern.Length <= start + size)
+            {
+                for (var k = 0; k < pattern.Length; k++)
+                    if (pattern[k] >= 0 && Shipped(at + k) != pattern[k]) return false;
+                return true;
+            }
+        return false;
+    }
+
+    /// <summary>
+    /// The byte the game shipped at <paramref name="at"/>, without copying the section like <see cref="Unpatched"/>:
+    /// a stored hit is checked on every start, and a warm start must not copy 40 MB of .text.
+    /// </summary>
+    private byte Shipped(nint at)
+    {
+        if (this == Game)
+            foreach (var (patched, original) in Patches.Originals) // in recording order: the earliest has the game's bytes
+                if (at >= patched && at < patched + original.Length) return original[(int)(at - patched)];
+        return *(byte*)at;
+    }
+
+    /// <summary>An IDA-style pattern as bytes, -1 for "??".</summary>
+    private static int[] Bytes(string pattern) =>
+        [.. pattern.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(t => t.StartsWith('?') ? -1 : Convert.ToInt32(t, 16))];
 
     private nint[] Search(string pattern, int count, string? anchor)
     {
@@ -171,8 +206,7 @@ public sealed unsafe partial class Image
 
     private List<nint> Scan(string pattern)
     {
-        var pat = pattern.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t.StartsWith('?') ? -1 : Convert.ToInt32(t, 16)).ToArray();
+        var pat = Bytes(pattern);
         // Search for the longest run of concrete bytes (vectorized IndexOf), then compare the rest.
         var (first, length) = (-1, 0);
         for (int i = 0, run = 0; i < pat.Length; i++)
@@ -221,7 +255,21 @@ public sealed unsafe partial class Image
     /// vtable of <paramref name="className"/> via MSVC RTTI: type descriptor ".?AV&lt;name&gt;@@" &lt;- complete object
     /// locator (signature 1, offset 0, by RVA) &lt;- vtable slot -1.
     /// </summary>
-    public nint VTable(string className) => Cached(className, () => FindVTable(className));
+    public nint VTable(string className) => Cached(className, () => FindVTable(className), vt => IsVTableOf(vt, className));
+
+    /// <summary>Whether slot -1 of <paramref name="vt"/> is a complete object locator whose type is <paramref name="className"/>.</summary>
+    private bool IsVTableOf(nint vt, string className)
+    {
+        if (!InData(vt - 8, 8)) return false;
+        var col = (nint)(*(long*)(vt - 8) - _pointerBase) + _base;
+        if (!InData(col, 16) || *(int*)col != 1) return false;
+        var td = _base + *(int*)(col + 12);
+        var name = Encoding.ASCII.GetBytes($".?AV{className}@@\0");
+        return InData(td + 16, name.Length) && new ReadOnlySpan<byte>((void*)(td + 16), name.Length).SequenceEqual(name);
+    }
+
+    /// <summary>Whether [at, at + length) lies in a data section.</summary>
+    private bool InData(nint at, int length) => _sections.Any(s => !s.Code && at >= s.Start && at + length <= s.Start + s.Size);
 
     private nint FindVTable(string className)
     {

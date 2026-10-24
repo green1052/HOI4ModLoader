@@ -286,7 +286,9 @@ internal static unsafe class SettingsMods
             Gui.SetText(Gui.FindTextBox(container, "hoimod_setting_label"), Gui.Literal(Loc.Get($"{_plugin}.{key}", key)));
             var isBool = bool.TryParse(value, out var on);
             var listed = !isBool && Loader.Config(_plugin!).ChoicesOf(section, key) != null;
-            var stepped = !isBool && !listed && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+            var stepped = !isBool && !listed // ids such as Discord's 19-digit one are text, not numbers to step
+                && (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                    || value.Contains('.') && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
             var check = Gui.Find(container, CheckBoxSlot, "hoimod_setting_check");
             Shown(check, isBool);
             if (isBool) Check(check, on);

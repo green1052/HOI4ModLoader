@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
@@ -131,9 +132,10 @@ public static class GameFiles
                     Log.Error($"{assembly.GetName().Name}: {patch.File} changed in this game version, left vanilla");
                     continue;
                 }
-                File.WriteAllText(Target(patch.File), built[patch.File] = patched);
+                // Localisation needs its BOM, which ReadAllText dropped.
+                File.WriteAllText(Target(patch.File), built[patch.File] = patched, new UTF8Encoding(patch.File.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)));
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            catch (Exception e) // a bad pattern skips only this patch
             {
                 Log.Error($"{assembly.GetName().Name}: {patch.File}: {e.Message}");
             }

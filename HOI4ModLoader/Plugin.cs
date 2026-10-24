@@ -13,8 +13,9 @@ public sealed class PluginAttribute(string id, string name, string version) : At
     public string Version { get; } = version;
 
     /// <summary>
-    /// Game version the plugin's offsets are for, a prefix of launcher-settings.json's rawVersion (e.g. "1.19.3"). On a
-    /// mismatch the plugin is skipped unless its config sets IgnoreGameVersion.
+    /// Game version the plugin's offsets are for, compared part by part with launcher-settings.json's rawVersion, a missing
+    /// part counting as 0 ("1.19.3" matches 1.19.3.0, not 1.19 or a 1.19.3.1 hotfix). On a mismatch the plugin is skipped
+    /// unless its config sets IgnoreGameVersion.
     /// </summary>
     public string? GameVersion { get; init; }
 

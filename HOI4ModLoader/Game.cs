@@ -237,6 +237,38 @@ public static unsafe class Game
         return flows == 0 || (uint)id >= (uint)*(int*)(supply + FlowOfSupply + 0xC) ? 0 : flows + (nint)FlowSize * id;
     }
 
+    // CSupplySystem +0x108: per-country supply by tag index, its network at +0x80. Network: nodes at +0xB8.
+    private const int CountriesOfSupply = 0x108, NetworkOfCountry = 0x80;
+    private const int FlowEntrySize = 16, CountryOfFlowEntry = 2, AmountOfFlowEntry = 8; // EntriesOfFlow: {u16 node, u16 country tag index, pad, i64 amount}
+    /// <summary>A supply network's nodes (CPdxArray of NodeSize-byte records, by node index); a node's province id.</summary>
+    public const int NodesOfNetwork = 0xB8, NodeSize = 0xE8, ProvinceOfNode = 4;
+
+    /// <summary>The supply network of <paramref name="tag"/> (a country of this game), or 0.</summary>
+    public static nint SupplyNetwork(int tag)
+    {
+        var supply = Supply;
+        var countries = supply == 0 ? 0 : *(nint*)(supply + CountriesOfSupply);
+        var country = countries == 0 ? 0 : *(nint*)(countries + 8 * TagIndex(tag));
+        return country == 0 ? 0 : *(nint*)(country + NetworkOfCountry);
+    }
+
+    /// <summary>The node of <paramref name="network"/> sending the most supply into province <paramref name="id"/> (its supply flow), or 0.</summary>
+    public static nint FeedingNode(nint network, int id, int tagIndex)
+    {
+        var flow = SupplyFlow(id);
+        if (flow == 0) return 0;
+        var entries = *(nint*)(flow + EntriesOfFlow);
+        (int Node, long Amount) best = (-1, 0);
+        for (int i = 0, n = *(int*)(flow + EntriesOfFlow + 0xC); i < n; i++)
+        {
+            var e = entries + i * FlowEntrySize;
+            if (*(ushort*)(e + CountryOfFlowEntry) != tagIndex || *(long*)(e + AmountOfFlowEntry) <= best.Amount) continue;
+            best = (*(ushort*)e, *(long*)(e + AmountOfFlowEntry));
+        }
+        var nodes = *(nint*)(network + NodesOfNetwork);
+        return best.Node < 0 || nodes == 0 || best.Node >= *(int*)(network + NodesOfNetwork + 0xC) ? 0 : nodes + (nint)NodeSize * best.Node;
+    }
+
     private const int ProvincesOfGameState = 8;                              // province container: vtable slot 0 = by id
     private const int AdjacencyOfProvince = 0xB8, Adjacencies = 0x70, AdjacencySize = 0x30, NeighbourId = 8, TypeOfAdjacency = 0x10;
 
@@ -354,6 +386,20 @@ public static unsafe class Native
         *(long*)(at + 0x10) = bytes.Length;
         *(long*)(at + 0x18) = Math.Max(15, bytes.Length);
     }
+
+    /// <summary>
+    /// Lexer::TokenToString(int token) -> std::string*: a script token's text, under the token table's lock (any thread).
+    /// A building type's or a CStrategicResource's key ("oil", "steel") is the token at its +0x08.
+    /// </summary>
+    [Signature] public const string TokenToStringSig = "40 53 48 83 EC 30 48 63 D9 80 3D ? ? ? ? 00 75 05 E8 ? ? ? ? 3B 1D ? ? ? ? 7E";
+
+    private static class Lexer
+    {
+        public static readonly delegate* unmanaged<int, nint> TokenToString = (delegate* unmanaged<int, nint>)Sig.Find(TokenToStringSig);
+    }
+
+    /// <summary>A script token's text, the game's bytes (<see cref="Utf8"/> for a string). Any thread.</summary>
+    public static Span<byte> Token(int token) => MsvcString(Lexer.TokenToString(token));
 
     /// <summary>The game's text bytes (a name, a token's string) as a string.</summary>
     public static string Utf8(ReadOnlySpan<byte> bytes) => Encoding.UTF8.GetString(bytes);
