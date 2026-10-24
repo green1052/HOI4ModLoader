@@ -145,6 +145,7 @@ public unsafe partial class AutoTrade : Plugin
 
     private void RestoreAuto()
     {
+        if (Loader.AtStartup) return; // a hot reload only: Windows recycles PIDs, so the check below alone can pass on an earlier run's file
         try
         {
             if (!File.Exists(AutoFile)) return;

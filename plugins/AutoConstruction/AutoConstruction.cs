@@ -182,6 +182,7 @@ public unsafe partial class AutoConstruction : Plugin
 
     private void RestoreTargets()
     {
+        if (Loader.AtStartup) return; // a hot reload only: Windows recycles PIDs, so the check below alone can pass on an earlier run's file
         try
         {
             if (!File.Exists(TargetsFile)) return;
