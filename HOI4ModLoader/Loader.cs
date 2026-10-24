@@ -310,7 +310,7 @@ public static class Loader
                 }
                 if (info.GameVersion is { } want
                     && !config.Bind("General", "IgnoreGameVersion", false, $"Load even if the game is not HOI4 {want}, the version this plugin was made for. May crash.")
-                    && !Game.Version.StartsWith(want, StringComparison.Ordinal))
+                    && !SameVersion(Game.Version, want))
                 {
                     log.Error($"skipped: made for HOI4 {want}, game is {Game.Version}");
                     return false;
@@ -338,6 +338,18 @@ public static class Loader
             }
         }
     }
+
+    /// <summary>
+    /// The game is the version <paramref name="want"/> was made for: parts compared one by one, an absent part (-1)
+    /// counting as 0. The prefix match this replaces loaded a plugin made for 1.19.3 on a 1.19.3.1 hotfix, whose offsets
+    /// may have moved.
+    /// </summary>
+    internal static bool SameVersion(string game, string want) =>
+        System.Version.TryParse(game, out var a) && System.Version.TryParse(want, out var b)
+        && Part(a.Major) == Part(b.Major) && Part(a.Minor) == Part(b.Minor)
+        && Part(a.Build) == Part(b.Build) && Part(a.Revision) == Part(b.Revision);
+
+    private static int Part(int part) => part < 0 ? 0 : part;
 
     /// <summary>
     /// Deletes settings that weren't bound on this load (outside <paramref name="keep"/>), e.g. ones a newer version dropped.
