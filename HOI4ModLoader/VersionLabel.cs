@@ -20,8 +20,7 @@ public static unsafe class VersionLabel
 
     private const int WindowOfView = 0x4DE0;    // main menu view: the window holding "version_label"
     private const int MaxHeight = 0xC4;        // CInstantTextBox: the .gui maxHeight
-    private const long VtablesBegin = 0x142785000, VtablesEnd = 0x1430FD000;  // exe .rdata: where GUI vtables live (PE section bounds)
-    private const long TextBegin = 0x140001000, TextEnd = 0x142785000;        // exe .text
+    private static readonly nint Image = System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress; // ASLR: RVAs are relative to it
 
     [Function(CallingConventions.Microsoft)] public delegate nint TextFn(nint view, nint text);
 
@@ -34,16 +33,17 @@ public static unsafe class VersionLabel
         ? Loc.Get("HOIMOD_NO_PLUGINS", "No plugins loaded")
         : string.Join("\n", Loader.LoadedPlugins.Select(p => $"- {Loader.Name(p)} {p.Version}")));
 
-    // shortcut: 1.19.4 also calls this builder through a function table with other views, whose +0x4DE0 is not a
-    // window; gate on a native-looking vtable so those calls are passed through untouched instead of faulting.
+    // shortcut: 1.19.4 also calls this builder through a function table with other views, whose +0x4DE0 can be some
+    // other GUI object; require a CContainerWindow-exact vtable so only real container windows are walked (any
+    // container window is safe: its name Find just returns 0 when the label isn't in it).
     private static bool LooksLikeGuiWindow(nint window)
     {
         if (window == 0) return false;
-        var vtable = *(nint*)window;
-        if (vtable < VtablesBegin || vtable >= VtablesEnd) return false;
-        var find = *(nint*)(vtable + 15 * 8);
-        return find >= TextBegin && find < TextEnd;
+        return *(nint*)window == Image + 0x2BB9FE0; // CContainerWindow vtable
     }
+
+    private static readonly HashSet<string> Logged = []; // one line per distinct outcome, to keep the log clean
+    private static void Say(string outcome) { if (Logged.Add(outcome)) Log.Info(outcome); }
 
     internal static void Install()
     {
@@ -53,8 +53,10 @@ public static unsafe class VersionLabel
             Log.Guard("version label", () =>
             {
                 var window = *(nint*)(view + WindowOfView);
-                if (!LooksLikeGuiWindow(window)) return;
+                var vtable = window != 0 ? *(nint*)window : 0;
+                if (!LooksLikeGuiWindow(window)) { Say($"skip: view 0x{view:X} window 0x{window:X} vtable 0x{vtable:X} (container vtable 0x{Image + 0x2BB9FE0:X})"); return; }
                 var box = Gui.Find(window, 15, "version_label");
+                Say($"found: window 0x{window:X} box 0x{box:X} maxHeight {(box != 0 ? *(int*)(box + MaxHeight) : -1)}");
                 var added = box != 0 && *(int*)(box + MaxHeight) >= 40 ? $"\nHOI4ModLoader {Loader.Version}" : " +";
                 Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // as bytes: the label is in the game's encoding
                 Gui.SetTooltip(box, Tooltip);

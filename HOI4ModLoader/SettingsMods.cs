@@ -93,25 +93,27 @@ internal static unsafe class SettingsMods
 
     private static void Build(nint screen)
     {
-        // shortcut: 1.19.4 keeps the dialog at +0x6798 but Finds through its +0x30 subobject (see the game's own call
-        // in the Open function); Find on the wrapper itself faults.
-        var root = *(nint*)(screen + RootOfScreen); // the game Finds through this window directly (Open: vtable slot 55)
-        if (root == 0 || Gui.FindTextBox(root, "hoimod_ui") == 0)
+        // shortcut: 1.19.4's settings root at +0x6798 is a wrapper whose vtable only safely takes the game's own
+        // window Find (slot 55); typed finds (slots 13/15) go to the menu_settings_ingame dialog it contains.
+        var root = *(nint*)(screen + RootOfScreen);
+        var dialog = root == 0 ? 0 : Gui.Find(root, WindowSlot, "menu_settings_ingame");
+        if (dialog == 0 || Gui.FindTextBox(dialog, "hoimod_ui") == 0)
         {
             if (!_reportedMissing) Log.Info("no Mods tab: the settings window isn't HOI4ModLoader\\ui's (see GameFiles in this log)");
             _reportedMissing = true;
             return;
         }
         _screen = screen;
-        _page = Gui.Find(root, WindowSlot, "menu_settings_MODS");
+        _page = Gui.Find(dialog, WindowSlot, "menu_settings_MODS");
         _list = Gui.Find(_page, WindowSlot, "hoimod_mods_list");
         _settings = Gui.Find(_page, WindowSlot, "hoimod_mods_settings");
         _title = Gui.FindTextBox(_settings, "hoimod_settings_title");
         _listTitle = Gui.FindTextBox(_list, "hoimod_mods_title");
-        _tab = Gui.Find(root, ButtonSlot, "hoimod_mods_tab");
-        var tabText = Gui.FindTextBox(root, "hoimod_mods_tab_text");
+        _tab = Gui.Find(dialog, ButtonSlot, "hoimod_mods_tab");
+        var tabText = Gui.FindTextBox(dialog, "hoimod_mods_tab_text");
         if (tabText != 0) Gui.SetText(tabText, Loc.Get("HOIMOD_MODS_TAB", "Mods"));
         Visible(_page, false);
+        Log.Info("Mods tab added");
 
         for (var row = 0; row < PluginRows; row++)
         {

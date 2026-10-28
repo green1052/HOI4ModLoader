@@ -1,16 +1,17 @@
-buttonType = {
+# The window is 480 wide and its 4 tabs fill the top row, so the Mods tab sits in the free bottom row, between Back and Apply.
+            buttonType = {
                 name = "hoimod_mods_tab"
-                position = { x = 454 y = 68 }
+                position = { x = 185 y = 470 }
                 quadTextureSprite ="GFX_settings_ingame_tab"
                 clicksound = click_checkbox
                 oversound = ui_menu_over
             }
             instantTextBoxType = {
                 name = "hoimod_mods_tab_text"
-                position = { x = 454 y = 74 }
+                position = { x = 185 y = 476 }
                 font = "hoi_18mbs"
-                text = ""
-                maxWidth = 107
+                text = "Mods"
+                maxWidth = 110
                 maxHeight = 20
                 format = centre
                 alwaystransparent = yes

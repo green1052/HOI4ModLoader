@@ -32,10 +32,20 @@ public static unsafe partial class Gui
         // 1.19.4: skip the old HasInstantTextBox gate - it is now a type dispatch that faults on foreign window classes.
         Find(window, FindTextBoxSlot, Name(name));
 
-    // Lookup names as game strings, made once and kept, since many lookups run every frame.
+    // Lookup names as game keys, made once and kept, since many lookups run every frame.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, nint> Names = new();
 
-    private static nint Name(string name) => Names.GetOrAdd(name, n => NewString(Encoding.ASCII.GetBytes(n)));
+    // The game's name key is 16 bytes { char* data, int length }, not a std::string (its lookups read it that way).
+    private static nint Name(string name) => Names.GetOrAdd(name, n =>
+    {
+        var bytes = Encoding.ASCII.GetBytes(n);
+        var data = (byte*)NativeMemory.AllocZeroed((nuint)bytes.Length);
+        bytes.CopyTo(new Span<byte>(data, bytes.Length));
+        var key = (byte*)NativeMemory.AllocZeroed(16);
+        *(nint*)key = (nint)data;
+        *(int*)(key + 8) = bytes.Length;
+        return (nint)key;
+    });
 
     /// <summary>
     /// A child of <paramref name="window"/> by name, through a CContainerWindow lookup (vtable slot: 13 button,
