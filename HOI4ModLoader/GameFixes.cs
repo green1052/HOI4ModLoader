@@ -11,7 +11,7 @@ internal static unsafe partial class GameFixes
     /// CIntelligenceAgency::RemoveOperative(agency, operative) -> bool: takes the operative off the agency's list. Callers
     /// free the operative whether or not it was removed.
     /// </summary>
-    [Signature] public const string RemoveOperative = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC 30 48 63 81 E4 00 00 00 45 33 F6 48 8B DA 48 8B F1";
+    [Signature] public const string RemoveOperative = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC 30 48 63 81 FC 00 00 00 45 33 F6 48 8B DA 48 8B F1";
 
     /// <summary>
     /// CDesignerAdjusterItem tooltip (tip = item+0x18, widget, text, ...) -> bool: a division stat's breakdown. Reads the

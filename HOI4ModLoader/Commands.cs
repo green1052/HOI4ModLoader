@@ -7,7 +7,7 @@ namespace HOI4ModLoader;
 public static unsafe class Commands
 {
     /// <summary>CSession::PostCommand(session, command, force) (clausewitz session.cpp).</summary>
-    [Signature] public const string PostSig = "48 89 5C 24 ? 57 48 81 EC 30 01 00 00 48 8B FA 48 8B D9 45 84 C0";
+    [Signature] public const string PostSig = "48 89 5C 24 08 55 56 57 48 8D AC 24 70 FF FF FF 48 81 EC 90 01 00 00 48 8B FA 48 8B D9 33 F6 89 B5 C0 00 00 00 45 84 C0";
 
     /// <summary>A UI helper that sends a command: `mov rcx,[rip+SessionHolder]; mov rax,[rcx]; call [rax+88h]` gets the session.</summary>
     [Signature] public const string SessionHolderSig = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 8B FA 48 8B F1 48 8B 0D ? ? ? ? 48 8B 01 FF 90 88 00 00 00 48 8B D8 B9 48 00 00 00 E8";
@@ -96,7 +96,7 @@ public static unsafe class Commands
     /// CMoveCommand ctor (mem[0x88], CArmy* unit, int province, bool clearQueue, int moveType, ...): the battle plan UI's plain
     /// move. A move out of combat becomes a retreat.
     /// </summary>
-    [Signature] public const string MoveSig = "48 89 4C 24 ? 53 48 83 EC 60 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 89 4B 10 C7 43 14 00 00 FF FF 66 89 4B 18 48 89 4B 1C 48 8D 05 ? ? ? ? 48 89 03 48 8D 4B 28";
+    [Signature] public const string MoveSig = "48 89 4C 24 ? 53 48 83 EC 60 48 8B D9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C0 48 89 41 10 33 C9 48 89 4B 10 C7 43 18 FF FF 00 00 48 89 4B 1C 48 8D 05 ? ? ? ? 48 89 03 48 8D 4B 28";
 
     private const int MoveSize = 0x88;
     private static delegate* unmanaged<nint, nint, int, byte, int, byte, byte, byte, byte, byte, nint> _move;

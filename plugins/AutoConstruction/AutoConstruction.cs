@@ -11,22 +11,22 @@ namespace AutoConstruction;
 public static class Signatures
 {
     /// <summary>Construction tab, click on a building button (item): selects the building for the construction map mode.</summary>
-    [Signature] public const string BuildingClick = "40 53 48 83 EC 30 80 3D ? ? ? ? ? 48 8B D9 74 ? 48 8B 0D";
+    [Signature] public const string BuildingClick = "48 89 5C 24 18 57 48 83 EC 30 48 8B F9 48 8B 0D ? ? ? ? 48 85 C9 74 ? 48 8B 99 ? ? ? ? EB ? 33 DB 80 3D ? ? ? ? ? 74 ? 48 85 DB";
 
     /// <summary>CCountryConstructionView::UpdateBuildingItems(view): (re)fills the building buttons, every frame while the tab is open.</summary>
-    [Signature] public const string UpdateBuildingItems = "48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC D0 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B E9";
+    [Signature] public const string UpdateBuildingItems = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 F8 FE FF FF 48 81 EC 08 02 00 00 0F 29 B4 24 F0 01 00 00 4C 8B F1 E8";
 
     /// <summary>CCountry::CanBuildInState(country, state, type, bool) -> bool: what the construction map mode allows.</summary>
     [Signature] public const string CanBuildInState = "48 8B 42 18 4D 8B D0 4C 8B C1 48 8B 08 48 8B 81 B8 00 00 00 F6 80 D2 00 00 00 01";
 
     /// <summary>CState::GetFreeSharedSlots(state) -> int: building slots left for factories, dockyards and the like.</summary>
-    [Signature] public const string FreeSharedSlots = "48 89 5C 24 ? 57 48 83 EC 20 33 D2 48 8B D9 E8";
+    [Signature] public const string FreeSharedSlots = "48 89 5C 24 08 57 48 83 EC 20 33 D2 48 8B D9 E8 ? ? ? ? 48 8B CB 8B F8 E8 ? ? ? ? 48 8B 5C 24 30 2B F8 B8 00 00 00 00 0F 49 C7 48 83 C4 20 5F C3";
 
     /// <summary>
     /// CProductionStatus::IsConstructionSaturated(status) -> bool: the queue takes every free civilian factory. Reads the
     /// define MAX_CIV_FACTORIES_PER_LINE (`mov r9d, [rip+disp32]` at +0x41).
     /// </summary>
-    [Signature] public const string ConstructionSaturated = "48 B8 09 E1 D1 C6 11 6B F1 29 48 F7 A9 78 03 00 00 4C 8B C2 49 C1 F8 0E 49 8B C0 48 C1 E8 3F 4C 03 C0 48 8B 41 70 44 2B 81 B0 03 00 00 44 2B 81 98 03 00 00 48 63 49 7C";
+    [Signature] public const string ConstructionSaturated = "48 B8 09 E1 D1 C6 11 6B F1 29 48 F7 A9 90 03 00 00 4C 8B C2 49 C1 F8 0E 49 8B C0 48 C1 E8 3F 4C 03 C0 48 8B 41 70 44 2B 81 C8 03 00 00 44 2B 81 B0 03 00 00 48 63 49 7C";
 
     /// <summary>Removes levels of a construction line, as its cancel button does: +0x28 the line's CRef (line+0x08), +0x30 levels.</summary>
     [VTable] public const string RemoveConstructionCommand = "CRemoveConstructionCommand";
@@ -39,17 +39,18 @@ public static class Signatures
 /// cores, then higher infrastructure (lower for infrastructure itself), then more free slots. Also runs AutoSupply.cs and
 /// AutoProduction.cs.
 /// </summary>
-[Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.3")]
+[Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.4")]
 public unsafe partial class AutoConstruction : Plugin
 {
     // Layouts for HOI4 1.19.3 (production status, construction lines and the command: the loader's Construction).
     private const int StatesOfCountry = 0x460, ProductionOfCountry = Construction.ProductionOfCountry;
     // CProductionStatus: civilian factories (fixed point), those used by construction lines, those used elsewhere (trade, consumer goods).
-    private const int CivilianFactories = 0x378, DamagedFactories = 0x390, ConstructionFactories = 0x398, OtherFactories = 0x3B0;
+    // shortcut: +0x18 shifted block; only ConstructionFactories/OtherFactories verified via ConstructionSaturated, other two inferred
+    private const int CivilianFactories = 0x390, DamagedFactories = 0x3A8, ConstructionFactories = 0x3B0, OtherFactories = 0x3C8;
     private const int CoresOfState = 176;
     private const int ProvinceLevel = 700;                       // CBuildingType: > 0 = built per province (naval base, bunker...)
     private const int RefOfLine = 0x08, FactoriesOfLine = 0x18, ProgressOfLine = 0x38, LevelsOfLine = 72, RepairLine = 140; // CBuildingProductionLine
-    private const int Items = 1440, WindowOfItem = 16, TypeOfItem = 32; // construction view building buttons
+    private const int Items = 1568, WindowOfItem = 16, TypeOfItem = 32; // construction view building buttons
     private const long PendingMs = 30_000;
     private const int BigStep = 5;                               // Ctrl+Shift+click
     private const string TargetBox = "hoimod_auto";

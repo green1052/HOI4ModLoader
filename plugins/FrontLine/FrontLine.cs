@@ -17,7 +17,7 @@ namespace FrontLine;
 /// Divisions taken off a front go back onto it when their job ends. The player's are saved to cache\frontline_held.txt, so
 /// a reload puts them back. ApplyToAI gives AI countries the same micro except rotation, each with its own bookkeeping (Side).
 /// </summary>
-[Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.3")]
+[Plugin("com.green1052.frontline", "Front Line", "1.0.0", GameVersion = "1.19.4")]
 public unsafe partial class FrontLine : Plugin
 {
     // Layouts for HOI4 1.19.3 (the rest are in the loader's Division, Province, Order, OrdersGroup, LandCombat).

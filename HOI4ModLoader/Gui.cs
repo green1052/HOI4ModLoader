@@ -13,8 +13,8 @@ public static unsafe partial class Gui
     /// <summary>CInstantTextBox::SetText(box, std::string*): moves the string in (freeing the old text) and re-lays it out.</summary>
     [Signature] public const string SetTextSig = "48 89 5C 24 ? 48 89 74 24 ? 48 89 54 24 ? 57 48 83 EC 20 48 8B F2";
 
-    /// <summary>CContainerWindow::HasInstantTextBox(window, std::string* name) -> bool.</summary>
-    [Signature] public const string HasTextBoxSig = "48 83 EC 28 48 8B C2 4C 8D 81 E0 11 00 00 48 8D 91 F8 11 00 00 48 8B C8 E8 ? ? ? ? 48 85 C0 0F 95 C0 48 83 C4 28 C3";
+    /// <summary>HasInstantTextBox by widget type: (window, std::string* name, type) -> bool. Type 0x6B is the container-window path.</summary>
+    [Signature] public const string HasTextBoxSig = "48 8B C2 41 83 F8 6B 74 35 41 81 F8 92 00 00 00 74 20 41 81 F8 EA 29 00 00";
 
     private const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
     private const int ShowSlot = 15, HideSlot = 16, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), Hide(), flags byte
@@ -22,7 +22,8 @@ public static unsafe partial class Gui
     private const int SetTooltipHandlerSlot = 69; // GUI object: SetTooltipHandler(CTooltipHandler*)
 
     private static delegate* unmanaged<nint, nint, void> _setText;
-    private static delegate* unmanaged<nint, nint, byte> _hasTextBox;
+    private const int ContainerWindowType = 0x6B; // 1.19.4: HasInstantTextBox became a type dispatch; 0x6B reads the container lists
+    private static delegate* unmanaged<nint, nint, int, byte> _hasTextBox;
     private static nint _tooltipVTable;                       // CTooltipHandler vtable: { BuildTooltip, destructor }
     private static readonly Dictionary<nint, nint> TooltipHandlers = [];      // widget -> its handler { vtable, widget }
     private static readonly Dictionary<nint, Func<string>> TooltipTexts = []; // widget -> its text
@@ -32,9 +33,9 @@ public static unsafe partial class Gui
     {
         if (window == 0) return 0; // a native null read would crash the game
         // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
-        if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, byte>)Sig.Find(HasTextBoxSig);
+        if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, int, byte>)Sig.Find(HasTextBoxSig);
         var str = Name(name);
-        return _hasTextBox(window, str) == 0 ? 0 : Find(window, FindTextBoxSlot, str);
+        return _hasTextBox(window, str, ContainerWindowType) == 0 ? 0 : Find(window, FindTextBoxSlot, str);
     }
 
     // Lookup names as game strings, made once and kept, since many lookups run every frame.

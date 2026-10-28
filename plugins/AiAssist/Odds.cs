@@ -10,9 +10,11 @@ public unsafe partial class AiAssist
     private const int DefenseOfStats = 0xA8, BreakthroughOfStats = 0xB0, HardnessOfStats = 0xB8, SoftAttackOfStats = 0xC0,
                       HardAttackOfStats = 0xC8, MaxOrgOfStats = 0x280, ArmorOfStats = 0x298, PiercingOfStats = 0x2A0;
 
-    // NDefines globals by RVA (hoi4.exe 1.19.3) that CCombatLand reads. Read on use: Lua fills them after plugins load.
+    // NDefines globals by RVA (hoi4.exe 1.19.4, uniform +0xAFCB8 shift of the 1.19.3 defines block, verified on the ground-crews
+    // cost define) that CCombatLand reads. Read on use: Lua fills them after plugins load.
     // An implausible value falls back to vanilla's.
-    private const int BaseAvoidRva = 0x3335B28, NoDefAvoidRva = 0x3335BD8, FortPenaltyRva = 0x3336760, RiverRva = 0x33362E0, LargeRiverRva = 0x3336390;
+    // shortcut: if 1.19.4 inserted defines mid-block these five are wrong; zeros fall back to vanilla odds, so verify in IDA then
+    private const int BaseAvoidRva = 0x33E57E0, NoDefAvoidRva = 0x33E57F0, FortPenaltyRva = 0x33E6418, RiverRva = 0x33E5F98, LargeRiverRva = 0x33E6048;
     private static double BaseAvoid => Define(BaseAvoidRva, 1, 100, 90);
     private static double NoDefAvoid => Define(NoDefAvoidRva, 1, 100, 60);
     private static double FortPenalty => Define(FortPenaltyRva, -1, -0.001, -0.15);

@@ -551,7 +551,7 @@ public static unsafe class LandCombat
 public static unsafe class Construction
 {
     /// <summary>BuildingContainer::GetFreeLevels(container, type) -> int: max level minus planned (built and queued), shared slots included.</summary>
-    [Signature] public const string FreeLevelsSig = "48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 4C 63 82";
+    [Signature] public const string FreeLevelsSig = "48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 4C 63 82 E0 02 00 00 48 8B F9 48 8B 41 20 48 8B F2 4A 63 0C 80 83 F9 FF 74 73 48 8B 47 38 48 8B 2C C8 48 85 ED 74 66 45 33 C0 48 89 5C 24 30 48 8B CF E8";
 
     /// <summary>CCountry::CanBuildInProvince(country, province, type, bool) -> bool.</summary>
     [Signature] public const string CanBuildInProvinceSig = "48 8B 82 B8 00 00 00 4D 8B D0 4C 8B C1 F6 80 D2 00 00 00 01";

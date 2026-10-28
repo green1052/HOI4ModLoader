@@ -1,3 +1,2 @@
 l_english:
-    com.green1052.queues.desc:0 "Queue techs, focuses and intelligence agency upgrades; each starts as soon as a slot is free.\n- Shift+click: queue or unqueue (a number shows its place)\n- Advisors, ideas, laws and decisions are taken once you have the political power\nWorks in multiplayer."
-    com.green1052.queues.PoliticalPower:0 "Political power queue"
+    com.green1052.queues.desc:0 "Queue national focuses with Shift+click; each starts as soon as the focus slot is free.\n- Shift+click: queue or unqueue (a number shows its place)\n- Unqueueing a focus also unqueues the queued focuses that need it\nWorks in multiplayer."

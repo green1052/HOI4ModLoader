@@ -11,8 +11,8 @@ namespace ArmySupport;
 /// <summary>Byte patterns (reverse engineered against HOI4 1.19.3), checked by tests\Signatures.Tests.</summary>
 public static partial class Signatures
 {
-    /// <summary>CNavalMissionSetTypeCommand ctor (mem[0x48], CTaskForce*, int mission).</summary>
-    [Signature] public const string SetNavalMission = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 48 83 EC 30 41 8B D8 48 8B F2 48 8B F9 C6 41 ? ? C7 41 ? ? ? ? ? 33 C9 89 4F ? C7 47 ? ? ? ? ? 66 89 4F ? 48 89 4F ? 48 8D 05 ? ? ? ? 48 89 07 48 8D 4F ? E8 ? ? ? ? 90 89 5F ? 66 C7 47";
+    /// <summary>CNavalMissionSetTypeCommand ctor (mem[0x48], CTaskForce*, int mission); the word at +0x44 (+0x45 stop training at max) is hardcoded to 1.</summary>
+    [Signature] public const string SetNavalMission = "48 89 5C 24 20 48 89 4C 24 08 55 56 57 48 83 EC 30 41 8B D8 48 8B F2 48 8B F9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C0 48 89 41 10 33 C9 48 89 4F 10 C7 47 18 FF FF 00 00 48 89 4F 1C 48 8D 05 ? ? ? ? 48 89 07 48 8D 4F 28 E8 ? ? ? ? 90 89 5F 40 66 C7 47 44 00 01";
 
     /// <summary>Adds a strategic region (+0x30: its id) to a task force's mission (+0x28: its CRef, the task force's +0x08).</summary>
     [VTable] public const string AddNavalRegion = "CNavalMissionAddRegionCommand";

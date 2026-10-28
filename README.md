@@ -2,10 +2,10 @@
 
 A C# plugin loader for Hearts of Iron IV, in the spirit of BepInEx. It changes no game files: everything happens in memory while the game runs.
 
-The bundled plugins add quality-of-life features: research, focus and political power queues, auto construction, auto trade, air wings for field marshals and more.
+The bundled plugins add quality-of-life features: a national focus queue, auto construction, auto trade, air wings for field marshals and more.
 
 ## Requirements
-- Hearts of Iron IV **1.19.3** (Steam, Windows 64-bit)
+- Hearts of Iron IV **1.19.4** (Steam, Windows 64-bit)
 - [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)
 
 ## Installation
@@ -33,7 +33,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 ## Plugins
 | Plugin | What it does | Multiplayer |
 |---|---|---|
-| Queues | Research, focus, intelligence agency and political power queues | ✅ |
+| Queues | National focus queue: Shift+click focuses to reserve them, numbers show the order | ✅ |
 | AutoConstruction | Auto construction targets per building, auto supply, auto production | ✅ |
 | AutoTrade | Imports resources you are short of (oil by your fuel), cuts imports you no longer need, draws your trade routes | ✅ |
 | FrontLine | Front line micro (rotation, plugging, cordons, escape, attacks, reserves) plus battle plan and operation (blitz, pincer) hotkeys | ✅ |
@@ -42,18 +42,14 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | Fonts | The game's text in an installed font or a .ttf/.otf/.ttc file | ✅ |
 | Reroll | A fresh random seed at every load, so reloading doesn't replay the same dice | Single player only |
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
-| Performance | Targeted decisions look for new targets every few days; the map updates every few frames at speeds 4-5 | ✅ (decision targets: single player) |
 | Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them; finished operations clear themselves | ✅ (operative drag: single player) |
 | DiscordPresence | Your country and the game date in your Discord status | ✅ |
 
 ### Queues
-**Shift+click** to queue, again to unqueue. Queued items show their position as a gold badge (`[31]` and up past 30); agency upgrades show `N` or `NxL` in a number box.
-- **Research, national focus, intelligence agency upgrades:** the first queued item starts as soon as a slot is free.
-  - Repeatable agency upgrades queue one more level per click (`1x3`).
-  - Unqueueing a focus also unqueues the queued focuses that need it.
-  - Items that can no longer start are dropped.
-- **National spirits, laws, designers, advisors, decisions:** taken one at a time once you have the political power. A full slot is replaced.
-- Setting: `PoliticalPower` (on).
+**Shift+click** a national focus to reserve it, again to unqueue it. Queued focuses show their position as a number before their name.
+- The first queued focus starts as soon as the focus slot is free.
+- Unqueueing a focus also unqueues the queued focuses that need it.
+- Focuses that can no longer start are dropped.
 
 ### AutoConstruction
 In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1, **Alt+click** to turn it off and take its lines not started yet out of the queue.
@@ -330,13 +326,8 @@ An add-on for [Sheep Mod](https://github.com/Sheep-of-Latrobe/sheeps-mod): it fi
 **Ground crews**
 - The AI spends spare command power (keeping 50) on More Ground Crews in its two hardest-fought air regions, which vanilla's AI never uses.
 
-### Performance
-The decision targets are single player only (they change when the game state updates); the map updates and frame cap only change drawing and work in multiplayer too.
-- **Decision targets** (`DecisionTargetDays`, 3; 1 is vanilla): targeted decisions look for new targets every few days instead of daily. Invalid targets still drop daily.
-- **Map updates** (`MapEveryFrames`, 3; 1 is vanilla): at speeds 4 and 5 the map (province colours, units, icons) updates every third frame. At speed 5 a frame is a game hour, so this was about 6 % more game time per second in a 1936 save. Paused and at speeds 1-3 it updates every frame.
-- **Frame cap** (`FastSpeedFrameMs`, 0: off): at speeds 4 and 5, the screen is drawn at most every that many milliseconds, leaving more time for the simulation. No effect with the `-render_thread` launch option.
-
-**Speed tips** (game options, no plugin needed; measured at speed 5 in a 1936 save):
+### Speed tips
+Game options only, no plugin needed (measured at speed 5 in a 1936 save):
 - At speed 5 the game runs one game hour per frame, and the simulation, not the graphics card, sets the pace. Lowering graphics settings or raising `max_refresh_rate` in `settings.txt` (`Documents\Paradox Interactive\Hearts of Iron IV`) changed nothing there.
 - The `-render_thread` launch option (Steam → Properties → Launch options; DirectX 11) draws the screen beside the next hour's simulation instead of after it. It is an undocumented game option: if you see glitches, take it out.
 - Turn vsync off: with it on, speed 5 waits for the monitor.
@@ -358,7 +349,7 @@ Your Discord status shows the country you play (its name for its current ideolog
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join.
 - Plugins like the queues and auto construction send the same commands a player's clicks would.
-- These switch off in a multiplayer lobby and back on in single player: field marshals holding air wings and railway guns (spread over his armies instead), railway gun positioning, FrontLine's Apply to AI, Performance's decision targets, Intelligence's operative drag, and the single-player plugins.
+- These switch off in a multiplayer lobby and back on in single player: field marshals holding air wings and railway guns (spread over his armies instead), railway gun positioning, FrontLine's Apply to AI, Intelligence's operative drag, and the single-player plugins.
 - Settings changed during a multiplayer session, and rebuilt plugin DLLs, take effect back in single player.
 
 ## Loader: start-up speed
@@ -374,7 +365,7 @@ Your Discord status shows the country you play (its name for its current ideolog
 
 ## Troubleshooting
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.
-- **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins made for a game version (1.19.3) don't load on another; `[General] IgnoreGameVersion = True` in the plugin's config loads them anyway (may crash).
+- **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins made for a game version (1.19.4) don't load on another; `[General] IgnoreGameVersion = True` in the plugin's config loads them anyway (may crash).
 - **The game crashed:** `HOI4ModLoader\crash.log` names the code that faulted (and the plugin hook, if any). Include it with a bug report.
 - **UI elements missing or broken:** other mods replacing the same interface files (settings window, main menu, construction tab, intelligence agency, army group card, battle plan tools) can conflict. The loader's versions win.
 - **Turning a plugin off:** use the Mods tab, or set `Enabled = False` in `config\<plugin id>.cfg`.

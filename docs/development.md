@@ -38,7 +38,7 @@ public static class Signatures   // the tests check every [Signature] here
     [Signature(Anchor = "Some engine string")] public const string Bar = "85 C0 0F 94 ?? E8"; // only inside functions using that string
 }
 
-[Plugin("com.green1052.myplugin", "My Plugin", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
+[Plugin("com.green1052.myplugin", "My Plugin", "1.0.0", GameVersion = "1.19.4", AffectsGameState = true)]
 [Dependency("com.green1052.other")]                // (optional) load after this plugin
 public class MyPlugin : Plugin
 {

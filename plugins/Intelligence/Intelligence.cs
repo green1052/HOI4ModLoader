@@ -8,7 +8,7 @@ namespace Intelligence;
 public static class Signatures
 {
     /// <summary>COperativeBottomBar update (bar): fills the bar from the agency's operatives, in their order.</summary>
-    [Signature] public const string BarUpdate = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 48 8B D9 48 83 B9 E0 0A 00 00 00";
+    [Signature] public const string BarUpdate = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 48 8B D9 48 83 B9 E0 0B 00 00 00";
 
     /// <summary>COperativeBottomBar full refresh (bar): refills and lays out the entries.</summary>
     [Signature] public const string BarRefresh = "40 55 48 83 EC 20 48 8B E9 48 8B 49 30 48 8B 01";
@@ -37,7 +37,7 @@ public static class Signatures
 /// Finished operations clear themselves from the operations list a few days after they finished (the game's own command:
 /// multiplayer too).
 /// </summary>
-[Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.3")]
+[Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.4")]
 public unsafe class Intelligence : Plugin
 {
     // Layouts for HOI4 1.19.3.

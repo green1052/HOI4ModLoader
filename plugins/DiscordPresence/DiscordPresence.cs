@@ -21,7 +21,7 @@ public static class Signatures
 /// is touched. The pipe work runs on its own thread, which ends (and Discord clears the status) a minute after the plugin
 /// stops updating it, e.g. when it is turned off or reloaded.
 /// </summary>
-[Plugin("com.green1052.discordpresence", "Discord Rich Presence", "1.0.0", GameVersion = "1.19.3")]
+[Plugin("com.green1052.discordpresence", "Discord Rich Presence", "1.0.0", GameVersion = "1.19.4")]
 public unsafe class DiscordPresence : Plugin
 {
     private const string Image = "https://cdn.cloudflare.steamstatic.com/steam/apps/394360/header.jpg";

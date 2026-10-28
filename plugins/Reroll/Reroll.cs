@@ -19,7 +19,7 @@ public static class Signatures
 /// random_list, mean time to happen). What was decided before the save stays. Single player only: every player's
 /// simulation must draw the same numbers.
 /// </summary>
-[Plugin("com.green1052.reroll", "Reroll", "1.0.0", GameVersion = "1.19.3", AffectsGameState = true)]
+[Plugin("com.green1052.reroll", "Reroll", "1.0.0", GameVersion = "1.19.4", AffectsGameState = true)]
 public unsafe class Reroll : Plugin
 {
     private const int SeedOfCommand = 0x28;

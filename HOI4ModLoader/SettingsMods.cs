@@ -17,20 +17,20 @@ namespace HOI4ModLoader;
 /// </summary>
 internal static unsafe class SettingsMods
 {
-    /// <summary>CSettingsScreen::Init(screen, window): stores the window and binds its buttons and checkboxes, once per menu.</summary>
-    [Signature] public const string InitSig = "48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 4C 89 70 20 55 48 8D 68 A1 48 81 EC 90 00 00 00 0F 29 70 E8 4C 8B D2 48 8B F1 48 89 91 98 5E 00 00";
+    /// <summary>CSettingsScreen ctor(screen, window, mode): stores the window and binds its buttons and checkboxes, once per menu.</summary>
+    [Signature] public const string InitSig = "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 C0 FA FF FF 48 81 EC 40 06 00 00 4D 8B F0 48 8B F2 4C 8B F9 48 8D 05 ? ? ? ? 48 89 01";
 
     /// <summary>CSettingsScreen::UpdateTabButtons(screen): selects the shown tab's button.</summary>
-    [Signature] public const string UpdateTabsSig = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B F1 48 8D 1D ? ? ? ? 48 8D 2D ? ? ? ? 66 66 66 0F 1F 84 00 00 00 00 00 48 8B 8E 98 5E 00 00";
+    [Signature] public const string UpdateTabsSig = "48 8B C4 48 89 58 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 88 48 81 EC 40 01 00 00 0F 29 70 B8 0F 29 78 A8 44 0F 29 40 98";
 
     /// <summary>CSettingsScreen::OnOpen(screen): shows the window and the shown tab, if it is a vanilla one.</summary>
-    [Signature] public const string OpenSig = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 48 8B EC 48 83 EC 40 48 8B F1 48 8B 89 98 5E 00 00 48 83 C1 30 48 8B 01 FF 50 78";
+    [Signature] public const string OpenSig = "53 48 83 EC 30 48 8B D9 48 8B 89 98 67 00 00 48 83 C1 30 48 8B 01 FF 50 78 48 8B 8B 98 67 00 00 E8";
 
     /// <summary>CCheckBox::UpdateSprite(checkbox): shows the frame of its state.</summary>
     [Signature] public const string CheckBoxSpriteSig = "40 53 48 83 EC 40 80 B9 BB 01 00 00 00 48 8B D9 48 89 74 24 58 75 22 48 8B 89 C0 00 00 00 48 8B 01 FF 90 60 02 00 00";
 
-    /// <summary>Checkbox observer: { vtable, owner, on toggle(owner), on checked(owner), on unchecked(owner), ... } (64 bytes).</summary>
-    [VTable] public const string CheckBoxGlue = "?$CCheckBoxObserverGlue@VCSettingsScreen@@";
+    /// <summary>Checkbox observer: { vtable, owner, six handler slots (toggle/checked/unchecked/...) } (64 bytes). 1.19.4 renamed it Legacy.</summary>
+    [VTable] public const string CheckBoxGlue = "?$CLegacyCheckBoxObserverGlue@VCSettingsScreen@@";
 
     /// <summary>Button observer: { vtable, 20 std::function slots (64 bytes each), slot 0 = click }.</summary>
     [VTable] public const string ButtonGlue = "CButtonObserverGlue";
@@ -38,14 +38,14 @@ internal static unsafe class SettingsMods
     /// <summary>std::function impl of a bound member call: _Do_call jumps to [impl+8] with rcx = [impl+16].</summary>
     [VTable] public const string MemberCall = "?$_Func_impl_no_alloc@V?$_Binder@U_Unforced@std@@AEAP8CSettingsScreen@@EAAXXZPEAV3@@std@@X$$V@std";
 
-    private const int RootOfScreen = 0x5E98, ShownTab = 0x5E60; // CSettingsScreen: its window, the shown tab container
+    private const int RootOfScreen = 0x4288, ShownTab = 0x6760; // CSettingsScreen: its window, the shown tab container
     private const int ButtonSlot = 13, CheckBoxSlot = 21, WindowSlot = 55;
     private const int ShowSlot = 15, HideSlot = 16, WidgetOfWindow = 48; // a container's GUI object, its Show()/Hide()
     private const int SetFrameSlot = 22;                              // button: SetFrame(1 selected, 2 not)
     private const int CheckState = 176, Observers = 128, AddObserverSlot = 1; // CCheckBox: state (bit 0 = checked), observer list
     private const int PluginRows = 18, SettingRows = 8;
 
-    [Function(CallingConventions.Microsoft)] public delegate nint InitFn(nint screen, nint window);
+    [Function(CallingConventions.Microsoft)] public delegate nint InitFn(nint screen, nint window, nint mode);
     [Function(CallingConventions.Microsoft)] public delegate nint TabsFn(nint screen);
     [Function(CallingConventions.Microsoft)] public delegate nint OpenFn(nint screen);
 
@@ -77,9 +77,9 @@ internal static unsafe class SettingsMods
         _ = Sig.VTable(CheckBoxGlue) + Sig.VTable(ButtonGlue) + Sig.VTable(MemberCall);
         var (init, open, updateTabs) = (Sig.Find(InitSig), Sig.Find(OpenSig), Sig.Find(UpdateTabsSig));
 
-        _init = Patches.Hook<InitFn>(init, (screen, window) =>
+        _init = Patches.Hook<InitFn>(init, (screen, window, mode) =>
         {
-            var result = _init!.OriginalFunction(screen, window);
+            var result = _init!.OriginalFunction(screen, window, mode);
             Guard(() => Build(screen));
             return result;
         });
@@ -433,7 +433,8 @@ internal static unsafe class SettingsMods
         var glue = Allocator.AllocZeroed(64);
         *(nint*)glue = Sig.VTable(CheckBoxGlue);
         *(nint*)(glue + 8) = cookie;
-        *(nint*)(glue + 16) = *(nint*)(glue + 24) = *(nint*)(glue + 32) = (nint)handler; // toggled, checked, unchecked
+        // 1.19.4: six callback slots (was three); same handler in all, Save() ignores repeats by state compare
+        for (var slot = 0x10; slot <= 0x38; slot += 8) *(nint*)(glue + slot) = (nint)handler;
         AddObserver(box, glue);
     }
 

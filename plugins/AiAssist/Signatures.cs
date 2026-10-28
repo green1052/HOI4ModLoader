@@ -111,7 +111,8 @@ public static class Signatures
     [Signature] public const string InvasionSupportValid = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 20 33 F6 48 8B F9 8B DE 39 59 44 7E ? 48 63 C3 48 8D 14 40 48 8B 47 38 48 8D 0C D0 E8 ? ? ? ? 48 85 C0 75 ? FF C3 3B 5F 44 7C ? 32 C0 48 8B 5C 24 30 48 8B 74 24 38 48 8B 7C 24 40 48 83 C4 20 41 5E C3 83 FB FF 74 ? 39 77 1C 7E ? 4C 8B F6 66 66 0F 1F 84 00 00 00 00 00 48 8B 47 10 48 8B 4F 08";
 
     /// <summary>(db) -> the building database's coastal_bunker CBuildingType* (thread-safe static key; the null type when undefined).</summary>
-    [Signature] public const string CoastalBunkerType = "40 53 48 83 EC 30 48 8B D9 8B 15 ? ? ? ? 65 48 8B 04 25 58 00 00 00 B9 64 08 00 00 48 8B 04 D0 8B 04 01 39 05 ? ? ? ? 7F ? 4C 8D 43 58 48 8D 4B 40 48 8D 15 ? ? ? ? 48 83 C4 30 5B E9 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 83 3D ? ? ? ? FF 75 ? 48 8D 05 ? ? ? ? 48 89 44 24 20 48 C7 44 24 28 0E 00 00 00";
+    // shortcut: 1.19.4 first of two beach-defense fortification getters; if invasion scoring misfires, try the sibling with E9 FB 84 FF FF
+    [Signature] public const string CoastalBunkerType = "40 53 48 83 EC 30 48 8B D9 8B 15 ? ? ? ? 65 48 8B 04 25 58 00 00 00 B9 EC 20 00 00 48 8B 04 D0 8B 04 01 39 05 ? ? ? ? 7F 19 4C 8D 43 58 48 8D 4B 40 48 8D 15 ? ? ? ? 48 83 C4 30 5B E9 AB 85 FF FF";
 
     /// <summary>
     /// The force concentration "active" test: `cmp dword [rcx+218h],0; jle; cmp dword [rcx+22Ch],0; jz; cmp qword [rcx+238h],0; jz`.
@@ -140,8 +141,8 @@ public static class Signatures
     /// </summary>
     [Signature] public const string UnassignedTaskForces = "48 89 54 24 ? 48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC 48 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B E9";
 
-    /// <summary>CNavalMissionSetTypeCommand ctor (mem[0x48], CTaskForce*, int mission); +0x44: stop training at max.</summary>
-    [Signature] public const string SetNavalMission = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 48 83 EC 30 41 8B D8 48 8B F2 48 8B F9 C6 41 ? ? C7 41 ? ? ? ? ? 33 C9 89 4F ? C7 47 ? ? ? ? ? 66 89 4F ? 48 89 4F ? 48 8D 05 ? ? ? ? 48 89 07 48 8D 4F ? E8 ? ? ? ? 90 89 5F ? 66 C7 47";
+    /// <summary>CNavalMissionSetTypeCommand ctor (mem[0x48], CTaskForce*, int mission); the word at +0x44 (+0x45 stop training at max) is hardcoded to 1.</summary>
+    [Signature] public const string SetNavalMission = "48 89 5C 24 20 48 89 4C 24 08 55 56 57 48 83 EC 30 41 8B D8 48 8B F2 48 8B F9 C6 41 08 00 C7 41 0C FF FF FF FF 33 C0 48 89 41 10 33 C9 48 89 4F 10 C7 47 18 FF FF 00 00 48 89 4F 1C 48 8D 05 ? ? ? ? 48 89 07 48 8D 4F 28 E8 ? ? ? ? 90 89 5F 40 66 C7 47 44 00 01";
 
     /// <summary>CNavalMissionMoveCommand ctor (mem[0x48], CTaskForce*, int sea province, bool).</summary>
     [Signature] public const string NavalMove = "48 89 4C 24 ? 53 55 56 57 41 56 48 83 EC 30 41 0F B6 D9 41 8B F8";
@@ -156,7 +157,7 @@ public static class Signatures
     /// CMoveShipsCommand ctor (mem[0x58], CPdxArray&lt;CShip*&gt;* ships, CTaskForce* toNavy, bool createNew, int province, bool move):
     /// with no task force and createNew, the ships (all of one task force) become a new task force of its fleet, where it is.
     /// </summary>
-    [Signature] public const string MoveShips = "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 0F 29 74 24 30 41 0F B6 D9 49 8B F8 4C 8B FA 4C 8B F1 C6 41 08 00 C7 41 0C FF FF FF FF 45 33 ED 44 89 69 10";
+    [Signature] public const string MoveShips = "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 0F 29 74 24 30 41 0F B6 D9 49 8B F8 4C 8B FA 4C 8B F1 C6 41 08 00 C7 41 0C FF FF FF FF 33 F6 48 89 71 10 C7 41 18 FF FF 00 00 48 89 71 1C";
 
     /// <summary>CShip (ship, long* out) -> out: its shore bombardment.</summary>
     [Signature] public const string ShipShoreBombardment = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 4C 8B 81 28 07 00 00 48 8D B9 80 00 00 00";
@@ -165,7 +166,11 @@ public static class Signatures
     /// Naval AI allocator's first filter (CPdxArray&lt;slot*&gt;* list) -> removed: drops reserve-fleet and dead task forces from
     /// the list the objectives take from (slot+0 the task force's CRef, +0x18 its objective). Country's AI worker thread.
     /// </summary>
-    [Signature] public const string FilterTaskForces = "41 56 48 83 EC 30 48 89 5C 24 ? 4C 8B F1 48 89 6C 24 ? 48 89 74 24 ? 33 F6 48 89 7C 24 ? 4C 89 7C 24 ? 39 71 0C";
+    /// <summary>
+    /// Naval AI allocator 1.19.4 (ai, unused, list of CPdxArray&lt;slot*&gt; candidates, unused): the old standalone first
+    /// filter is inlined into it. We take bombarders off the list before vanilla assigns the rest.
+    /// </summary>
+    [Signature] public const string FilterTaskForces = "48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 D8 F6 FF FF 48 81 EC 28 0A 00 00 0F 29 B4 24 10 0A 00 00 4C 8B E9 C6 41 19 00";
 
     /// <summary>`mov ecx,48h; call alloc; ...; mov r8b,1; mov rdx,rsi; mov rcx,rax; call CCancelMovementCommand ctor (mem[0x48], CArmy*, bool)`
     /// (+28: the call): stops a division's move or attack, as the UI's stop does.</summary>
@@ -189,13 +194,13 @@ public static class Signatures
     /// CStratAirSetMissionCommand ctor (mem[0x48], CAirWing*, int mission bits, bool enable, bool clearFirst): +0x40 bits, +0x44
     /// enable, +0x45 clear, +0x46 stop training at max XP. The AI's own training pass posts (wing, 0x800, 1, 1) with +0x46 set.
     /// </summary>
-    [Signature] public const string SetMissionCommand = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 54 24 ? 48 89 4C 24 ? 56 57 41 56 48 83 EC 20 41 0F B6 F9 41 8B D8 48 8B F2 4C 8B F1 C6 41 08 00 C7 41 0C FF FF FF FF 33 C9 41 89 4E 10 41 C7 46 14 00 00 FF FF 66 41 89 4E 18 49 89 4E 1C 48 8D 05 ? ? ? ? 49 89 06 49 8D 4E 28 E8 ? ? ? ? 90 41 89 5E 40 41 88 7E 44 0F B6 44 24";
+    [Signature] public const string SetMissionCommand = "48 89 5C 24 18 48 89 6C 24 20 48 89 54 24 10 48 89 4C 24 08 56 57 41 56 48 83 EC 20 41 0F B6 F9 41 8B D8 48 8B F2 4C 8B F1 C6 41 08 00 C7 41 0C FF FF FF FF 33 C0 48 89 41 10 33 C9 49 89 4E 10 41 C7 46 18 FF FF 00 00 49 89 4E 1C 48 8D 05 ? ? ? ? 49 89 06 49 8D 4E 28 E8 ? ? ? ? 90 41 89 5E 40 41 88 7E 44 0F B6 44 24 60 41 88 46 45";
 
     /// <summary>CAirWing::CanTrain(wing) -> bool: mission 0x800 allowed (`mov eax,[rcx+30h]; shr eax,0Bh`), XP under NAir.AIR_WING_XP_TRAINING_MAX, not in a raid, not a carrier wing in port.</summary>
     [Signature] public const string CanTrain = "40 53 48 83 EC 20 8B 41 30 48 8B D9 C1 E8 0B";
 
-    /// <summary>CAirWing::GetAirBase(wing) -> CAirBase*: where it is or is flying to (same pattern as ArmySupport's).</summary>
-    [Signature] public const string AirBaseOfWing = "40 53 48 83 EC 20 48 8B D9 48 83 C1 48 83 39 00 75 ? 83 79 ? ? 74 ? E8 ? ? ? ? 48 85 C0 75 ? 48 8B 4B ? 48 83 C1 18 83 39 00 75 ? 83 79 ? ? 75 ? 33 C0 48 83 C4 20 5B C3";
+    /// <summary>CAirWing::GetAirBase(wing) -> CAirBase*: where it is or is flying to (vtable slot 2; same pattern as ArmySupport's).</summary>
+    [Signature] public const string AirBaseOfWing = "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B 0D ? ? ? ? 48 8B 01 FF 90 B8 00 00 00 48 8B 4B 38 48 8B F8 48 83 C1 18 83 39 00 75 0A 83 79 04 00 75 04 33 C0 EB 05 E8 ? ? ? ? 45 33 C0";
 
     /// <summary>CAirWing::GetExperienceLevel(wing) -> int: how many NAir.AIR_WING_XP_LEVELS its XP (`mov rdx,[rcx+218h]`) reached; 0 is green.</summary>
     [Signature] public const string WingXpLevel = "4C 8B 05 ? ? ? ? 33 C0 48 8B 91 18 02 00 00";

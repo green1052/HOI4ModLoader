@@ -18,7 +18,8 @@ public static partial class Signatures
     [Signature] public const string MaxSize = "40 53 48 83 EC 30 80 3D ? ? ? ? ? 48 89 74 24";
 
     /// <summary>CAirWing::GetAirBase(wing) -> CAirBase*: where it is, or is flying to.</summary>
-    [Signature] public const string AirBaseOfWing = "40 53 48 83 EC 20 48 8B D9 48 83 C1 48 83 39 00 75 ? 83 79 ? ? 74 ? E8 ? ? ? ? 48 85 C0 75 ? 48 8B 4B ? 48 83 C1 18 83 39 00 75 ? 83 79 ? ? 75 ? 33 C0 48 83 C4 20 5B C3";
+    /// <summary>CAirWing::GetAirBase (vtable slot 2): the base the wing is at or flying to. CRef&lt;CAirBase&gt; at [wing+0x38]+0x18.</summary>
+    [Signature] public const string AirBaseOfWing = "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B 0D ? ? ? ? 48 8B 01 FF 90 B8 00 00 00 48 8B 4B 38 48 8B F8 48 83 C1 18 83 39 00 75 0A 83 79 04 00 75 04 33 C0 EB 05 E8 ? ? ? ? 45 33 C0";
 
     /// <summary>Squared map distance from a strategic region to a state (region, CState*) -> int.</summary>
     [Signature] public const string RegionToState = "48 83 EC 28 4C 8B 42 ? 48 8B 51 ? 48 8D 4C 24 ? 41 8B 80 ? ? ? ? 2B 82 E0 00 00 00";

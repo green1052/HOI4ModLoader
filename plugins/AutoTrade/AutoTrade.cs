@@ -9,10 +9,10 @@ namespace AutoTrade;
 public static class Signatures
 {
     /// <summary>CTradeResourceInfoItem: click on the resource icon (item): `mov rdx,[rcx+20h]; mov rcx,[rcx+0A88h]; jmp SelectResource`.</summary>
-    [Signature] public const string ResourceIconClick = "48 8B 51 20 48 8B 89 88 0A 00 00 E9";
+    [Signature] public const string ResourceIconClick = "48 8B 51 20 48 8B 89 88 0B 00 00 E9";
 
     /// <summary>CTradeResourceInfoItem::Update(item, unused): re-sets every text of a resource column in the trade view.</summary>
-    [Signature] public const string ResourceItemUpdate = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC C8 01 00 00 0F 29 B4 24 ? ? ? ? 4C 8B F1";
+    [Signature] public const string ResourceItemUpdate = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 28 FF FF FF 48 81 EC D8 01 00 00 0F 29 B4 24 C0 01 00 00 4C 8B F1 45 33 E4 44 89 A5 30 01 00 00 44 89 A5 20 01 00 00 44 38 25";
 
     /// <summary>CCountryResources::GetBalance(resources, CStrategicResource*) -> int: the trade view's balance (net of imports).</summary>
     [Signature] public const string Balance = "48 83 EC 28 4C 63 92 D8 00 00 00 4C 8D 99 38 02 00 00";
@@ -42,7 +42,7 @@ public static class Signatures
 /// fuel stockpile instead: only unused oil becomes fuel, so its balance never shows a shortage. Ctrl+Alt+C draws our trade
 /// routes (TradeOverlay.cs).
 /// </summary>
-[Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.3")]
+[Plugin("com.green1052.autotrade", "Auto Trade", "1.0.0", GameVersion = "1.19.4")]
 public unsafe partial class AutoTrade : Plugin
 {
     // Layouts for HOI4 1.19.3. Amounts are fixed point (1e5) unless noted.
@@ -74,7 +74,7 @@ public unsafe partial class AutoTrade : Plugin
     private nint _oil, _oilDb; // _oilDb: the database global's address until oil is looked up, once a game runs
     private byte[]? _autoPrefix; // "Auto " in the game's language, made once: Labels runs with every redraw of a column
     private const int FuelOfStatus = 0x08, MaxFuelOfStatus = 0x10;
-    private const int ItemDatabaseRva = 0x332F088, OilOfDatabase = 0x68; // the strategic resources' database global (HOI4 1.19.3): its oil
+    private const int ItemDatabaseRva = 0x33DD4D0, OilOfDatabase = 0x68; // the strategic resources' database global (HOI4 1.19.4): its oil (verified: the item update compares item+0x20 against db+0x68)
 
     public override void Load()
     {

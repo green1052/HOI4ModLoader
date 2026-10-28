@@ -30,7 +30,7 @@ public static partial class Signatures
     [Signature] public const string WingAddSlotCap = "83 FE 03 0F 83 ? ? ? ? 48 8B 9F";
 
     /// <summary>Army card: creates the attached-wing slots ("attached_units" gridbox).</summary>
-    [Signature] public const string CreateWingSlots = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 40 48 8B D9 33 ED";
+    [Signature] public const string CreateWingSlots = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 30 48 8B D9 48 8B 89 78 3F 00 00";
 
     /// <summary>
     /// UI: attach air wings to a group (CPdxArray&lt;CAirWing*&gt;* wings, COrdersGroup* group): posts one

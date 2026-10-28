@@ -18,7 +18,7 @@ public unsafe partial class AiAssist
     private const int BombardWaitHours = 14 * 24; // with no battle in reach, waits on hold at sea that long instead of going to port
 
     [Function(CallingConventions.Microsoft)] public delegate void UnassignedTaskForcesFn(nint slots, nint tag);
-    [Function(CallingConventions.Microsoft)] public delegate int FilterTaskForcesFn(nint list, nint unused);
+    [Function(CallingConventions.Microsoft)] public delegate void FilterTaskForcesFn(nint ai, int unused, nint list, nint unused2);
 
     private const int ObjectiveOfSlot = 0x18, AirBaseOfShip = 0x730, OwnerOfTaskForce = 0x1D8, ControllerOfTaskForce = 0x1DC, ResolvedTaskForce = 0x10;
     private const int PatrolMission = 1, StrikeForceMission = 2;
@@ -52,11 +52,10 @@ public unsafe partial class AiAssist
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
         Allocator.Resolve(); // the heap functions are found here, not on AI threads
         if (bombard)
-            _filterTaskForces = Patches.Hook<FilterTaskForcesFn>(Sig.Find(Signatures.FilterTaskForces), (list, unused) =>
+            _filterTaskForces = Patches.Hook<FilterTaskForcesFn>(Sig.Find(Signatures.FilterTaskForces), (ai, unused, list, unused2) =>
             {
-                var removed = _filterTaskForces!.OriginalFunction(list, unused);
                 Safely(() => TakeForShore(list));
-                return removed;
+                _filterTaskForces!.OriginalFunction(ai, unused, list, unused2);
             });
         _unassignedTaskForces = Patches.Hook<UnassignedTaskForcesFn>(Sig.Find(Signatures.UnassignedTaskForces), (slots, tag) =>
         {
