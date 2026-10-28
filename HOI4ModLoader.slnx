@@ -3,7 +3,6 @@
         <Project Path="plugins/AiAssist/AiAssist.csproj" />
         <Project Path="plugins/ArmySupport/ArmySupport.csproj" />
         <Project Path="plugins/AutoConstruction/AutoConstruction.csproj" />
-        <Project Path="plugins/AutoTrade/AutoTrade.csproj" />
         <Project Path="plugins/ChecksumPatcher/ChecksumPatcher.csproj" />
         <Project Path="plugins/DiscordPresence/DiscordPresence.csproj" />
         <Project Path="plugins/Fonts/Fonts.csproj" />

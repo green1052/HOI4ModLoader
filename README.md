@@ -2,7 +2,7 @@
 
 A C# plugin loader for Hearts of Iron IV, in the spirit of BepInEx. It changes no game files: everything happens in memory while the game runs.
 
-The bundled plugins add quality-of-life features: national focus and research queues, auto construction, auto trade, air wings for field marshals and more.
+The bundled plugins add quality-of-life features: national focus and research queues, auto construction, air wings for field marshals and more.
 
 ## Requirements
 - Hearts of Iron IV **1.19.4** (Steam, Windows 64-bit)
@@ -35,7 +35,6 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 |---|---|---|
 | Queues | National focus and research queues: Shift+click to reserve, numbers show the order | ✅ |
 | AutoConstruction | Auto construction targets per building, auto supply, auto production | ✅ |
-| AutoTrade | Imports resources you are short of (oil by your fuel), cuts imports you no longer need, draws your trade routes | ✅ |
 | FrontLine | Front line micro (rotation, plugging, cordons, escape, attacks, reserves) plus battle plan and operation (blitz, pincer) hotkeys | ✅ |
 | ArmySupport | Air wings and railway guns for field marshals, railway gun positioning, airbase capacity, auto rebase, auto ground crews and aces, paradrops and invasions to several targets with auto support, battle plan keys for them, army organizer | ✅ (field marshals: spread over armies; railway gun positioning: single player) |
 | ChecksumPatcher | Keeps achievements with mods | ✅ |
@@ -66,15 +65,6 @@ In the construction tab, **Shift+click** a building to raise its auto constructi
 **Auto production** (`AutoProduction`, on): military factories move one at a time from a land or air line with a big surplus to one that is short.
 - Settings: surplus threshold (`SurplusPercent`, 50 % of need), `CoverDays` (60), factories moved per game day (`MovesPerTurn`, 2).
 - No line is created or emptied.
-
-### AutoTrade
-In the trade view, **Shift+click** a resource icon to toggle auto trade for it (`Auto` shows; kept per country for the session).
-- Shortages are imported; imports no longer needed are cut back. The balance stays at the surplus you set (`Surplus`, 0).
-- Seller priority: your subjects, your faction (`AlliesFirst`, on), then whoever can sell the most.
-- **Oil** follows the fuel stockpile, checked weekly:
-  - one step more while fuel is under `FuelLowPercent` (50 %) of its maximum and not filling up;
-  - one step less while it is at or over `FuelHighPercent` (90 %) and not falling.
-- **Trade routes:** **Ctrl+Alt+C** draws your import and export routes in gold, in any map mode.
 
 ### FrontLine
 Does the front line micro a player would do by hand, with the battle plan UI's own commands (multiplayer works).
