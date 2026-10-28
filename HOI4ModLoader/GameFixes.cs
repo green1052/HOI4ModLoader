@@ -53,7 +53,7 @@ internal static unsafe partial class GameFixes
         var template = Sig.VTable(DivisionTemplate);
         _adjusterTooltip = Patches.Hook<AdjusterTooltipFn>(Sig.Find(AdjusterTooltip), (tip, widget, text, a4) =>
         {
-            if (*(nint*)(tip + TemplateOfTip) is var p && p != 0 && !(Readable(p - TipOfTemplate) && *(nint*)(p - TipOfTemplate) == template))
+            if (*(nint*)(tip + TemplateOfTip) is var p && p != 0 && !(Native.Readable(p - TipOfTemplate) && *(nint*)(p - TipOfTemplate) == template))
                 *(nint*)(tip + TemplateOfTip) = 0;
             return _adjusterTooltip!.OriginalFunction(tip, widget, text, a4);
         });
@@ -61,22 +61,4 @@ internal static unsafe partial class GameFixes
 
     private static bool Holds(nint agency, nint operative) => agency != 0 && Native.PdxArray(agency + OperativesOfAgency).Contains(operative);
 
-    /// <summary>An aligned qword at <paramref name="at"/> can be read: committed, not no-access or guard.</summary>
-    private static bool Readable(nint at)
-    {
-        MemoryInfo info;
-        return VirtualQuery(at, &info, sizeof(MemoryInfo)) != 0 && info.State == 0x1000 && (info.Protect & 0x101) == 0; // MEM_COMMIT; PAGE_NOACCESS, PAGE_GUARD
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MemoryInfo // MEMORY_BASIC_INFORMATION
-    {
-        public nint BaseAddress, AllocationBase;
-        public uint AllocationProtect;
-        public nint RegionSize;
-        public uint State, Protect, Type;
-    }
-
-    [LibraryImport("kernel32.dll")]
-    private static partial nint VirtualQuery(nint address, MemoryInfo* info, nint size);
 }

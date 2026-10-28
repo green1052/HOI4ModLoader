@@ -61,7 +61,9 @@ public unsafe partial class AiAssist
 
     private const int StateOfAirBase = 0x68; // CAirBase: its state; none for a carrier's
 
-    private static bool OnCarrier(nint airbase) => airbase != 0 && *(nint*)(airbase + StateOfAirBase) == 0;
+    // 1.19.4 hands back base pointers that are no longer readable (it crashed the game); such a wing counts as a carrier's and is left alone.
+    private static bool OnCarrier(nint airbase) =>
+        airbase != 0 && (!Native.Readable(airbase + StateOfAirBase) || *(nint*)(airbase + StateOfAirBase) == 0);
 
     private const int IdleWingsHours = 24;
     private static int _idleWingsAt;

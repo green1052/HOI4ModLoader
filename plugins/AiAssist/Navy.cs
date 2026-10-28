@@ -105,7 +105,9 @@ public unsafe partial class AiAssist
         var data = *(nint**)list;
         var tag = 0;
         for (var i = 0; i < count && tag == 0; i++)
-            if (data[i] != 0 && Game.Resolve(*(long*)data[i]) is var r && r != 0 && *(long*)(r - ResolvedTaskForce + RefOfTaskForce) == *(long*)data[i])
+            // 1.19.4 resolves refs to objects this read runs off (it crashed the game), so the address is checked first.
+            if (data[i] != 0 && Game.Resolve(*(long*)data[i]) is var r && r != 0
+                && Native.Readable(r - ResolvedTaskForce + RefOfTaskForce) && *(long*)(r - ResolvedTaskForce + RefOfTaskForce) == *(long*)data[i])
                 tag = *(int*)(r - ResolvedTaskForce + ControllerOfTaskForce) is > 0 and var c ? c : *(int*)(r - ResolvedTaskForce + OwnerOfTaskForce);
         if (tag <= 0 || tag == Game.ControlledTag) return;
         var country = Game.Country(tag);

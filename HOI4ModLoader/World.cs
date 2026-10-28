@@ -592,7 +592,8 @@ public static unsafe class Construction
         var lineVTable = Sig.VTable(LineClass);
         foreach (var line in Native.PdxArray(production + LinesOfProduction))
         {
-            var building = line != 0 && *(nint*)line == lineVTable ? *(nint*)(line + BuildingOfLine) : 0;
+            // Readable first: a line the game already freed takes the vtable check's read off a mapped page (it crashed the game).
+            var building = line != 0 && Native.Readable(line) && *(nint*)line == lineVTable ? *(nint*)(line + BuildingOfLine) : 0;
             if (building != 0 && *(nint*)(building + TypeOfBuilding) == type) lines.Add((line, building));
         }
         return lines;

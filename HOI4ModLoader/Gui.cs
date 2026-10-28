@@ -30,7 +30,7 @@ public static unsafe partial class Gui
     /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none (or no window).</summary>
     public static nint FindTextBox(nint window, string name) =>
         // 1.19.4: skip the old HasInstantTextBox gate - it is now a type dispatch that faults on foreign window classes.
-        Find(window, FindTextBoxSlot, Name(name));
+        window == 0 ? 0 : Find(window, FindTextBoxSlot, Name(name)); // an item whose window is not built yet has none
 
     // Lookup names as game keys, made once and kept, since many lookups run every frame.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, nint> Names = new();

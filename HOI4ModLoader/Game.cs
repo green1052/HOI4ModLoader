@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -327,8 +328,27 @@ public static unsafe class Game
 }
 
 /// <summary>Readers for engine containers.</summary>
-public static unsafe class Native
+public static unsafe partial class Native
 {
+    /// <summary>An aligned qword at <paramref name="at"/> can be read: committed, not no-access or guard.</summary>
+    public static bool Readable(nint at)
+    {
+        MemoryInfo info;
+        return VirtualQuery(at, &info, sizeof(MemoryInfo)) != 0 && info.State == 0x1000 && (info.Protect & 0x101) == 0; // MEM_COMMIT; PAGE_NOACCESS, PAGE_GUARD
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryInfo // MEMORY_BASIC_INFORMATION
+    {
+        public nint BaseAddress, AllocationBase;
+        public uint AllocationProtect;
+        public nint RegionSize;
+        public uint State, Protect, Type;
+    }
+
+    [LibraryImport("kernel32.dll")]
+    private static partial nint VirtualQuery(nint address, MemoryInfo* info, nint size);
+
     /// <summary>The engine's fixed-point scale: 1.0 is 100000 (resources, scores, progress).</summary>
     public const long FixedPoint = 100_000;
 
