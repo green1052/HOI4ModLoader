@@ -18,33 +18,20 @@ public static unsafe class VersionLabel
     /// <summary>Main menu view (view, std::string* out): writes the "version_label" text.</summary>
     [Signature] public const string TextSig = "48 89 54 24 ? 53 48 83 EC 40 48 8B DA C7 44 24";
 
-    private const int WindowOfView = 0x4DE0;    // main menu view: the window holding "version_label" (1.19.4; the refresh fn reads [view+0x4DE0] before the Find)
-    private const int MaxHeight = 0xC4;        // CInstantTextBox: the .gui maxHeight
-
     [Function(CallingConventions.Microsoft)] public delegate nint TextFn(nint view, nint text);
 
     private static IHook<TextFn>? _hook;
     private static readonly Logger Log = new("VersionLabel");
-
-    private static string Tooltip() => $"HOI4ModLoader {Loader.Version}\n"
-        + (Updater.Installed is { } update ? Loc.Format("HOIMOD_UPDATE_INSTALLED", "{0} installed: restart the game to use it", update) + "\n" : "")
-        + (Loader.LoadedCount == 0
-        ? Loc.Get("HOIMOD_NO_PLUGINS", "No plugins loaded")
-        : string.Join("\n", Loader.LoadedPlugins.Select(p => $"- {Loader.Name(p)} {p.Version}")));
 
     internal static void Install()
     {
         _hook = Patches.Hook<TextFn>(Sig.Find(TextSig), (view, text) =>
         {
             var result = _hook!.OriginalFunction(view, text);
+            // shortcut: 1.19.4 also calls this builder with views whose "version_label" window is not safely
+            // walkable from a detour, so only the string is touched here — no window lookups, no tooltip.
             Log.Guard("version label", () =>
-            {
-                // shortcut: the type-parameterized HasInstantTextBox gate is unsafe on this window class in 1.19.4; Find (vtable slot 15) is the same call the game itself makes here
-                var box = Gui.Find(*(nint*)(view + WindowOfView), 15, "version_label");
-                var added = box != 0 && *(int*)(box + MaxHeight) >= 40 ? $"\nHOI4ModLoader {Loader.Version}" : " +";
-                Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // as bytes: the label is in the game's encoding
-                Gui.SetTooltip(box, Tooltip);
-            });
+                Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes($"\nHOI4ModLoader {Loader.Version}")]));
             return result;
         });
     }
