@@ -1,21 +1,99 @@
-# The window is 480 wide and its 4 tabs fill the top row, so the Mods tab sits in the free bottom row, between Back and Apply.
+${1}buttonType = {
+                name = "settings_tab_1"
+                position = { x = 25 y = 68 }
+                quadTextureSprite ="GFX_settings_ingame_tab"
+                scale = 0.82
+                clicksound = click_checkbox
+                oversound = ui_menu_over
+            }
+            instantTextBoxType = {
+                name = "settings_tab_1_text"
+                position = { x = 25 y = 74 }
+                font = "hoi_18mbs"
+                text = "SM_GAME"
+                maxWidth = 86
+                maxHeight = 20
+                format = centre
+                alwaystransparent = yes
+            }
+
+            buttonType = {
+                name = "settings_tab_2"
+                position = { x = 111 y = 68 }
+                quadTextureSprite ="GFX_settings_ingame_tab"
+                scale = 0.82
+                clicksound = click_checkbox
+                oversound = ui_menu_over
+            }
+            instantTextBoxType = {
+                name = "settings_tab_2_text"
+                position = { x = 111 y = 74 }
+                font = "hoi_18mbs"
+                text = "SM_VIDEO"
+                maxWidth = 86
+                maxHeight = 20
+                format = centre
+                alwaystransparent = yes
+            }
+
+            buttonType = {
+                name = "settings_tab_3"
+                position = { x = 198 y = 68 }
+                quadTextureSprite ="GFX_settings_ingame_tab"
+                scale = 0.82
+                clicksound = click_checkbox
+                oversound = ui_menu_over
+            }
+            instantTextBoxType = {
+                name = "settings_tab_3_text"
+                position = { x = 198 y = 74 }
+                font = "hoi_18mbs"
+                text = "SM_AUDIO"
+                maxWidth = 86
+                maxHeight = 20
+                format = centre
+                alwaystransparent = yes
+            }
+
+            buttonType = {
+                name = "settings_tab_4"
+                position = { x = 285 y = 68 }
+                quadTextureSprite ="GFX_settings_ingame_tab"
+                scale = 0.82
+                clicksound = click_checkbox
+                oversound = ui_menu_over
+            }
+            instantTextBoxType = {
+                name = "settings_tab_4_text"
+                position = { x = 285 y = 74 }
+                font = "hoi_16mbs"
+                text = "SETTINGS_ACCESSIBILITY"
+                maxWidth = 86
+                maxHeight = 20
+                format = centre
+                alwaystransparent = yes
+            }
+
             buttonType = {
                 name = "hoimod_mods_tab"
-                position = { x = 185 y = 470 }
+                position = { x = 371 y = 68 }
                 quadTextureSprite ="GFX_settings_ingame_tab"
+                scale = 0.82
                 clicksound = click_checkbox
                 oversound = ui_menu_over
             }
             instantTextBoxType = {
                 name = "hoimod_mods_tab_text"
-                position = { x = 185 y = 476 }
+                position = { x = 371 y = 74 }
                 font = "hoi_18mbs"
                 text = "Mods"
-                maxWidth = 110
+                maxWidth = 86
                 maxHeight = 20
                 format = centre
                 alwaystransparent = yes
             }
+
+            ${2}
 
             # HOI4ModLoader: the "Mods" tab's page (filled by the loader, HOI4ModLoader\SettingsMods.cs).
             instantTextBoxType = {

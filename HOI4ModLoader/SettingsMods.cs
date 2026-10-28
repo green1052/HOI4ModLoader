@@ -4,9 +4,9 @@ using System.Text;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
-// The settings window gets a fifth tab after the vanilla four; the vanilla tabs are left untouched.
+// The settings window gets a fifth tab, and the Mods page goes in after its Back button.
 [assembly: HOI4ModLoader.GuiPatch("interface/settings.gui", "gui/settings_mods.gui",
-    After = @"(?s)name = ""menu_settings_ingame"".*?name = ""settings_tab_4"".*?\n\t\t\t\}")]
+    Replace = @"(?s)(name = ""menu_settings_ingame"".*?)buttonType = \{\s*name = ""settings_tab_1"".*?name = ""settings_tab_4"".*?\n\t\t\t\}(.*?shortcut = ""ESCAPE""\s*\})")]
 
 namespace HOI4ModLoader;
 
@@ -33,7 +33,7 @@ internal static unsafe class SettingsMods
     [VTable] public const string CheckBoxGlue = "?$CLegacyCheckBoxObserverGlue@VCSettingsScreen@@";
 
     /// <summary>Button observer: { vtable, 20 std::function slots (64 bytes each), slot 0 = click }.</summary>
-    [VTable] public const string ButtonGlue = "CButtonObserverGlue";
+    [VTable] public const string ButtonGlue = "?$CLegacyButtonObserverGlue@VCSettingsScreen@@";
 
     /// <summary>std::function impl of a bound member call: _Do_call jumps to [impl+8] with rcx = [impl+16].</summary>
     [VTable] public const string MemberCall = "?$_Func_impl_no_alloc@V?$_Binder@U_Unforced@std@@AEAP8CSettingsScreen@@EAAXXZPEAV3@@std@@X$$V@std";
@@ -113,7 +113,7 @@ internal static unsafe class SettingsMods
         var tabText = Gui.FindTextBox(dialog, "hoimod_mods_tab_text");
         if (tabText != 0) Gui.SetText(tabText, Loc.Get("HOIMOD_MODS_TAB", "Mods"));
         Visible(_page, false);
-        Log.Info("Mods tab added");
+        Log.Info($"Mods tab added: tab 0x{_tab:X} text 0x{tabText:X} page 0x{_page:X}");
 
         for (var row = 0; row < PluginRows; row++)
         {
@@ -147,6 +147,7 @@ internal static unsafe class SettingsMods
     [UnmanagedCallersOnly]
     private static void OnTab(nint unused) => Guard(() =>
     {
+        Log.Info("Mods tab clicked");
         if (*(nint*)(_screen + ShownTab) != _page) ShowPage();
     });
 
@@ -437,7 +438,7 @@ internal static unsafe class SettingsMods
 
     private static void BindButton(nint button, delegate* unmanaged<nint, void> handler, nint cookie)
     {
-        var glue = Allocator.AllocZeroed(8 + 20 * 64);
+        var glue = Allocator.AllocZeroed(0x600); // 1.19.4 glue ctor (sub_141A47E80) builds 0x588 bytes
         *(nint*)glue = Sig.VTable(ButtonGlue);
         *(nint*)(glue + 8) = Sig.VTable(MemberCall); // slot 0 (click): std::function calling handler(cookie)
         *(nint*)(glue + 16) = (nint)handler;

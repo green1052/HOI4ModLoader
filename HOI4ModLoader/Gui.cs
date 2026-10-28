@@ -20,7 +20,7 @@ public static unsafe partial class Gui
     private const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
     private const int ShowSlot = 15, HideSlot = 16, Flags = 117, HiddenFlag = 0x10; // GUI object: Show(), Hide(), flags byte
     private const int TextOffset = 0x110; // CInstantTextBox: std::string text
-    private const int SetTooltipHandlerSlot = 69; // GUI object: SetTooltipHandler(CTooltipHandler*)
+    private const int SetTooltipHandlerSlot = 71; // CInstantTextBox vtable: SetTooltipHandler(CTooltipHandler*), stores it at +80
 
     private static delegate* unmanaged<nint, nint, void> _setText;
     private static nint _tooltipVTable;                       // CTooltipHandler vtable: { BuildTooltip, destructor }
