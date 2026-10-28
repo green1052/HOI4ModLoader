@@ -18,7 +18,7 @@ public static unsafe class VersionLabel
     /// <summary>Main menu view (view, std::string* out): writes the "version_label" text.</summary>
     [Signature] public const string TextSig = "48 89 54 24 ? 53 48 83 EC 40 48 8B DA C7 44 24";
 
-    private const int WindowOfView = 18144;    // main menu view: its window
+    private const int WindowOfView = 0x4DE0;    // main menu view: the window holding "version_label" (1.19.4; the refresh fn reads [view+0x4DE0] before the Find)
     private const int MaxHeight = 0xC4;        // CInstantTextBox: the .gui maxHeight
 
     [Function(CallingConventions.Microsoft)] public delegate nint TextFn(nint view, nint text);
