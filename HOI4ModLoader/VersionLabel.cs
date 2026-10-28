@@ -39,7 +39,8 @@ public static unsafe class VersionLabel
             var result = _hook!.OriginalFunction(view, text);
             Log.Guard("version label", () =>
             {
-                var box = Gui.FindTextBox(*(nint*)(view + WindowOfView), "version_label");
+                // shortcut: the type-parameterized HasInstantTextBox gate is unsafe on this window class in 1.19.4; Find (vtable slot 15) is the same call the game itself makes here
+                var box = Gui.Find(*(nint*)(view + WindowOfView), 15, "version_label");
                 var added = box != 0 && *(int*)(box + MaxHeight) >= 40 ? $"\nHOI4ModLoader {Loader.Version}" : " +";
                 Native.SetMsvcString(text, [.. Native.MsvcString(text), .. Encoding.UTF8.GetBytes(added)]); // as bytes: the label is in the game's encoding
                 Gui.SetTooltip(box, Tooltip);
