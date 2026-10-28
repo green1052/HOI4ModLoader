@@ -55,7 +55,7 @@ internal static unsafe class SettingsMods
     private static bool _reportedMissing, _tooMany;
 
     /// <summary>Widgets of the last built Mods page.</summary>
-    private static nint _screen, _page, _list, _settings, _tab, _title, _listTitle, _prev, _next, _pageText;
+    private static nint _screen, _builtRoot, _page, _list, _settings, _tab, _title, _listTitle, _prev, _next, _pageText;
     private static readonly nint[] PluginBoxes = new nint[PluginRows], PluginTitles = new nint[PluginRows], PluginArrows = new nint[PluginRows];
     private static readonly nint[] Rows = new nint[SettingRows];
 
@@ -78,8 +78,7 @@ internal static unsafe class SettingsMods
         _open = Patches.Hook<OpenFn>(open, screen =>
         {
             var result = _open!.OriginalFunction(screen);
-            if (_page == 0) Guard(() => Build(screen)); // first open: the window (0x6798) only exists now, not at the ctor
-            else if (screen == _screen && *(nint*)(screen + ShownTab) == _page) Guard(ShowPage); // reopened on our tab
+            Guard(() => Build(screen)); // every open: the game recreates the settings window (sub_141A4E0E0), so bind its new widgets
             return result;
         });
         _updateTabs = Patches.Hook<TabsFn>(updateTabs, screen =>
@@ -93,27 +92,29 @@ internal static unsafe class SettingsMods
 
     private static void Build(nint screen)
     {
-        // shortcut: 1.19.4's settings root at +0x6798 is a wrapper whose vtable only safely takes the game's own
-        // window Find (slot 55); typed finds (slots 13/15) go to the menu_settings_ingame dialog it contains.
         var root = *(nint*)(screen + RootOfScreen);
-        var dialog = root == 0 ? 0 : Gui.Find(root, WindowSlot, "menu_settings_ingame");
-        if (dialog == 0 || Gui.FindTextBox(dialog, "hoimod_ui") == 0)
+        if (root == 0 || Gui.FindTextBox(root, "hoimod_ui") == 0)
         {
             if (!_reportedMissing) Log.Info("no Mods tab: the settings window isn't HOI4ModLoader\\ui's (see GameFiles in this log)");
             _reportedMissing = true;
             return;
         }
+        if (root == _builtRoot) return; // 1.19.4 keeps the window between opens; binding it again would double every observer
+        _builtRoot = root;
         _screen = screen;
-        _page = Gui.Find(dialog, WindowSlot, "menu_settings_MODS");
+        // The shown tab survives the window; if it was our (now freed) page, OnOpen showed nothing, so show the new one.
+        var wasMods = *(nint*)(screen + ShownTab) == _page;
+        if (wasMods) *(nint*)(screen + ShownTab) = 0;
+        _page = Gui.Find(root, WindowSlot, "menu_settings_MODS");
         _list = Gui.Find(_page, WindowSlot, "hoimod_mods_list");
         _settings = Gui.Find(_page, WindowSlot, "hoimod_mods_settings");
         _title = Gui.FindTextBox(_settings, "hoimod_settings_title");
         _listTitle = Gui.FindTextBox(_list, "hoimod_mods_title");
-        _tab = Gui.Find(dialog, ButtonSlot, "hoimod_mods_tab");
-        var tabText = Gui.FindTextBox(dialog, "hoimod_mods_tab_text");
+        _tab = Gui.Find(root, ButtonSlot, "hoimod_mods_tab");
+        var tabText = Gui.FindTextBox(root, "hoimod_mods_tab_text");
         if (tabText != 0) Gui.SetText(tabText, Loc.Get("HOIMOD_MODS_TAB", "Mods"));
         Visible(_page, false);
-        Log.Info($"Mods tab added: tab 0x{_tab:X} text 0x{tabText:X} page 0x{_page:X}");
+        Log.Info($"Mods tab added: root 0x{root:X} tab 0x{_tab:X} page 0x{_page:X}");
 
         for (var row = 0; row < PluginRows; row++)
         {
@@ -142,6 +143,7 @@ internal static unsafe class SettingsMods
         BindButton(_prev, &OnTurnPage, -1);
         BindButton(_next, &OnTurnPage, +1);
         BindButton(_tab, &OnTab, 0);
+        if (wasMods) ShowPage();
     }
 
     [UnmanagedCallersOnly]
