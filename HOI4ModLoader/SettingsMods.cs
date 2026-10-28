@@ -93,7 +93,9 @@ internal static unsafe class SettingsMods
 
     private static void Build(nint screen)
     {
-        var root = *(nint*)(screen + RootOfScreen);
+        // shortcut: 1.19.4 keeps the dialog at +0x6798 but Finds through its +0x30 subobject (see the game's own call
+        // in the Open function); Find on the wrapper itself faults.
+        var root = *(nint*)(screen + RootOfScreen) + 0x30;
         if (root == 0 || Gui.FindTextBox(root, "hoimod_ui") == 0)
         {
             if (!_reportedMissing) Log.Info("no Mods tab: the settings window isn't HOI4ModLoader\\ui's (see GameFiles in this log)");

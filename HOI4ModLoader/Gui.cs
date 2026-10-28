@@ -13,7 +13,8 @@ public static unsafe partial class Gui
     /// <summary>CInstantTextBox::SetText(box, std::string*): moves the string in (freeing the old text) and re-lays it out.</summary>
     [Signature] public const string SetTextSig = "48 89 5C 24 ? 48 89 74 24 ? 48 89 54 24 ? 57 48 83 EC 20 48 8B F2";
 
-    /// <summary>HasInstantTextBox by widget type: (window, std::string* name, type) -> bool. Type 0x6B is the container-window path.</summary>
+    /// <summary>1.19.4's type-keyed HasInstantTextBox faults on window classes outside its dispatch, so this is no
+    /// longer called; kept so a game update that moves it still fails the signature test.</summary>
     [Signature] public const string HasTextBoxSig = "48 8B C2 41 83 F8 6B 74 35 41 81 F8 92 00 00 00 74 20 41 81 F8 EA 29 00 00";
 
     private const int FindTextBoxSlot = 15; // CContainerWindow vtable: instantTextBox by name (std::string*, bool logIfMissing); never null
@@ -22,21 +23,14 @@ public static unsafe partial class Gui
     private const int SetTooltipHandlerSlot = 69; // GUI object: SetTooltipHandler(CTooltipHandler*)
 
     private static delegate* unmanaged<nint, nint, void> _setText;
-    private const int ContainerWindowType = 0x6B; // 1.19.4: HasInstantTextBox became a type dispatch; 0x6B reads the container lists
-    private static delegate* unmanaged<nint, nint, int, byte> _hasTextBox;
     private static nint _tooltipVTable;                       // CTooltipHandler vtable: { BuildTooltip, destructor }
     private static readonly Dictionary<nint, nint> TooltipHandlers = [];      // widget -> its handler { vtable, widget }
     private static readonly Dictionary<nint, Func<string>> TooltipTexts = []; // widget -> its text
 
     /// <summary>The instantTextBox named <paramref name="name"/> in <paramref name="window"/>, or 0 if it has none (or no window).</summary>
-    public static nint FindTextBox(nint window, string name)
-    {
-        if (window == 0) return 0; // a native null read would crash the game
-        // ReSharper disable once ConvertIfStatementToNullCoalescingAssignment (no ??= for function pointers)
-        if (_hasTextBox == null) _hasTextBox = (delegate* unmanaged<nint, nint, int, byte>)Sig.Find(HasTextBoxSig);
-        var str = Name(name);
-        return _hasTextBox(window, str, ContainerWindowType) == 0 ? 0 : Find(window, FindTextBoxSlot, str);
-    }
+    public static nint FindTextBox(nint window, string name) =>
+        // 1.19.4: skip the old HasInstantTextBox gate - it is now a type dispatch that faults on foreign window classes.
+        Find(window, FindTextBoxSlot, Name(name));
 
     // Lookup names as game strings, made once and kept, since many lookups run every frame.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, nint> Names = new();
@@ -49,7 +43,7 @@ public static unsafe partial class Gui
     /// </summary>
     public static nint Find(nint window, int slot, string name) => window == 0 ? 0 : Find(window, slot, Name(name));
 
-    private static nint Find(nint window, int slot, nint name) => ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[slot])(window, name, 0);
+    private static nint Find(nint window, int slot, nint name) => ((delegate* unmanaged<nint, nint, byte, nint>)(*(nint**)window)[slot])(window, name, 1); // 1 like the game's own calls; 0 walks uninitialized entries on 1.19.4 and faults
 
     /// <summary>The text box's current text (the game's bytes; valid until its text changes).</summary>
     public static ReadOnlySpan<byte> Text(nint textBox) => Native.MsvcString(textBox + TextOffset);
