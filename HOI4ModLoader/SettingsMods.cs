@@ -4,9 +4,9 @@ using System.Text;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
-// The settings window gets a fifth tab, and the Mods page goes in after its Back button.
+// The settings window gets a fifth tab after the vanilla four; the vanilla tabs are left untouched.
 [assembly: HOI4ModLoader.GuiPatch("interface/settings.gui", "gui/settings_mods.gui",
-    Replace = @"(?s)(name = ""menu_settings_ingame"".*?)buttonType = \{\s*name = ""settings_tab_1"".*?name = ""settings_tab_4"".*?\n\t\t\t\}(.*?shortcut = ""ESCAPE""\s*\})")]
+    After = @"(?s)name = ""menu_settings_ingame"".*?name = ""settings_tab_4"".*?\n\t\t\t\}")]
 
 namespace HOI4ModLoader;
 
@@ -95,7 +95,7 @@ internal static unsafe class SettingsMods
     {
         // shortcut: 1.19.4 keeps the dialog at +0x6798 but Finds through its +0x30 subobject (see the game's own call
         // in the Open function); Find on the wrapper itself faults.
-        var root = *(nint*)(screen + RootOfScreen) + 0x30;
+        var root = *(nint*)(screen + RootOfScreen); // the game Finds through this window directly (Open: vtable slot 55)
         if (root == 0 || Gui.FindTextBox(root, "hoimod_ui") == 0)
         {
             if (!_reportedMissing) Log.Info("no Mods tab: the settings window isn't HOI4ModLoader\\ui's (see GameFiles in this log)");
