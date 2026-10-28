@@ -2,7 +2,7 @@
 
 A C# plugin loader for Hearts of Iron IV, in the spirit of BepInEx. It changes no game files: everything happens in memory while the game runs.
 
-The bundled plugins add quality-of-life features: a national focus queue, auto construction, auto trade, air wings for field marshals and more.
+The bundled plugins add quality-of-life features: national focus and research queues, auto construction, auto trade, air wings for field marshals and more.
 
 ## Requirements
 - Hearts of Iron IV **1.19.4** (Steam, Windows 64-bit)
@@ -33,7 +33,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 ## Plugins
 | Plugin | What it does | Multiplayer |
 |---|---|---|
-| Queues | National focus queue: Shift+click focuses to reserve them, numbers show the order | ✅ |
+| Queues | National focus and research queues: Shift+click to reserve, numbers show the order | ✅ |
 | AutoConstruction | Auto construction targets per building, auto supply, auto production | ✅ |
 | AutoTrade | Imports resources you are short of (oil by your fuel), cuts imports you no longer need, draws your trade routes | ✅ |
 | FrontLine | Front line micro (rotation, plugging, cordons, escape, attacks, reserves) plus battle plan and operation (blitz, pincer) hotkeys | ✅ |
@@ -46,10 +46,10 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | DiscordPresence | Your country and the game date in your Discord status | ✅ |
 
 ### Queues
-**Shift+click** a national focus to reserve it, again to unqueue it. Queued focuses show their position as a number before their name.
-- The first queued focus starts as soon as the focus slot is free.
+**Shift+click** a national focus or a technology to reserve it, again to unqueue it. Queued entries show their position as a number (before the focus name, or on the tech's bonus line).
+- The first queued focus starts as soon as the focus slot is free; queued techs fill research slots the same way.
 - Unqueueing a focus also unqueues the queued focuses that need it.
-- Focuses that can no longer start are dropped.
+- Focuses that can no longer start are dropped; fully researched techs leave the queue.
 
 ### AutoConstruction
 In the construction tab, **Shift+click** a building to raise its auto construction target by 1, **Ctrl+Shift+click** by 5, **Ctrl+click** to lower it by 1, **Alt+click** to turn it off and take its lines not started yet out of the queue.

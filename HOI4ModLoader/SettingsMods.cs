@@ -17,7 +17,7 @@ namespace HOI4ModLoader;
 /// </summary>
 internal static unsafe class SettingsMods
 {
-    /// <summary>CSettingsScreen ctor(screen, window, mode): stores the window and binds its buttons and checkboxes, once per menu.</summary>
+    /// <summary>CSettingsScreen ctor(screen, ?, mode) — not hooked (1.19.4: the settings window only exists once Open runs; Build moved there), kept so a game update that moves the ctor still fails this test.</summary>
     [Signature] public const string InitSig = "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 C0 FA FF FF 48 81 EC 40 06 00 00 4D 8B F0 48 8B F2 4C 8B F9 48 8D 05 ? ? ? ? 48 89 01";
 
     /// <summary>CSettingsScreen::UpdateTabButtons(screen): selects the shown tab's button.</summary>
@@ -38,18 +38,16 @@ internal static unsafe class SettingsMods
     /// <summary>std::function impl of a bound member call: _Do_call jumps to [impl+8] with rcx = [impl+16].</summary>
     [VTable] public const string MemberCall = "?$_Func_impl_no_alloc@V?$_Binder@U_Unforced@std@@AEAP8CSettingsScreen@@EAAXXZPEAV3@@std@@X$$V@std";
 
-    private const int RootOfScreen = 0x4288, ShownTab = 0x6760; // CSettingsScreen: its window, the shown tab container
+    private const int RootOfScreen = 0x6798, ShownTab = 0x6760; // CSettingsScreen: its (live) window — only set once settings open —, the shown tab container
     private const int ButtonSlot = 13, CheckBoxSlot = 21, WindowSlot = 55;
     private const int ShowSlot = 15, HideSlot = 16, WidgetOfWindow = 48; // a container's GUI object, its Show()/Hide()
     private const int SetFrameSlot = 22;                              // button: SetFrame(1 selected, 2 not)
     private const int CheckState = 176, Observers = 128, AddObserverSlot = 1; // CCheckBox: state (bit 0 = checked), observer list
     private const int PluginRows = 18, SettingRows = 8;
 
-    [Function(CallingConventions.Microsoft)] public delegate nint InitFn(nint screen, nint window, nint mode);
     [Function(CallingConventions.Microsoft)] public delegate nint TabsFn(nint screen);
     [Function(CallingConventions.Microsoft)] public delegate nint OpenFn(nint screen);
 
-    private static IHook<InitFn>? _init;
     private static IHook<TabsFn>? _updateTabs;
     private static IHook<OpenFn>? _open;
     private static delegate* unmanaged<nint, void> _checkBoxSprite;
@@ -75,18 +73,13 @@ internal static unsafe class SettingsMods
         // Resolve everything before hooking, so a broken signature leaves no half-installed tab.
         _checkBoxSprite = (delegate* unmanaged<nint, void>)Sig.Find(CheckBoxSpriteSig);
         _ = Sig.VTable(CheckBoxGlue) + Sig.VTable(ButtonGlue) + Sig.VTable(MemberCall);
-        var (init, open, updateTabs) = (Sig.Find(InitSig), Sig.Find(OpenSig), Sig.Find(UpdateTabsSig));
+        var (open, updateTabs) = (Sig.Find(OpenSig), Sig.Find(UpdateTabsSig));
 
-        _init = Patches.Hook<InitFn>(init, (screen, window, mode) =>
-        {
-            var result = _init!.OriginalFunction(screen, window, mode);
-            Guard(() => Build(screen));
-            return result;
-        });
         _open = Patches.Hook<OpenFn>(open, screen =>
         {
             var result = _open!.OriginalFunction(screen);
-            if (screen == _screen && _page != 0 && *(nint*)(screen + ShownTab) == _page) Guard(ShowPage); // reopened on our tab
+            if (_page == 0) Guard(() => Build(screen)); // first open: the window (0x6798) only exists now, not at the ctor
+            else if (screen == _screen && *(nint*)(screen + ShownTab) == _page) Guard(ShowPage); // reopened on our tab
             return result;
         });
         _updateTabs = Patches.Hook<TabsFn>(updateTabs, screen =>

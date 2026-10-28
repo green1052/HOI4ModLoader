@@ -1,2 +1,2 @@
 l_english:
-    com.green1052.queues.desc:0 "Queue national focuses with Shift+click; each starts as soon as the focus slot is free.\n- Shift+click: queue or unqueue (a number shows its place)\n- Unqueueing a focus also unqueues the queued focuses that need it\nWorks in multiplayer."
+    com.green1052.queues.desc:0 "Queue national focuses and technologies with Shift+click; each starts as soon as its slot is free.\n- Shift+click: queue or unqueue (a number shows its place)\n- Unqueueing a focus also unqueues the queued focuses that need it\nWorks in multiplayer."
