@@ -13,20 +13,14 @@ public static class Signatures
     /// </summary>
     [Signature] public const string FocusClick = "48 85 D2 0F 84 ? ? ? ? 48 8B C4 48 89 58 08 48 89 68 18 48 89 70 20 57 41 56 41 57 48 81 EC B0 00 00 00";
 
-    /// <summary>
-    /// CNationalFocusView::UpdateNodeStates(view, float dt, cache): updates every focus item, every frame while the tree is
-    /// open. Item names are set only once, when the items are built.
-    /// </summary>
-    [Signature] public const string FocusUpdateNodeStates = "48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC 98 05 00 00 4C 8B F9 33 C0 89 44 24 30 89 85 F8 04 00 00";
-
     /// <summary>CNationalFocusProgress::IsCompleted(progress, CNationalFocus*) -> bool.</summary>
     [Signature] public const string FocusCompleted = "48 89 54 24 10 48 83 EC 28 48 83 C1 58 4C 8D 44 24 38 48 8D 54 24 30 E8";
 
     /// <summary>
-    /// Tech tree click handler (view, event): reads the clicked tech from the event. 1.19.4 has a single click path; the
-    /// 1.19.3 "TechClick" twin no longer exists (no other handler in the cluster reads the event's tech).
+    /// CCountryTechTreeView tech click handler (view, event): takes the CResearchStatus from the event (+8) and starts its
+    /// research. Its twin right before it only scrolls the tree to the tech, so only this one is hooked.
     /// </summary>
-    [Signature] public const string XorTechClick = "40 55 56 48 83 EC 28 80 3D";
+    [Signature] public const string XorTechClick = "40 56 57 48 83 EC 58 80 3D ? ? ? ? 00 48 8B F9 48 8B 72 08 74 ? 48 85 F6 74 ? 48 8B 0D ? ? ? ? 48 85 C9 74 ? 48 8B 89 08 05 00 00 48 8B 01 FF 50 38 84 C0";
 
     /// <summary>
     /// CCountryTechTreeView::UpdateAllItemStates(view): re-runs every displayed tech item's state, and so its bonus text.
@@ -49,9 +43,9 @@ public unsafe class Queues : Plugin
 {
     // Layouts for HOI4 1.19.4.
     private const int FocusOfCountry = 0x1380, FocusInProgress = 0x10;    // CCountry -> focus progress -> CNationalFocus* (null = idle)
-    private const int FocusItems = 0x3B80, FocusOfItem = 0x20;            // CNationalFocusView items; CNationalFocusTreeItem -> CNationalFocus
-    // shortcut: 0x5F0 is the pointer passed as the popup's country; if wrong, shift-click only degrades to a normal click
-    private const int ViewedCountryOfFocusView = 0x5F0, TagOfCountry = 8; // CCountry* shown, null = the player
+    private const int FocusItems = 0x39B8, FocusOfItem = 0x20;            // CNationalFocusView items (measured on 1.19.4); CNationalFocusTreeItem -> CNationalFocus
+    // shortcut: 0x3A60 is the only slot holding the shown country on 1.19.4 (measured); if wrong, shift-click only degrades to a normal click
+    private const int ViewedCountryOfFocusView = 0x3A60; // CCountry* shown, null = the player
     private const int Prerequisites = 0x570, FocusesOfGroup = 8;          // CNationalFocus: CPdxArray of prerequisite blocks (AND), each a CPdxArray of focuses (OR)
     private const int MutuallyExclusive = 0x588;                          // CNationalFocus: CPdxArray of blocks like the prerequisites'
     private const int WindowOfItem = 0x10;                                // focus tree and tech tree items: their window
@@ -63,18 +57,17 @@ public unsafe class Queues : Plugin
     private const int StatusOfEvent = 8, TechOfStatus = 0x160;            // click event -> CResearchStatus -> CTechnology*
     private const int Statuses = 0x88, IndexOfTech = 0x38, LevelOfStatus = 0x174, MaxLevel = 0x3DC; // CResearch status table; CTechnology
     private const int StatusOfTechItem = 0xC8, StateOfTechItem = 0xD0, TechResearching = 5; // CTechnologyTreeTechItem
-    private const int ViewOfTechItem = 0x30, ViewedTagOfTechView = 0x1AA0; // item -> view; int tag shown, <= 0 = the player
-    private const int TechItems = 0x2788, TechItemCount = 0x27AC;         // CCountryTechTreeView: item pointers, count
+    private const int ViewedTagOfTechView = 0x2830;                       // int tag shown, <= 0 = the player
+    // CCountryTechTreeView (1.19.4, from its UpdateAllItemStates): entries of 40 bytes, each holding its item at +16.
+    private const int TechItems = 0x2800, TechItemCount = 0x280C, TechEntrySize = 40, ItemOfEntry = 16;
     private const int ResearchSlot = 56, ResearchBonus = 60;              // CSetResearchCommand fields after the target
     private const long SentTimeoutMs = 30_000;                            // a sent command not running by then failed: drop the entry
 
     [Function(CallingConventions.Microsoft)] public delegate void FocusClickFn(nint view, nint focus, byte a3, nint a4);
-    [Function(CallingConventions.Microsoft)] public delegate void NodeStatesFn(nint view, float dt, nint cache);
     [Function(CallingConventions.Microsoft)] public delegate nint TechClickFn(nint view, nint ev);
     [Function(CallingConventions.Microsoft)] public delegate void EntryFn(nint view);
 
     private IHook<FocusClickFn>? _focusClick;
-    private IHook<NodeStatesFn>? _focusNodeStates;
     private IHook<TechClickFn>? _xorTechClick;
     private IHook<EntryFn>? _techViewUpdateAllItems;
     private delegate* unmanaged<nint, nint, byte> _focusCompleted;
@@ -82,11 +75,11 @@ public unsafe class Queues : Plugin
     private readonly Queue _focus = new("focus", Signatures.FocusCommand, 0x38);
     private readonly Queue _research = new("research", Signatures.ResearchCommand, 0x40);
     private PerGame _game = null!;
+    private nint _focusView, _techView; // the trees' views, from their click handlers; checked for life before each use
 
     public override void Load()
     {
         var focusClick = Sig.Find(Signatures.FocusClick);
-        var focusNodeStates = Sig.Find(Signatures.FocusUpdateNodeStates);
         _focusCompleted = (delegate* unmanaged<nint, nint, byte>)Sig.Find(Signatures.FocusCompleted);
         _game = new PerGame(() => // another game or country: queued pointers no longer apply
         {
@@ -99,15 +92,17 @@ public unsafe class Queues : Plugin
         {
             _game.Check();
             var viewed = *(nint*)(view + ViewedCountryOfFocusView);
-            var ours = viewed == 0 || *(int*)(viewed + TagOfCountry) == Game.ControlledTag; // another country's tree: never queued (it could never start)
-            if (!ours || focus == 0 || !Gui.ShiftHeld) _focusClick!.OriginalFunction(view, focus, a3, a4);
-            else if (_focus.Items.Contains(focus)) UnqueueFocus(focus);
+            // Compared as a pointer: the tag offset is the loader's, this one is the view's own slot.
+            var ours = viewed == 0 || viewed == Game.Country(Game.ControlledTag); // another country's tree: never queued (it could never start)
+            if (!ours || focus == 0 || !Gui.ShiftHeld)
+            {
+                _focusClick!.OriginalFunction(view, focus, a3, a4);
+                return;
+            }
+            if (_focus.Items.Contains(focus)) UnqueueFocus(focus);
             else Toggle(_focus, focus);
-        });
-        _focusNodeStates = Patches.Hook<NodeStatesFn>(focusNodeStates, (view, dt, cache) =>
-        {
-            _focusNodeStates!.OriginalFunction(view, dt, cache);
-            Log.Guard("focus numbers", (this, view), static s => s.Item1.LabelFocuses(s.view));
+            _focusView = view; // live here; Pump re-stamps the numbers from it while the tree stays open
+            LabelFocuses(view);
         });
         _xorTechClick = Patches.Hook<TechClickFn>(Sig.Find(Signatures.XorTechClick), (view, ev) =>
             ShiftQueuesTech(view, ev) ? 0 : _xorTechClick!.OriginalFunction(view, ev));
@@ -126,31 +121,32 @@ public unsafe class Queues : Plugin
         if (status == 0 || !Gui.ShiftHeld) return false;
         _game.Check();
         Toggle(_research, *(nint*)(status + TechOfStatus));
-        _techViewUpdateAllItems!.OriginalFunction(view); // refresh the tree; LabelTechs follows in the hook
+        _techView = view; // live here; Pump re-stamps the numbers from it while the tree stays open
+        _techViewUpdateAllItems!.OriginalFunction(view); // lays the items out again, then:
+        LabelTechs(view);
         return true;
     }
 
     /// <summary>Puts a queued tech's place on its freshly re-set "bonus" text, showing it if hidden.</summary>
     private void LabelTechs(nint view)
     {
-        var items = *(nint*)(view + TechItems);
+        var entries = *(nint*)(view + TechItems);
         var count = *(int*)(view + TechItemCount);
-        for (var i = 0; i < count && items != 0; i++) LabelTech(*(nint*)(items + 8 * i));
+        var viewed = *(int*)(view + ViewedTagOfTechView);
+        if (entries == 0 || viewed > 0 && viewed != Game.ControlledTag) return;
+        for (var i = 0; i < count; i++) LabelTech(*(nint*)(entries + TechEntrySize * i + ItemOfEntry));
     }
 
     private void LabelTech(nint item)
     {
-        var status = *(nint*)(item + StatusOfTechItem);
-        var view = *(nint*)(item + ViewOfTechItem);
-        if (status == 0 || view == 0) return;
-        var viewed = *(int*)(view + ViewedTagOfTechView);
-        if (viewed > 0 && viewed != Game.ControlledTag) return;
-        var position = _research.Items.IndexOf(*(nint*)(status + TechOfStatus)) + 1;
-        if (position == 0 || *(int*)(item + StateOfTechItem) == TechResearching) return;
+        var status = item == 0 ? 0 : *(nint*)(item + StatusOfTechItem);
+        if (status == 0) return;
+        // shortcut: an unqueued tech's box stays shown until the game next lays the item out; it then holds its own text again.
+        var position = *(int*)(item + StateOfTechItem) == TechResearching ? 0 : _research.Items.IndexOf(*(nint*)(status + TechOfStatus)) + 1;
         var box = Gui.FindTextBox(*(nint*)(item + WindowOfItem), "bonus"); // every item but secret weapons has one
         if (box == 0) return;
         Gui.Number(box, position);
-        if (Gui.IsHidden(box)) Gui.Show(box);
+        if (position > 0 && Gui.IsHidden(box)) Gui.Show(box);
     }
 
     /// <summary>
@@ -160,7 +156,7 @@ public unsafe class Queues : Plugin
     private void LabelFocuses(nint view)
     {
         var viewed = *(nint*)(view + ViewedCountryOfFocusView);
-        if (viewed != 0 && *(int*)(viewed + TagOfCountry) != Game.ControlledTag) return;
+        if (viewed != 0 && viewed != Game.Country(Game.ControlledTag)) return;
         foreach (var item in Native.PdxArray(view + FocusItems))
         {
             var position = _focus.Items.IndexOf(*(nint*)(item + FocusOfItem)) + 1;
@@ -252,6 +248,21 @@ public unsafe class Queues : Plugin
         // After the running checks above, which take an entry off when it starts.
         Drop(_research, tech => research != 0 && Researched(research, tech));
         Drop(_focus, f => Unreachable(focus, f));
+        LabelOpenFocusTree();
+        if (_techView != 0 && Native.Readable(_techView + TechItemCount) && *(int*)(_techView + TechItemCount) is > 0 and < 10000)
+            LabelTechs(_techView);
+    }
+
+    /// <summary>
+    /// Re-stamps the numbers on the focus tree the player last shift-clicked. 1.19.4 has no working per-frame hook for it, so
+    /// the view is kept from the click handler and only used while it still shows the player's country (closed or freed: not).
+    /// </summary>
+    private void LabelOpenFocusTree()
+    {
+        var view = _focusView;
+        if (view == 0 || !Native.Readable(view + ViewedCountryOfFocusView) || !Native.Readable(view + FocusItems + 0xC)) return;
+        if (*(nint*)(view + ViewedCountryOfFocusView) != Game.Country(Game.ControlledTag)) return;
+        LabelFocuses(view);
     }
 
     /// <summary>Unqueues the entries that can no longer start.</summary>
