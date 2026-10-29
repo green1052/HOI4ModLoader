@@ -18,9 +18,11 @@ public static unsafe class VersionLabel
     /// <summary>Main menu view (view, std::string* out): writes the "version_label" text.</summary>
     [Signature] public const string TextSig = "48 89 54 24 ? 53 48 83 EC 40 48 8B DA C7 44 24";
 
+    /// <summary>CContainerWindow: the window type the label lives in.</summary>
+    [VTable] public const string ContainerWindow = "CContainerWindow";
+
     private const int WindowOfView = 0x4DE0;    // main menu view: the window holding "version_label"
     private const int MaxHeight = 0xC4;        // CInstantTextBox: the .gui maxHeight
-    private static readonly nint Image = System.Diagnostics.Process.GetCurrentProcess().MainModule!.BaseAddress; // ASLR: RVAs are relative to it
 
     [Function(CallingConventions.Microsoft)] public delegate nint TextFn(nint view, nint text);
 
@@ -39,7 +41,7 @@ public static unsafe class VersionLabel
     private static bool LooksLikeGuiWindow(nint window)
     {
         if (window == 0) return false;
-        return *(nint*)window == Image + 0x2BB9FE0; // CContainerWindow vtable
+        return *(nint*)window == Sig.VTable(ContainerWindow);
     }
 
     private static readonly HashSet<string> Logged = []; // one line per distinct outcome, to keep the log clean
@@ -54,7 +56,7 @@ public static unsafe class VersionLabel
             {
                 var window = *(nint*)(view + WindowOfView);
                 var vtable = window != 0 ? *(nint*)window : 0;
-                if (!LooksLikeGuiWindow(window)) { Say($"skip: view 0x{view:X} window 0x{window:X} vtable 0x{vtable:X} (container vtable 0x{Image + 0x2BB9FE0:X})"); return; }
+                if (!LooksLikeGuiWindow(window)) { Say($"skip: view 0x{view:X} window 0x{window:X} vtable 0x{vtable:X} (container vtable 0x{Sig.VTable(ContainerWindow):X})"); return; }
                 var box = Gui.Find(window, 15, "version_label");
                 Say($"found: window 0x{window:X} box 0x{box:X} maxHeight {(box != 0 ? *(int*)(box + MaxHeight) : -1)}");
                 var added = box != 0 && *(int*)(box + MaxHeight) >= 40 ? $"\nHOI4ModLoader {Loader.Version}" : " +";
