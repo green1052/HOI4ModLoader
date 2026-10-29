@@ -79,7 +79,7 @@ public unsafe partial class ArmySupport
         if (air == 0) return;
         var free = new Dictionary<nint, int>();
         foreach (var b in Native.PdxArray(air + BasesOfAir))
-            if (*(nint*)(b + StateOfBase) != 0) free[b] = _freeCapacity(b); // land bases, as the game rebases
+            if (Native.Readable(b + StateOfBase) && *(nint*)(b + StateOfBase) != 0) free[b] = _freeCapacity(b); // land bases, as the game rebases; a base freed this tick (captured) is unreadable
         var moved = 0;
         foreach (var pool in Native.PdxArray(air + PoolsOfAir))
         foreach (var wing in Native.PdxArray(pool + WingsOfPool))
@@ -89,12 +89,12 @@ public unsafe partial class ArmySupport
             if (region == 0 || mask == 0 || (mask & Exercise) != 0 || *(nint*)(wing + AttachedArmy) != 0 || *(long*)(wing + Destination) != 0) continue;
             if (*(long*)(wing + Coverage) >= _coverage) continue;
             var current = _baseOf(wing);
-            if (current == 0 || *(nint*)(current + StateOfBase) == 0) continue; // on a carrier
+            if (current == 0 || !Native.Readable(current + StateOfBase) || *(nint*)(current + StateOfBase) == 0) continue; // on a carrier, or its base was freed this tick
             long rangeOut;
             var range = *_range(wing, &rangeOut);
             var reached = _inRange(0, region, current, range, 0);
             var size = _maxSize(wing);
-            var best = free.Where(b => b.Key != current && b.Value >= size)
+            var best = free.Where(b => b.Key != current && b.Value >= size && Native.Readable(b.Key + StateOfBase))
                 .Select(b => (Base: b.Key, Reached: _inRange(0, region, b.Key, range, 0), Distance: _regionToState(region, *(nint*)(b.Key + StateOfBase))))
                 .Where(b => b.Reached > reached) // strictly better: no back and forth
                 .OrderByDescending(b => b.Reached).ThenBy(b => b.Distance)
