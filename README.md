@@ -157,8 +157,6 @@ Settings: every threshold, each feature on/off.
 - **Auto ground crews** (`AutoGroundCrews`, off): turns More Ground Crews on in the two regions where your wings fight hardest.
   - Only while command power stays above `GroundCrewsReserve` (50).
   - Turned off where the fighting stops for three days. Regions you turn off yourself are left alone.
-- **Battle plan keys** (always on): **D** naval invasion, **Ctrl+D** naval invasion with a floating harbour, **G** paradrop. Vanilla has no keys for these buttons.
-  - Added to the installed game's own battle plan interface, so nothing goes stale after an update. A workshop mod that replaces `interface/battleplantools.gui` with an older copy (e.g. "Naval Invasion Hotkey") is overridden; unsubscribe it.
 - **Paradrop to several destinations** (`SplitDrops`, on): select several paratrooper divisions, press the paradrop button, click the airbase, then click destinations one after another.
   - Each further destination gets its share as a new paradrop from the same airbase; the divisions end up evenly spread.
 - **Auto paradrop transports** (`AutoTransports`, on): a paradrop with no transport planes on the paradrop mission at its airbase gets the idle transport wings that reach its target.

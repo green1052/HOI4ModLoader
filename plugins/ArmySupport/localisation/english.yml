@@ -1,5 +1,5 @@
 l_english:
-    com.green1052.armysupport.desc:0 "Helps with air wings, railway guns and organizing armies.\n- Right-click a field marshal's card: attach the selected air wings and railway guns to him\n- Shift+right-click an airbase: send only the air wings that fit\n- Ctrl+Alt+G: split the selected divisions into armies\n- Battle plan keys: D naval invasion, Ctrl+D with a floating harbour, G paradrop\n- Auto rebase, auto ground crews and auto aces\nWorks in multiplayer (railway gun settings: single player only)."
+    com.green1052.armysupport.desc:0 "Helps with air wings, railway guns and organizing armies.\n- Right-click a field marshal's card: attach the selected air wings and railway guns to him\n- Shift+right-click an airbase: send only the air wings that fit\n- Ctrl+Alt+G: split the selected divisions into armies\n- Auto rebase, auto ground crews and auto aces\nWorks in multiplayer (railway gun settings: single player only)."
     com.green1052.armysupport.FieldMarshal:0 "Field marshals"
     com.green1052.armysupport.FieldMarshal.desc:0 "Right-click a field marshal's card with air wings or railway guns selected to attach them.\nSingle player: to him directly. Multiplayer: spread over his armies."
     com.green1052.armysupport.FrontPenalty:0 "Railway guns: front line penalty"
