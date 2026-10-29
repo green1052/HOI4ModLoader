@@ -102,7 +102,7 @@ public unsafe partial class ArmySupport
             if (best.Base == 0) continue;
             var cmd = Allocator.AllocZeroed(0x48);
             _transfer(cmd, wing, best.Base, 0, region, (int)mask); // keeps the mission on arrival
-            if (!Commands.TryPost(cmd)) continue;
+            if (!Commands.TryPost(cmd, !Multiplayer)) continue; // AI post like the game's own rebase: a player post opens the strategic air view
             free[best.Base] -= size;
             moved++;
         }
