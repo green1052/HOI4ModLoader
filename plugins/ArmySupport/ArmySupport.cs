@@ -6,7 +6,7 @@ namespace ArmySupport;
 /// Army helpers, one file each: field marshal attachments, railway gun placement, airbase capacity, auto rebase, auto
 /// ground crews, auto aces, paradrops, invasion support and the Ctrl+Alt+G army organizer.
 /// </summary>
-[Plugin("com.green1052.armysupport", "Army Support", "1.0.0", GameVersion = "1.19.4")]
+[Plugin("com.green1052.armysupport", "Army Support", "1.0.0", GameVersion = "1.19.4.1")]
 public partial class ArmySupport : Plugin
 {
     public override void Load()

@@ -38,10 +38,10 @@ public static class Signatures
 /// entry the game accepts starts with the UI's own command, so multiplayer stays in sync. Queued entries show their place:
 /// before a focus' name, on a tech's bonus text. Entries that can no longer start are dropped.
 /// </summary>
-[Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.4")]
+[Plugin("com.green1052.queues", "Queues", "1.0.0", GameVersion = "1.19.4.1")]
 public unsafe class Queues : Plugin
 {
-    // Layouts for HOI4 1.19.4.
+    // Layouts for HOI4 1.19.4 (unchanged in 1.19.4.1, whose hotfix moved only code).
     private const int FocusOfCountry = 0x1380, FocusInProgress = 0x10;    // CCountry -> focus progress -> CNationalFocus* (null = idle)
     private const int FocusItems = 0x39B8, FocusOfItem = 0x20;            // CNationalFocusView items (measured on 1.19.4); CNationalFocusTreeItem -> CNationalFocus
     // shortcut: 0x3A60 is the only slot holding the shown country on 1.19.4 (measured); if wrong, shift-click only degrades to a normal click

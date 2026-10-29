@@ -5,7 +5,7 @@ A C# plugin loader for Hearts of Iron IV, in the spirit of BepInEx. It changes n
 The bundled plugins add quality-of-life features: national focus and research queues, auto construction, air wings for field marshals and more.
 
 ## Requirements
-- Hearts of Iron IV **1.19.4** (Steam, Windows 64-bit)
+- Hearts of Iron IV **1.19.4.1** (Steam, Windows 64-bit)
 - [.NET 10 Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)
 
 ## Installation
@@ -353,7 +353,7 @@ Your Discord status shows the country you play (its name for its current ideolog
 
 ## Troubleshooting
 - **".NET 10 Runtime (x64) not found" message:** install the .NET 10 Runtime (x64). The game still starts, without mods.
-- **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins made for a game version (1.19.4) don't load on another; `[General] IgnoreGameVersion = True` in the plugin's config loads them anyway (may crash).
+- **A plugin does nothing:** check `HOI4ModLoader\LogOutput.log`. Plugins made for a game version (1.19.4.1) don't load on another; `[General] IgnoreGameVersion = True` in the plugin's config loads them anyway (may crash).
 - **The game crashed:** `HOI4ModLoader\crash.log` names the code that faulted (and the plugin hook, if any). Include it with a bug report.
 - **UI elements missing or broken:** other mods replacing the same interface files (settings window, main menu, construction tab, intelligence agency, army group card, battle plan tools) can conflict. The loader's versions win.
 - **Turning a plugin off:** use the Mods tab, or set `Enabled = False` in `config\<plugin id>.cfg`.

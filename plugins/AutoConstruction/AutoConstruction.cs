@@ -39,7 +39,7 @@ public static class Signatures
 /// cores, then higher infrastructure (lower for infrastructure itself), then more free slots. Also runs AutoSupply.cs and
 /// AutoProduction.cs.
 /// </summary>
-[Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.4")]
+[Plugin("com.green1052.autoconstruction", "Auto Construction", "1.0.0", GameVersion = "1.19.4.1")]
 public unsafe partial class AutoConstruction : Plugin
 {
     // Layouts for HOI4 1.19.3 (production status, construction lines and the command: the loader's Construction).

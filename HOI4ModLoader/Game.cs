@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace HOI4ModLoader;
 
-/// <summary>The running game: version, game state, the player's country. Offsets for HOI4 1.19.4.</summary>
+/// <summary>The running game: version, game state, the player's country. Offsets for HOI4 1.19.4.1 (1.19.4 layouts unchanged by the hotfix).</summary>
 public static unsafe class Game
 {
     /// <summary>launcher-settings.json "rawVersion", e.g. "1.19.3.0"; "unknown" without one (plugins made for a version then skip).</summary>

@@ -37,7 +37,7 @@ public static class Signatures
 /// Finished operations clear themselves from the operations list a few days after they finished (the game's own command:
 /// multiplayer too).
 /// </summary>
-[Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.4")]
+[Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.4.1")]
 public unsafe class Intelligence : Plugin
 {
     // Layouts for HOI4 1.19.3.

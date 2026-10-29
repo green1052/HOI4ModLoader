@@ -11,7 +11,7 @@ namespace AiAssist;
 /// - Air and navy: air retreat, bombing targets, air training, ground crews, strategic invasions, naval training, shore bombardment.
 /// - Other: army training, stable leaders, production lines, railway guns, supply hubs.
 /// </summary>
-[Plugin(Id, "AI Assist", "1.0.0", GameVersion = "1.19.4", AffectsGameState = true)]
+[Plugin(Id, "AI Assist", "1.0.0", GameVersion = "1.19.4.1", AffectsGameState = true)]
 public unsafe partial class AiAssist : Plugin
 {
     private const string Id = "com.green1052.aiassist";
