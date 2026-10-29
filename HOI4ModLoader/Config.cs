@@ -34,7 +34,7 @@ public sealed class ConfigFile
     public T Bind<T>(string section, string key, T defaultValue, string description) where T : IConvertible
     {
         _bound.Add((section, key));
-        var (sectionAt, keyAt) = Find(section, key);
+        var (_, keyAt) = Find(section, key);
         if (keyAt >= 0)
         {
             var raw = ValueOf(_lines[keyAt]);
@@ -43,6 +43,7 @@ public sealed class ConfigFile
         }
 
         Reload();
+        int sectionAt;
         (sectionAt, keyAt) = Find(section, key);
         if (keyAt >= 0) return Bind(section, key, defaultValue, description); // written meanwhile
         var entry = new[] { $"# {description}", $"{key} = {Convert.ToString(defaultValue, CultureInfo.InvariantCulture)}", "" };

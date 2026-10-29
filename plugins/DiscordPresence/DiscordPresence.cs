@@ -18,7 +18,7 @@ public static class Signatures
 /// <summary>
 /// Discord Rich Presence: the country played, the game date and multiplayer, shown in the player's Discord status. Talks
 /// to the Discord app over its local IPC pipe (\\.\pipe\discord-ipc-N), the same way Discord's own SDKs do; no game state
-/// is touched. The pipe work runs on its own thread, which ends (and Discord clears the status) a minute after the plugin
+/// is touched. The pipe work runs on its own thread, which ends (and Discord clearsz the status) a minute after the plugin
 /// stops updating it, e.g. when it is turned off or reloaded.
 /// </summary>
 [Plugin("com.green1052.discordpresence", "Discord Rich Presence", "1.0.0", GameVersion = "1.19.4.1")]
@@ -28,6 +28,7 @@ public unsafe class DiscordPresence : Plugin
     private const int Handshake = 0, Frame = 1;
 
     private static readonly int[] MonthDays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
     private const int NameOfCountry = 0x10; // std::string: the name the game shows, for its current ideology ("독일국")
     private const int HumanControllersOfGameState = 0x388; // CPdxArray<sbyte> by tag: players on each country (gamestate.cpp)
 
@@ -82,7 +83,7 @@ public unsafe class DiscordPresence : Plugin
             state = state == "" ? null : state,
             timestamps = new { start = _since },
             assets = new { large_image = Image, large_text = "Hearts of Iron IV" },
-        }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+        }, Json);
     }
 
     /// <summary>Players with a country: lockstep game state, the same for the host and every client. Observers aren't counted.</summary>

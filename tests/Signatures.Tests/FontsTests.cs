@@ -4,13 +4,13 @@ namespace Signatures.Tests;
 
 public class FontsTests
 {
-    private static readonly string HOI4Dir = typeof(FontsTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().First(a => a.Key == "HOI4Dir").Value!;
+    private static readonly string GameDir = typeof(FontsTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().First(a => a.Key == "HOI4Dir").Value!;
 
     /// <summary>The game's Korean UI font drawn anew with Malgun Gothic: every character back, Hangul from GDI, the texture readable again.</summary>
     [Fact]
     public void RedrawsAGameFont()
     {
-        var fnt = Path.Combine(HOI4Dir, "gfx", "fonts", "korean", "hoi_18mbs.fnt");
+        var fnt = Path.Combine(GameDir, "gfx", "fonts", "korean", "hoi_18mbs.fnt");
         var dir = Directory.CreateTempSubdirectory().FullName;
         Assert.True(Fonts.Fonts.Draw(fnt, "Malgun Gothic", 100, dir));
         var lines = File.ReadAllLines(Path.Combine(dir, "hoi_18mbs.fnt"));

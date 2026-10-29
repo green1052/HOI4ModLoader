@@ -95,7 +95,7 @@ public unsafe partial class FrontLine
         var running = _operations.Where(o => o.Pincer == pincer && (selected.Count == 0 || o.Units.Any(selected.Contains))).ToList();
         if (running.Count > 0)
         {
-            foreach (var op in running) End(op, tag, "cancelled");
+            foreach (var op in running) End(op, tag, "canceled");
             DrawOperations();
             return;
         }

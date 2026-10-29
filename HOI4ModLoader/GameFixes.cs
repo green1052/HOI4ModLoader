@@ -1,11 +1,10 @@
-using System.Runtime.InteropServices;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
 namespace HOI4ModLoader;
 
 /// <summary>Vanilla bugs the game crashes on, fixed where they start.</summary>
-internal static unsafe partial class GameFixes
+internal static unsafe class GameFixes
 {
     /// <summary>
     /// CIntelligenceAgency::RemoveOperative(agency, operative) -> bool: takes the operative off the agency's list. Callers

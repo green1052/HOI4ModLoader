@@ -88,11 +88,9 @@ public unsafe partial class AiAssist
         var lost = week.Count(id => Game.Province(id) is var p && p != 0 && Province.Enemy(country, tag, p));
         history.Enqueue((hour, border.Select(Game.Id).ToHashSet()));
         long ours = 0;
-        var land = 0;
         foreach (var unit in Game.Units(country))
             if (unit != 0 && Division.IsLand(unit))
             {
-                land++;
                 ours += Division.Power(unit);
             }
         var contact = new Dictionary<int, int>();          // enemy -> our line provinces facing it
@@ -256,7 +254,7 @@ public unsafe partial class AiAssist
     /// <summary>
     /// Elastic defence: a fought-out enemy stack next to the grad is attacked by two or more fresh divisions (spares next to it,
     /// reserves behind the grad). Each enemy stack next to it is pinned by one fresh division, where our stack passes vanilla's
-    /// strength test, so it can't come to its aid. Worn attackers break off (<see cref="BreakOff"/>). Main thread.
+    /// strength test, so it can't come to its aid. Worn attackers break off (<see cref="BreakOff()"/>). Main thread.
     /// </summary>
     private static void CounterAttack(nint country, int tag, Grad grad, int hour)
     {

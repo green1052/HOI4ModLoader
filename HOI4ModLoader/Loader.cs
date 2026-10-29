@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
+
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 
@@ -281,7 +281,7 @@ public static class Loader
             }
         }
 
-        Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id)];
+        Known = [.. found.Values.Select(f => f.Info).OrderBy(i => i.Id, StringComparer.Ordinal)];
         Loc.Load([typeof(Loader).Assembly, .. found.Values.Select(f => f.Type.Assembly)]); // disabled plugins too, for their names
         if (AtStartup) // the game reads its interface files once, after this
         {

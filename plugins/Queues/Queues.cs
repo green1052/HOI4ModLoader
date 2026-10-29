@@ -24,7 +24,7 @@ public static class Signatures
 
     /// <summary>
     /// CCountryTechTreeView::UpdateAllItemStates(view): re-runs every displayed tech item's state, and so its bonus text.
-    /// Hooked instead of the per-item bonus setter: after the original call every item is freshly labelled, so one loop
+    /// Hooked instead of the per-item bonus setter: after the original call every item is freshly labeled, so one loop
     /// over the items (view+0x2788, count view+0x27AC) re-stamps our queue numbers.
     /// </summary>
     [Signature] public const string TechViewUpdateAllItems = "40 53 57 41 54 41 55 41 56 48 83 EC 30 48 8B F9 E8 ? ? ? ? 80 3D ? ? ? ? 00 4C 8B E0";

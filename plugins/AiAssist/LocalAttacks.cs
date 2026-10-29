@@ -91,7 +91,7 @@ public unsafe partial class AiAssist
     /// <summary>
     /// Why a local attack from <paramref name="from"/> on <paramref name="to"/> is ruled out, or 0. Steered: on a grad, except
     /// against fought-out spearheads; from a thin front; into terrain that cripples the armor; where an attack was lost lately
-    /// (<see cref="BreakOff"/>). Unsupplied: supply can't follow. Pocket-closing and corridor targets pass all but the armor rule.
+    /// (<see cref="BreakOff()"/>). Unsupplied: supply can't follow. Pocket-closing and corridor targets pass all but the armor rule.
     /// </summary>
     private static int RuledOut(nint me, int tag, nint from, nint to)
     {

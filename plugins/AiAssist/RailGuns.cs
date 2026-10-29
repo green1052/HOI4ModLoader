@@ -28,7 +28,7 @@ public unsafe partial class AiAssist
     private void LoadRailGuns()
     {
         var loop = Sig.Find(AiSignatures2.RailwayGunScore);
-        _gunTable = (long*)NativeMemory.AllocZeroed((nuint)(8 * (GunArmySlots + 1))); // never freed: the stub may run any time
+        _gunTable = (long*)NativeMemory.AllocZeroed(8 * (GunArmySlots + 1)); // never freed: the stub may run any time
         // Replaces `mov [r9+r8*8],rdx; mov rax,[r13+60h]; mov [rbp+1150h],rax` (15 bytes) with the same plus the bonus for an
         // army in the table. rcx, rdx, r11 and the flags are dead there.
         Patches.Asm(loop + 0x5C, 15,

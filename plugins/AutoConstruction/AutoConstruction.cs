@@ -299,14 +299,14 @@ public unsafe partial class AutoConstruction : Plugin
     /// A CPdxArray only when its header and data are readable and its size sane; else empty and the reason logged once.
     /// Probe for the 1.19.4.1 crash: guards the reads Queue() makes that nothing exercised before (cores, provinces).
     /// </summary>
-    private static readonly HashSet<string> _unreadable = [];
+    private static readonly HashSet<string> Unreadable = [];
     private ReadOnlySpan<T> SafeArray<T>(nint at, string what) where T : unmanaged
     {
         var ptr = Native.Readable(at) ? *(nint*)at : 0;
         var size = Native.Readable(at) ? *(int*)(at + 0xC) : -1;
         if (size >= 0 && size < 1_000_000 && (size == 0 || Native.Readable(ptr)))
             return Native.PdxArray<T>(at);
-        if (_unreadable.Add(what)) Log.Error($"{what} unreadable at 0x{at:X} (ptr 0x{ptr:X}, size {size}): layout changed?");
+        if (Unreadable.Add(what)) Log.Error($"{what} unreadable at 0x{at:X} (ptr 0x{ptr:X}, size {size}): layout changed?");
         return default;
     }
     /// <summary>

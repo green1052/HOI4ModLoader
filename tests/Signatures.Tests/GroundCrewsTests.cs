@@ -10,7 +10,7 @@ public class GroundCrewsTests
 
     /// <summary>The operands GroundCrews takes out of CanExecute: the call lands on IsOn (country+0x4D8 map, on at +0x38), the cost on the define.</summary>
     [Fact]
-    public unsafe void CanExecuteOperandsResolve()
+    public void CanExecuteOperandsResolve()
     {
         var image = Image.Load(Path.Combine(GameDir, "hoi4.exe"));
         var at = image.FindAll(GroundCrews.CanExecuteSig)[0];

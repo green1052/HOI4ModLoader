@@ -2,7 +2,7 @@ using HOI4ModLoader;
 
 namespace FrontLine;
 
-public unsafe partial class FrontLine
+public partial class FrontLine
 {
     // ---- Escape: leave a salient through its neck before it closes; break out of a pocket ----
 

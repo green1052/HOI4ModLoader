@@ -201,7 +201,7 @@ public partial class AiAssist
 
     /// <summary>
     /// Reserves and second-line divisions off their post walk back. Ready ones (ReadyOrg, ReadyStrength) attack a break-in within
-    /// FireRadius provinces, as many as it takes; they keep their post and <see cref="BreakOff"/> tracks them. Main thread.
+    /// FireRadius provinces, as many as it takes; they keep their post and <see cref="BreakOff()"/> tracks them. Main thread.
     /// </summary>
     private static void FireBrigade(nint country, int tag, nint[] units, int hour)
     {

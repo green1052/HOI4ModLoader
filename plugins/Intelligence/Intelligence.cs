@@ -219,7 +219,7 @@ public unsafe class Intelligence : Plugin
                 at = (was.X + (x - was.X) * Ease, was.Y + (y - was.Y) * Ease);
             }
             _shown[children[k]] = at;
-            var packed = (long)(uint)(int)MathF.Round(at.X) | (long)(int)MathF.Round(at.Y) << 32;
+            var packed = (long)(int)MathF.Round(at.X) | (long)(int)MathF.Round(at.Y) << 32;
             ((delegate* unmanaged<nint, long, void>)(*(nint**)children[k])[SetPositionSlot])(children[k], packed);
         }
     }
