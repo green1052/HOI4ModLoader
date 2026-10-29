@@ -1,4 +1,6 @@
 ﻿l_english:
-    com.green1052.intelligence.desc:0 "Helps with the intelligence screen.\n- Drag an operative's portrait: reorder them, as army cards\n- Finished operations clear themselves from the list after a few days\nThe drag is single player only."
+    com.green1052.intelligence.desc:0 "Helps with the intelligence screen.\n- Drag an operative's portrait: reorder them, as army cards\n- Finished operations clear themselves from the list after a few days\nThe drag is single player only and can be turned off."
     com.green1052.intelligence.DismissDays:0 "Clear finished operations after (days)"
     com.green1052.intelligence.DismissDays.desc:0 "Game days after an operation finished before it leaves the operations list. 0: never."
+    com.green1052.intelligence.EnableDrag:0 "Drag operative portraits"
+    com.green1052.intelligence.EnableDrag.desc:0 "Reorder operatives by dragging their portraits in the bottom bar. Single player only."

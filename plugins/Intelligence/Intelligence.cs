@@ -40,11 +40,11 @@ public static class Signatures
 [Plugin("com.green1052.intelligence", "Intelligence", "1.0.0", GameVersion = "1.19.4.1")]
 public unsafe class Intelligence : Plugin
 {
-    // Layouts for HOI4 1.19.3.
-    private const int AgencyOfCountry = 0xFC0, OperativesOfAgency = 0xD8;
-    private const int PortraitGlue = 0x50, ButtonGlue = 0x558, OperativeOfItem = 0x20; // entry: its two glues, operative CRef
+    // Layouts re-verified on HOI4 1.19.4.1: 1.19.4 moved ButtonGlue +0x80, OperativesOfAgency +0x18, BoxOfBar +0x100.
+    private const int AgencyOfCountry = 0xFC0, OperativesOfAgency = 0xF0;
+    private const int PortraitGlue = 0x50, ButtonGlue = 0x5D8, OperativeOfItem = 0x20; // entry: its two glues, operative CRef
     private const int SetPositionSlot = 8;                                               // entry vtable: SetPosition(packed x, y)
-    private const int BoxOfBar = 0xB00, CellsOfBox = 0x188, ChildCountOfBox = 0x194, ChildrenOfBox = 0x1A0; // grid box
+    private const int BoxOfBar = 0xC00, CellsOfBox = 0x188, ChildCountOfBox = 0x194, ChildrenOfBox = 0x1A0; // grid box
     private const int InputOfGui = 0x500, MousePositionSlot = 0xC0 / 8;
     private const int ButtonOfEvent = 0x20, TypeOfEvent = 0x24;                          // mouse event
     private const int MouseUp = 1, MouseDown = 2, Click = 5;
@@ -78,13 +78,15 @@ public unsafe class Intelligence : Plugin
     {
         _dismissDays = Config.Bind("Intelligence", "DismissDays", 7,
             "Game days after an operation finished before it clears itself from the operations list (0: never).");
+        var drag = Config.Bind("Intelligence", "EnableDrag", true,
+            "Reorder operatives by dragging their portraits in the bottom bar, as army cards (single player only).");
         _game = new PerGame(() =>
         {
             _deleted.Clear();
             _checkedDay = -1;
         });
         if (_dismissDays > 0) MainThread.Every(TimeSpan.FromSeconds(1), DismissFinished);
-        if (Multiplayer) return; // the drag changes the game
+        if (Multiplayer || !drag) return; // the drag changes the game
         _glueVTable = Sig.VTable(Signatures.ItemGlue);
         _itemVTable = Sig.VTable(Signatures.Item);
         _barRefresh = (delegate* unmanaged<nint, void>)Sig.Find(Signatures.BarRefresh);
