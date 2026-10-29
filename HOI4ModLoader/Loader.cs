@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 
@@ -36,6 +37,7 @@ public static class Loader
     private static FileSystemWatcher? _pluginWatcher;
     private static volatile bool _pluginsTouched = true; // a DLL in plugins\ was written: check (on the main thread) until it settles
     private static int _generation;
+    private static bool _avLogged;
 
     /// <summary>Plugins are loading for the first time, before the game reads its files; false on later (hot) reloads.</summary>
     public static bool AtStartup { get; private set; } = true;
@@ -47,6 +49,18 @@ public static class Loader
         try
         {
             Logger.Reset();
+            // Managed AVs crash the game with faulting module "unknown" and leave nothing in crash.log; catch them first-chance
+            // (they are uncatchable at the throw site) and write the managed stack while the process can still write.
+            AppDomain.CurrentDomain.FirstChanceException += (_, e) =>
+            {
+                if (e.Exception is not AccessViolationException) return;
+                lock (typeof(Loader))
+                {
+                    if (_avLogged) return;
+                    _avLogged = true;
+                }
+                Log.Error($"access violation in managed code, stack:\n{Environment.StackTrace}");
+            };
             var config = new ConfigFile(Path.Combine(ModsDir, "config", "HOI4ModLoader.cfg"));
             if (config.Bind("Debug", "WaitForDebugger", false, "Pause startup until a debugger attaches to hoi4.exe."))
                 while (!Debugger.IsAttached) Thread.Sleep(100);

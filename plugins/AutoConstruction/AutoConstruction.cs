@@ -223,6 +223,7 @@ public unsafe partial class AutoConstruction : Plugin
             if (_sent.TryGetValue(type, out var sent) && count < sent.Count && now < sent.Until) continue; // not all in the queue yet
             _sent.Remove(type);
             if (count >= target || room == 0) continue; // the rest once factories free up
+            if (!_failed.Contains(type)) Log.Info($"{Name(type)}: queueing up to {Math.Min(target - count, room)} more");
             var queued = Queue(country, tag, type, Math.Min(target - count, room));
             room -= queued;
             if (queued > 0)
@@ -295,6 +296,20 @@ public unsafe partial class AutoConstruction : Plugin
     }
 
     /// <summary>
+    /// A CPdxArray only when its header and data are readable and its size sane; else empty and the reason logged once.
+    /// Probe for the 1.19.4.1 crash: guards the reads Queue() makes that nothing exercised before (cores, provinces).
+    /// </summary>
+    private static readonly HashSet<string> _unreadable = [];
+    private ReadOnlySpan<T> SafeArray<T>(nint at, string what) where T : unmanaged
+    {
+        var ptr = Native.Readable(at) ? *(nint*)at : 0;
+        var size = Native.Readable(at) ? *(int*)(at + 0xC) : -1;
+        if (size >= 0 && size < 1_000_000 && (size == 0 || Native.Readable(ptr)))
+            return Native.PdxArray<T>(at);
+        if (_unreadable.Add(what)) Log.Error($"{what} unreadable at 0x{at:X} (ptr 0x{ptr:X}, size {size}): layout changed?");
+        return default;
+    }
+    /// <summary>
     /// Queues up to <paramref name="wanted"/> levels, one per state (province for province buildings), best first. Places
     /// already building this type go last: separate lines build in parallel, one line's levels in turn. Returns the levels queued.
     /// </summary>
@@ -306,16 +321,16 @@ public unsafe partial class AutoConstruction : Plugin
 
         var infrastructureType = Buildings.Type(Buildings.InfrastructureSlot); // 0 before the game made its building database
         var places = new List<(nint Container, int Id, int Free, (int, int, int, int) Rank)>();
-        foreach (var state in Native.PdxArray(country + StatesOfCountry))
+        foreach (var state in SafeArray<nint>(country + StatesOfCountry, "states of country"))
         {
             if (_canBuildInState(country, state, type, 1) == 0) continue;
             var infrastructure = infrastructureType == 0 ? 0 : Buildings.Level(State.Buildings(state), infrastructureType);
-            var rank = (Native.PdxArray<int>(state + CoresOfState).Contains(tag) ? 1 : 0,
+            var rank = (SafeArray<int>(state + CoresOfState, "cores of state").Contains(tag) ? 1 : 0,
                 type == infrastructureType ? -infrastructure : infrastructure, // faster construction; infrastructure itself where it's lacking
                 _freeSharedSlots(state), -State.Id(state));
             if (!perProvince) places.Add((State.Buildings(state), State.Id(state), Construction.FreeLevels(State.Buildings(state), type), rank));
             else
-                foreach (var province in State.Provinces(state))
+                foreach (var province in SafeArray<nint>(state + State.ProvincesOffset, "provinces of state"))
                     if (Construction.CanBuildInProvince(country, province, type))
                         places.Add((Province.Buildings(province), Game.Id(province), Construction.FreeLevels(Province.Buildings(province), type), rank));
         }

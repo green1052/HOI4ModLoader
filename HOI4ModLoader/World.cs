@@ -594,7 +594,8 @@ public static unsafe class Construction
         {
             // Readable first: a line the game already freed takes the vtable check's read off a mapped page (it crashed the game).
             var building = line != 0 && Native.Readable(line) && *(nint*)line == lineVTable ? *(nint*)(line + BuildingOfLine) : 0;
-            if (building != 0 && *(nint*)(building + TypeOfBuilding) == type) lines.Add((line, building));
+            // So can the building pointer be unreadable (a freshly queued line's is filled in a tick later, on 1.19.4.1).
+            if (building != 0 && Native.Readable(building + TypeOfBuilding) && *(nint*)(building + TypeOfBuilding) == type) lines.Add((line, building));
         }
         return lines;
     }
