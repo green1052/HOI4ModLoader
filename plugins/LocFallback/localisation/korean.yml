@@ -1,0 +1,3 @@
+l_korean:
+    com.green1052.locfallback.name:0 "번역 폴백"
+    com.green1052.locfallback.desc:0 "번역이 없는 모드는 영어로 보여줍니다."

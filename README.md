@@ -43,6 +43,7 @@ Delete `version.dll` and the `HOI4ModLoader` folder from the game folder.
 | AiAssist | Add-on for Sheep Mod: fixes AI logic its scripts can't reach | Single player only |
 | Intelligence | Drag operatives in the intelligence screen's bottom bar to reorder them; finished operations clear themselves | ✅ (operative drag: single player) |
 | DiscordPresence | Your country and the game date in your Discord status | ✅ |
+| LocFallback | Mods without a translation show in English | ✅ |
 
 ### Queues
 **Shift+click** a national focus or a technology to reserve it, again to unqueue it. Queued entries show their position as a number (before the focus name, or on the tech's bonus line).
@@ -333,6 +334,9 @@ Your Discord status shows the country you play (its name for its current ideolog
 - Needs the Discord desktop app running on the same PC.
 - `ApplicationId`: Discord shows the status under a Discord application's name. It works out of the box with the project's application; to show another name, create one at [discord.com/developers](https://discord.com/developers/applications) (New Application) and paste its Application ID. Empty: off.
 - The status clears within a minute after the game closes or the plugin is turned off.
+
+### LocFallback
+Mods without a translation show in English. Mods that already ship your language are left alone.
 
 ## Multiplayer
 - Other players see vanilla. Only interface files change, not the checksum, so players without the loader can join.
