@@ -17,10 +17,6 @@ public static partial class Signatures
     /// <summary>CAirWing::GetMaxSize(wing) -> int: its full plane count.</summary>
     [Signature] public const string MaxSize = "40 53 48 83 EC 30 80 3D ? ? ? ? ? 48 89 74 24";
 
-    /// <summary>CAirWing::GetAirBase(wing) -> CAirBase*: where it is, or is flying to.</summary>
-    /// <summary>CAirWing::GetAirBase (vtable slot 2): the base the wing is at or flying to. CRef&lt;CAirBase&gt; at [wing+0x38]+0x18.</summary>
-    [Signature] public const string AirBaseOfWing = "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B 0D ? ? ? ? 48 8B 01 FF 90 B8 00 00 00 48 8B 4B 38 48 8B F8 48 83 C1 18 83 39 00 75 0A 83 79 04 00 75 04 33 C0 EB 05 E8 ? ? ? ? 45 33 C0";
-
     /// <summary>Squared map distance from a strategic region to a state (region, CState*) -> int.</summary>
     [Signature] public const string RegionToState = "48 83 EC 28 4C 8B 42 ? 48 8B 51 ? 48 8D 4C 24 ? 41 8B 80 ? ? ? ? 2B 82 E0 00 00 00";
 
@@ -47,7 +43,6 @@ public unsafe partial class ArmySupport
     private delegate* unmanaged<nint, nint, nint, long, int, int> _inRange;
     private delegate* unmanaged<nint, long*, long*> _range;
     private delegate* unmanaged<nint, int> _freeCapacity, _maxSize;
-    private delegate* unmanaged<nint, nint> _baseOf;
     private delegate* unmanaged<nint, nint, int> _regionToState;
     private delegate* unmanaged<nint, nint, nint, byte, nint, int, nint> _transfer;
     private long _coverage;
@@ -63,12 +58,12 @@ public unsafe partial class ArmySupport
     private void ResolveAir()
     {
         if (_transfer != null) return;
+        AirWing.ResolveBase();
         _ = Sig.FindAll(Game.StrategicAirSig, 2);
         _inRange = (delegate* unmanaged<nint, nint, nint, long, int, int>)Sig.Find(Signatures.ProvincesInRange);
         _range = (delegate* unmanaged<nint, long*, long*>)Sig.Find(Signatures.GetRange);
         _freeCapacity = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.FreeCapacity);
         _maxSize = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.MaxSize);
-        _baseOf = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.AirBaseOfWing);
         _regionToState = (delegate* unmanaged<nint, nint, int>)Sig.Find(Signatures.RegionToState);
         _transfer = (delegate* unmanaged<nint, nint, nint, byte, nint, int, nint>)Sig.Find(Signatures.TransferCommand);
     }
@@ -88,7 +83,7 @@ public unsafe partial class ArmySupport
             var mask = *(uint*)(wing + MissionMask);
             if (region == 0 || mask == 0 || (mask & Exercise) != 0 || *(nint*)(wing + AttachedArmy) != 0 || *(long*)(wing + Destination) != 0) continue;
             if (*(long*)(wing + Coverage) >= _coverage) continue;
-            var current = _baseOf(wing);
+            var current = AirWing.Base(wing);
             if (current == 0 || !Native.Readable(current + StateOfBase) || *(nint*)(current + StateOfBase) == 0) continue; // on a carrier, or its base was freed this tick
             long rangeOut;
             var range = *_range(wing, &rangeOut);

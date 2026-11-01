@@ -158,7 +158,7 @@ public unsafe partial class ArmySupport
             var to = targets.Length == 0 ? 0 : Game.Province(targets[0]);
             var airbase = from == 0 ? 0 : BaseOf(bases, Province.State(from));
             var region = to == 0 ? 0 : Province.StrategicRegion(to);
-            if (airbase == 0 || region == 0 || TransportWings(air).Any(w => _baseOf(w) == airbase && (*(uint*)(w + MissionMask) & ParadropMission) != 0)) continue;
+            if (airbase == 0 || region == 0 || TransportWings(air).Any(w => AirWing.Base(w) == airbase && (*(uint*)(w + MissionMask) & ParadropMission) != 0)) continue;
             if (SendTransportsTo(air, airbase, region) is var sent and > 0)
                 Log.Info($"paradrop: {sent} transport wing(s) to the airbase in province {source} for the drop on {targets[0]}");
         }
@@ -187,7 +187,7 @@ public unsafe partial class ArmySupport
             if (_maxSize(wing) > room || _inRange(0, region, airbase, *_range(wing, &rangeOut), 0) == 0) continue;
             var cmd = Allocator.AllocZeroed(0x48);
             _transfer(cmd, wing, airbase, 0, region, ParadropMission);
-            if (!Commands.TryPost(cmd)) continue;
+            if (!Commands.TryPost(cmd, !Multiplayer)) continue; // automatic transfer: no player-command air selection in single player
             room -= _maxSize(wing);
             sent++;
         }

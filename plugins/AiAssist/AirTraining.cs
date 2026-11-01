@@ -22,7 +22,6 @@ public unsafe partial class AiAssist
     private IHook<AssignWingFn>? _assignWing;
     private static delegate* unmanaged<nint, nint, int, byte, byte, nint> _setMission;
     private static delegate* unmanaged<nint, byte> _canTrain;
-    private static delegate* unmanaged<nint, nint> _baseOf;
     private static delegate* unmanaged<nint, int> _xpLevel;
     private static delegate* unmanaged<nint, int, byte> _atWarAny;
     private static delegate* unmanaged<nint, int*, byte> _postAi;
@@ -36,7 +35,7 @@ public unsafe partial class AiAssist
         _ = Sig.Find(AirRegions.RegionAirDataSig) + Sig.FindAll(Game.StrategicAirSig, 2)[0]; // the functions the superiority offsets come from
         _setMission = (delegate* unmanaged<nint, nint, int, byte, byte, nint>)Sig.Find(Signatures.SetMissionCommand);
         _canTrain = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.CanTrain);
-        _baseOf = (delegate* unmanaged<nint, nint>)Sig.Find(Signatures.AirBaseOfWing);
+        AirWing.ResolveBase();
         _xpLevel = (delegate* unmanaged<nint, int>)Sig.Find(Signatures.WingXpLevel);
         _atWarAny = (delegate* unmanaged<nint, int, byte>)Sig.Find(Signatures.AtWarAny);
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
@@ -88,7 +87,7 @@ public unsafe partial class AiAssist
                 foreach (var wing in Native.PdxArray(pool + WingsOfPool).ToArray())
                 {
                     if (wing == 0 || *(int*)(wing + MissionsOfWing) != 0 || *(long*)(wing + DestinationOfWing) != 0 || *(nint*)(wing + AttachedArmyOfWing) != 0) continue;
-                    if (OnCarrier(_baseOf(wing))) continue; // a carrier's wings fly with it
+                    if (OnCarrier(AirWing.Base(wing))) continue; // a carrier's wings fly with it
                     if (room <= 0) break;
                     if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel) continue;
                     var cmd = TrainingCommand(wing);
@@ -113,7 +112,7 @@ public unsafe partial class AiAssist
     private static bool Train(nint wing, nint airbase, nint region, int mission)
     {
         if (mission < 0 || region == 0 || *(nint*)(wing + AttachedArmyOfWing) != 0) return false;
-        if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel || OnCarrier(_baseOf(wing))) return false; // a carrier's wings fly its missions
+        if (_canTrain(wing) == 0 || _xpLevel(wing) >= TrainedLevel || OnCarrier(AirWing.Base(wing))) return false; // a carrier's wings fly its missions
         var tag = WingOwner(wing);
         if (tag <= 0 || tag == Game.ControlledTag) return false;
         var country = Game.Country(tag);
@@ -121,7 +120,7 @@ public unsafe partial class AiAssist
         if (diplomacy == 0) return false;
         var atWar = _atWarAny(diplomacy, 0) != 0;
         // At war a wing being moved goes (its base may be lost); at peace the AI moves idle wings for nothing.
-        if (atWar && (*(long*)(wing + DestinationOfWing) != 0 || airbase == 0 || _baseOf(wing) != airbase)) return false;
+        if (atWar && (*(long*)(wing + DestinationOfWing) != 0 || airbase == 0 || AirWing.Base(wing) != airbase)) return false;
         if (atWar && !(mission is AirSuperiorityIndex or InterceptionIndex && LandRegion(region) && Quiet(tag, region))) return false;
         if ((*(int*)(wing + MissionsOfWing) & TrainingMission) != 0) return true; // already training: kept
         var day = Game.Hour / 24;
@@ -167,7 +166,7 @@ public unsafe partial class AiAssist
     /// </summary>
     private static bool MovingBack(nint wing, nint airbase)
     {
-        var from = airbase == 0 ? 0 : _baseOf(wing);
+        var from = airbase == 0 ? 0 : AirWing.Base(wing);
         if (from == 0 || from == airbase || OnCarrier(from) || OnCarrier(airbase)) return false; // carriers move: their wings go where they are
         var tag = WingOwner(wing);
         if (tag <= 0 || tag == Game.ControlledTag) return false;

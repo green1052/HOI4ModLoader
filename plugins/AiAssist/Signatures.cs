@@ -196,9 +196,6 @@ public static class Signatures
     /// <summary>CAirWing::CanTrain(wing) -> bool: mission 0x800 allowed (`mov eax,[rcx+30h]; shr eax,0Bh`), XP under NAir.AIR_WING_XP_TRAINING_MAX, not in a raid, not a carrier wing in port.</summary>
     [Signature] public const string CanTrain = "40 53 48 83 EC 20 8B 41 30 48 8B D9 C1 E8 0B";
 
-    /// <summary>CAirWing::GetAirBase(wing) -> CAirBase*: where it is or is flying to (vtable slot 2; same pattern as ArmySupport's).</summary>
-    [Signature] public const string AirBaseOfWing = "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B 0D ? ? ? ? 48 8B 01 FF 90 B8 00 00 00 48 8B 4B 38 48 8B F8 48 83 C1 18 83 39 00 75 0A 83 79 04 00 75 04 33 C0 EB 05 E8 ? ? ? ? 45 33 C0";
-
     /// <summary>CAirWing::GetExperienceLevel(wing) -> int: how many NAir.AIR_WING_XP_LEVELS its XP (`mov rdx,[rcx+218h]`) reached; 0 is green.</summary>
     [Signature] public const string WingXpLevel = "4C 8B 05 ? ? ? ? 33 C0 48 8B 91 18 02 00 00";
 
