@@ -163,14 +163,11 @@ public static class Signatures
     [Signature] public const string ShipShoreBombardment = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 4C 8B 81 28 07 00 00 48 8D B9 80 00 00 00";
 
     /// <summary>
-    /// Naval AI allocator's first filter (CPdxArray&lt;slot*&gt;* list) -> removed: drops reserve-fleet and dead task forces from
-    /// the list the objectives take from (slot+0 the task force's CRef, +0x18 its objective). Country's AI worker thread.
+    /// Naval AI allocator after CollectObjectives (call at +11). The old filter is inlined: its CPdxArray&lt;slot*&gt;
+    /// is a local at rbp+2F0h (size +2FCh), not a function argument. Replace 13 bytes at +16, replaying
+    /// mov rbx,r12; mov ecx,r12d; mov r9d,[rbp+2FCh]. No live volatile registers at this call boundary.
     /// </summary>
-    /// <summary>
-    /// Naval AI allocator 1.19.4 (ai, unused, list of CPdxArray&lt;slot*&gt; candidates, unused): the old standalone first
-    /// filter is inlined into it. We take bombarders off the list before vanilla assigns the rest.
-    /// </summary>
-    [Signature] public const string FilterTaskForces = "48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 D8 F6 FF FF 48 81 EC 28 0A 00 00 0F 29 B4 24 10 0A 00 00 4C 8B E9 C6 41 19 00";
+    [Signature] public const string FilterTaskForces = "49 8D 4D 68 48 8D 95 E0 06 00 00 E8 ? ? ? ? 49 8B DC 41 8B CC 44 8B 8D FC 02 00 00 45 85 C9";
 
     /// <summary>`mov ecx,48h; call alloc; ...; mov r8b,1; mov rdx,rsi; mov rcx,rax; call CCancelMovementCommand ctor (mem[0x48], CArmy*, bool)`
     /// (+28: the call): stops a division's move or attack, as the UI's stop does.</summary>

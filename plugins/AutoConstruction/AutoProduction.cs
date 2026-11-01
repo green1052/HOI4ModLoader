@@ -37,6 +37,7 @@ public unsafe partial class AutoConstruction
 
     private void LoadProduction()
     {
+        ProductionLine.ResolveLayout();
         _balance = (delegate* unmanaged<nint, long*, nint, long*>)Sig.Find(ProductionSignatures.GetBalance);
         _need = (delegate* unmanaged<nint, long*, nint, nint, long*>)Sig.Find(ProductionSignatures.GetNeed);
         MainThread.Every(TimeSpan.FromSeconds(1), ProductionPump);

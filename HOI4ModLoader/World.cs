@@ -480,11 +480,18 @@ public static unsafe class Order
     public static bool Executing(nint order) => *(byte*)(order + ExecutingOffset) != 0;
 }
 
-/// <summary>CProductionLine (military) and its equipment. Offsets for HOI4 1.19.3.</summary>
+/// <summary>CProductionLine (military) and its equipment. Offsets verified against HOI4 1.19.4.1.</summary>
 public static unsafe class ProductionLine
 {
     public const int MilitaryLinesOffset = 88; // CCountryProduction: CPdxArray<CProductionLine*>
-    private const int VariantOfLine = 0x88, TypeOfVariant = 1008, ArchetypeOfType = 1240;
+    internal const int VariantOfLine = 0x88, TypeOfVariant = 0x3F0, ArchetypeOfType = 0x538, IndexOfArchetype = 0x598;
+
+    // The AI's production counter reads line -> variant -> type -> archetype -> index, in that order.
+    // Pin the operands too: the old 0x4D8 field now contains a number, not an equipment pointer.
+    [Signature] public const string EquipmentLayout = "4D 8B BC 24 88 00 00 00 49 8B BF F0 03 00 00 48 8B 87 38 05 00 00 48 89 44 24 ? 8B 80 98 05 00 00";
+
+    /// <summary>Check the equipment layout before installing production hooks or timers.</summary>
+    public static void ResolveLayout() => Sig.Find(EquipmentLayout);
 
     /// <summary>The equipment variant it makes, or 0.</summary>
     public static nint Variant(nint line) => *(nint*)(line + VariantOfLine);
@@ -495,6 +502,9 @@ public static unsafe class ProductionLine
         var type = variant == 0 ? 0 : *(nint*)(variant + TypeOfVariant);
         return type == 0 ? 0 : *(nint*)(type + ArchetypeOfType);
     }
+
+    /// <summary>The archetype's index in the AI's factory target arrays.</summary>
+    public static int ArchetypeIndex(nint archetype) => *(int*)(archetype + IndexOfArchetype);
 }
 
 /// <summary>CLandCombat: a land battle, its defending side and the attacker's share. Offsets for HOI4 1.19.3.</summary>

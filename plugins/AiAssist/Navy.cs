@@ -1,4 +1,5 @@
 using HOI4ModLoader;
+using System.Runtime.InteropServices;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Hooks.Definitions.X64;
 
@@ -18,11 +19,10 @@ public unsafe partial class AiAssist
     private const int BombardWaitHours = 14 * 24; // with no battle in reach, waits on hold at sea that long instead of going to port
 
     [Function(CallingConventions.Microsoft)] public delegate void UnassignedTaskForcesFn(nint slots, nint tag);
-    [Function(CallingConventions.Microsoft)] public delegate void FilterTaskForcesFn(nint ai, int unused, nint list, nint unused2);
 
     private const int ObjectiveOfSlot = 0x18, AirBaseOfShip = 0x730, OwnerOfTaskForce = 0x1D8, ControllerOfTaskForce = 0x1DC, ResolvedTaskForce = 0x10;
     private const int PatrolMission = 1, StrikeForceMission = 2;
-    private IHook<FilterTaskForcesFn>? _filterTaskForces;
+    private static nint _shoreCrumb;
 
     private IHook<UnassignedTaskForcesFn>? _unassignedTaskForces;
     private static delegate* unmanaged<nint, nint, int, nint> _setNavalMission;
@@ -52,16 +52,33 @@ public unsafe partial class AiAssist
         _postAi = (delegate* unmanaged<nint, int*, byte>)Sig.Find(Signatures.PostAiCommand);
         Allocator.Resolve(); // the heap functions are found here, not on AI threads
         if (bombard)
-            _filterTaskForces = Patches.Hook<FilterTaskForcesFn>(Sig.Find(Signatures.FilterTaskForces), (ai, unused, list, unused2) =>
-            {
-                Safely(() => TakeForShore(list));
-                _filterTaskForces!.OriginalFunction(ai, unused, list, unused2);
-            });
+        {
+            // Since 1.19.4 the filter is inlined into the allocator. Its candidate list is a local at rbp+2F0h,
+            // not an argument of the outer function. Run after CollectObjectives, before objectives take candidates.
+            // This is a call boundary: volatile registers/flags are dead, rsp is aligned and has home space.
+            var site = Sig.Find(Signatures.FilterTaskForces) + 16;
+            _shoreCrumb = Breadcrumb.Label($"{Info.Id} shore bombardment (asm hook {Breadcrumb.Where(site)})");
+            Patches.Asm(site, 13, "use64", "lea rcx, [rbp+2F0h]",
+                $"mov rax, 0x{(nint)(delegate* unmanaged<nint, void>)&FilterForShore:X}", "call rax",
+                "mov rbx, r12", "mov ecx, r12d", "mov r9d, [rbp+2FCh]");
+        }
         _unassignedTaskForces = Patches.Hook<UnassignedTaskForcesFn>(Sig.Find(Signatures.UnassignedTaskForces), (slots, tag) =>
         {
             Safely(() => Navy(slots, *(int*)tag));
             _unassignedTaskForces!.OriginalFunction(slots, tag);
         });
+    }
+
+    [UnmanagedCallersOnly]
+    private static void FilterForShore(nint list)
+    {
+        var crumb = Breadcrumb.Enter(_shoreCrumb);
+        try
+        {
+            if (SheepMod.Active) TakeForShore(list);
+        }
+        catch (Exception e) { Failed(e); }
+        finally { Breadcrumb.Leave(crumb); }
     }
 
     /// <summary>

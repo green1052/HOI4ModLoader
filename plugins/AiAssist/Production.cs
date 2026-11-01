@@ -10,7 +10,7 @@ public unsafe partial class AiAssist
 
     private const int BestVariants = 208;                                          // CCountryProduction: best variant per archetype
     private const int DesiredFactories = 696;                                       // CAIInteriorMinister: int per archetype
-    private const int ActiveFactoriesOfLine = 0x18, IndexOfArchetype = 1336;       // CProductionLine; CEquipmentType
+    private const int ActiveFactoriesOfLine = 0x18;                               // CProductionLine
     private const long StickyEfficiency = 35L << 15;                                // average line efficiency 35 %; GetEfficiency is Q15 percent
     private const int StickyBand = 25, MaxArchetypes = 256;                         // cuts up to 25 % (at least 1) are held
 
@@ -25,6 +25,7 @@ public unsafe partial class AiAssist
 
     private void LoadProductionLines(int days)
     {
+        ProductionLine.ResolveLayout();
         _stickyHours = 24 * days;
         _efficiency = (delegate* unmanaged<nint, long*, long*>)Sig.Find(Signatures.LineEfficiency);
         _isNaval = (delegate* unmanaged<nint, byte>)Sig.Find(Signatures.IsNaval);
@@ -56,7 +57,7 @@ public unsafe partial class AiAssist
             var archetype = line == 0 ? 0 : ProductionLine.Archetype(ProductionLine.Variant(line));
             var factories = archetype == 0 ? 0 : *(int*)(line + ActiveFactoriesOfLine);
             if (factories <= 0) continue;
-            var i = *(int*)(archetype + IndexOfArchetype);
+            var i = ProductionLine.ArchetypeIndex(archetype);
             if ((uint)i >= (uint)n) continue;
             long efficiency;
             _efficiency(line, &efficiency);
