@@ -28,6 +28,7 @@ public static class SupplySignatures
 /// - the hub feeding them is saturated: +1 railway on its weakest link to the capital (or a naval base on a sea link);
 /// - the hub isn't connected: a railway from it to the nearest connected hub;
 /// - no hub near them: a supply hub in their state (railway-connected provinces first), then a railway to it.
+/// Hub and railway building each have a setting (BuildHubs/BuildRailways), as do the when-to-build thresholds.
 /// </summary>
 public unsafe partial class AutoConstruction
 {
@@ -36,12 +37,13 @@ public unsafe partial class AutoConstruction
     private const int KindOfNode = 8, Capital = 12, SupplyIn = 56, SupplyLeft = 64, Connected = 152, NavalNode = 3;
     // In game time, so a fix still being built isn't queued again at high speed. A shortage counts after a week (an advance
     // outruns its supply for a few days), a fixed area waits a month, and at most one new hub (cost 20000) is built a month.
-    private const int SupplyCooldownHours = 30 * 24, StarvingHours = 7 * 24, HubEveryHours = 30 * 24;
+    // The week, the month, the saturation and distance thresholds are settings (Load); the cooldown stays fixed.
+    private const int SupplyCooldownHours = 30 * 24;
+    private const int MaxSupplyActions = 2, MaxRailSearch = 15;
+    private bool _hubs = true, _rails = true;
+    private int _starvingHours = 7 * 24, _hubEveryHours = 30 * 24, _saturationPercent = 80, _hubDistance = 3;
     private readonly Dictionary<int, int> _starvingSince = []; // province id -> game hour its divisions first ran short
     private int _supplyDay = -1, _lastHub = int.MinValue;
-    private const int MaxSupplyActions = 2, MaxRailSearch = 15;
-    private const int SaturationPercent = 80; // a hub using this much of the supply it gets is upgraded (railway to the capital)
-    private const int HubDistance = 3;        // starving divisions with no hub this close (provinces) get a new one
 
     private delegate* unmanaged<nint, int*, nint, byte, int, nint, byte, byte, nint> _upgradeRail;
     private delegate* unmanaged<nint, void> _bottleneckDtor;
@@ -93,7 +95,7 @@ public unsafe partial class AutoConstruction
             if (actions == MaxSupplyActions) break;
             var id = Game.Id(province);
             if (!_starvingSince.TryGetValue(id, out var since) || since > now) _starvingSince[id] = since = now;
-            if (now - since < StarvingHours) continue; // not short long enough to build for
+            if (now - since < _starvingHours) continue; // not short long enough to build for
             if (_supplySent.TryGetValue(id, out var until) && now < until) continue;
             var acted = FixSupply(country, tag, network, province);
             // Wait either way: what is queued or missing changes slowly.
@@ -112,7 +114,7 @@ public unsafe partial class AutoConstruction
             var nodeProvince = *(int*)(node + Game.ProvinceOfNode);
             if (*(long*)(node + Connected) <= 0 && *(byte*)(node + Capital) == 0) return ConnectRailway(network, tag, nodeProvince);
             var supplied = *(long*)(node + SupplyIn);
-            if (supplied > 0 && (supplied - *(long*)(node + SupplyLeft)) * 100 / supplied >= SaturationPercent)
+            if (supplied > 0 && (supplied - *(long*)(node + SupplyLeft)) * 100 / supplied >= _saturationPercent)
             {
                 // A hub feeds many provinces: upgrade its link once, not once per starving province.
                 var now = Game.Hour;
@@ -121,14 +123,14 @@ public unsafe partial class AutoConstruction
                 _hubUpgraded[nodeProvince] = now + SupplyCooldownHours;
                 return true;
             }
-            if (Nearest(province, HubDistance, id => id == nodeProvince) >= 0) return false; // near and not saturated: building won't help (disruption)
+            if (Nearest(province, _hubDistance, id => id == nodeProvince) >= 0) return false; // near and not saturated: building won't help (disruption)
         }
         return BuildHub(country, tag, network, province);
     }
 
     private bool UpgradeRail(int tag, nint node, bool naval, int id)
     {
-        if (node == 0) return false;
+        if (!_rails || node == 0) return false;
         var data = stackalloc byte[0x40];
         new Span<byte>(data, 0x40).Clear();
         _upgradeRail((nint)data, &tag, node, naval ? (byte)1 : (byte)0, -1, 0, 1, 0);
@@ -141,6 +143,7 @@ public unsafe partial class AutoConstruction
     /// <summary>A railway (+1 level) from <paramref name="from"/> to the nearest hub connected to the capital.</summary>
     private bool ConnectRailway(nint network, int tag, int from)
     {
+        if (!_rails) return false;
         var start = Game.Province(from);
         if (start == 0) return false;
         var connected = new HashSet<int>();
@@ -168,8 +171,10 @@ public unsafe partial class AutoConstruction
     /// <summary>A supply hub for the starving province's area, in its state or next to it, then a railway to it if it has none.</summary>
     private bool BuildHub(nint country, int tag, nint network, nint province)
     {
+        if (!_hubs) return false;
         var state = Province.State(province);
-        if (state == 0 || QueuedHubIn(country, state) || Game.Hour - _lastHub is >= 0 and < HubEveryHours) return false;
+        var sinceHub = Game.Hour - _lastHub;
+        if (state == 0 || QueuedHubIn(country, state) || sinceHub >= 0 && sinceHub < _hubEveryHours) return false;
         var candidates = new List<nint>();
         foreach (var p in State.Provinces(state)) candidates.Add(p);
         foreach (var id in Game.Neighbours(province))

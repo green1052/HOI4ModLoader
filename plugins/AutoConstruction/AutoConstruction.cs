@@ -78,6 +78,13 @@ public unsafe partial class AutoConstruction : Plugin
             "Lines kept waiting in the queue beyond what idle civilian factories work on, so a finished line is replaced at once."));
         var supply = Config.Bind("Supply", "AutoSupply", true,
             "Where your divisions are low on supply, upgrade a saturated hub's railway, connect a cut-off hub, or build a new hub.");
+        // Bound even when off: unbound keys are pruned from the file after Load.
+        _hubs = Config.Bind("Supply", "BuildHubs", true, "Allow building new supply hubs (with a connecting railway) where none is near.");
+        _rails = Config.Bind("Supply", "BuildRailways", true, "Allow railway work: upgrading a saturated hub's link to the capital, connecting a cut-off hub.");
+        _starvingHours = Math.Max(0, Config.Bind("Supply", "StarvingDays", 7, "Divisions must be short on supply this many game days before anything is built for them.")) * 24;
+        _hubEveryHours = Math.Max(0, Config.Bind("Supply", "HubEveryDays", 30, "At most one new supply hub per this many game days (a hub costs 20000).")) * 24;
+        _saturationPercent = Math.Clamp(Config.Bind("Supply", "SaturationPercent", 80, "A hub using this share (%) of the supply it gets has its railway upgraded."), 1, 100);
+        _hubDistance = Math.Max(1, Config.Bind("Supply", "HubDistance", 3, "Starving divisions with a hub this close (provinces) don't get a new one."));
         var production = Config.Bind("Production", "AutoProduction", true,
             "Move military factories, one at a time, from lines with a big equipment surplus to lines that are short.");
         // Bound even when off: unbound keys are pruned from the file after Load.
