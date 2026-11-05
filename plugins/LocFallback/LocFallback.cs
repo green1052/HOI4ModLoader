@@ -7,7 +7,7 @@ using Reloaded.Hooks.Definitions.X64;
 
 namespace LocFallback;
 
-/// <summary>Byte patterns (reverse engineered against HOI4 1.19.4.1), checked by tests\Signatures.Tests.</summary>
+/// <summary>Byte patterns (reverse engineered against HOI4 1.19.4.2), checked by tests\Signatures.Tests.</summary>
 public static class Signatures
 {
     /// <summary>LoadFolder(root, token, folder, a4, a5, a6) (sub_1422AF9F0): enumerates a localisation folder
@@ -31,7 +31,7 @@ public static partial class LocLines
 
 /// <summary>Mods without localisation in your language show raw keys. The game parses one folder pass for the
 /// player's language only; a second pass as English inserts English text for the keys that pass does not define.</summary>
-[Plugin("com.green1052.locfallback", "Loc Fallback", "1.0.0", GameVersion = "1.19.4.1")]
+[Plugin("com.green1052.locfallback", "Loc Fallback", "1.0.0", GameVersion = "1.19.4.2")]
 public class LocFallback : Plugin
 {
     [Function(CallingConventions.Microsoft)] public delegate nint LoadFolderFn(nint root, nint token, nint a3, nint a4, nint a5, nint a6);

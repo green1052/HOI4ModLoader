@@ -12,7 +12,7 @@ public unsafe partial class AiAssist
 
     // NDefines globals by RVA (hoi4.exe 1.19.4, uniform +0xAFCB8 shift of the 1.19.3 defines block, verified on the ground-crews
     // cost define) that CCombatLand reads. Read on use: Lua fills them after plugins load.
-    // 1.19.4.1's hotfix moved only code: the defines block (cost define checked) sits at the same RVAs.
+    // The 1.19.4.x hotfixes moved only code: the defines block (cost define checked) sits at the same RVAs.
     // An implausible value falls back to vanilla's.
     private const int BaseAvoidRva = 0x33E57E0, NoDefAvoidRva = 0x33E57F0, FortPenaltyRva = 0x33E6418, RiverRva = 0x33E5F98, LargeRiverRva = 0x33E6048;
     private static double BaseAvoid => Define(BaseAvoidRva, 1, 100, 90);
