@@ -1,6 +1,6 @@
 namespace HOI4ModLoader;
 
-/// <summary>Read-only CAirWing queries shared by player automation and AI worker threads. HOI4 1.19.4.2.</summary>
+/// <summary>Read-only CAirWing queries shared by player automation and AI worker threads. HOI4 1.19.5.0.</summary>
 public static unsafe class AirWing
 {
     private const int PoolOfWing = 0x38, BaseOfPool = 0x18;
