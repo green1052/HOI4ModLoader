@@ -10,7 +10,7 @@ internal static unsafe class GameFixes
     /// CIntelligenceAgency::RemoveOperative(agency, operative) -> bool: takes the operative off the agency's list. Callers
     /// free the operative whether or not it was removed.
     /// </summary>
-    [Signature] public const string RemoveOperative = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC 30 48 63 81 FC 00 00 00 45 33 F6 48 8B DA 48 8B F1";
+    [Signature] public const string RemoveOperative = "48 89 5C 24 10 57 48 83 EC 30 48 63 81 FC 00 00 00 48 8B DA 33 D2 48 8B F9 85 C0 7E 26 4C 8B C8 44 8B C2 48 8B 81 F0 00 00 00";
 
     /// <summary>
     /// CDesignerAdjusterItem tooltip (tip = item+0x18, widget, text, ...) -> bool: a division stat's breakdown. Reads the
@@ -32,7 +32,7 @@ internal static unsafe class GameFixes
 
     [Function(CallingConventions.Microsoft)] public delegate void AirBaseRowsFn(nint view, nint airbase, byte showEmpty, nint filter, nint count, nint context);
 
-    private const int AgencyOfCountry = 0xFC0, OperativesOfAgency = 0xD8, TemplateOfTip = 0x190, TipOfTemplate = 0x18;
+    private const int AgencyOfCountry = 0xFC0, OperativesOfAgency = 0xF0, TemplateOfTip = 0x190, TipOfTemplate = 0x18; // OperativesOfAgency moved 0xD8 -> 0xF0 in 1.19.4, still 0xF0 in 1.20.0.0
 
     private static IHook<RemoveOperativeFn>? _removeOperative;
     private static IHook<AdjusterTooltipFn>? _adjusterTooltip;

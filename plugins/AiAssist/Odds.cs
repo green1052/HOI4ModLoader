@@ -14,7 +14,7 @@ public unsafe partial class AiAssist
     // cost define) that CCombatLand reads. Read on use: Lua fills them after plugins load.
     // The 1.19.4.x hotfixes moved only code: the defines block (cost define checked) sits at the same RVAs.
     // An implausible value falls back to vanilla's.
-    private const int BaseAvoidRva = 0x33E57E0, NoDefAvoidRva = 0x33E57F0, FortPenaltyRva = 0x33E6418, RiverRva = 0x33E5F98, LargeRiverRva = 0x33E6048;
+    private const int BaseAvoidRva = 0x33EBD08, NoDefAvoidRva = 0x33EBD18, FortPenaltyRva = 0x33EC940, RiverRva = 0x33EC4C0, LargeRiverRva = 0x33EC570;
     private static double BaseAvoid => Define(BaseAvoidRva, 1, 100, 90);
     private static double NoDefAvoid => Define(NoDefAvoidRva, 1, 100, 60);
     private static double FortPenalty => Define(FortPenaltyRva, -1, -0.001, -0.15);
