@@ -480,7 +480,7 @@ public static unsafe class Order
     public static bool Executing(nint order) => *(byte*)(order + ExecutingOffset) != 0;
 }
 
-/// <summary>CProductionLine (military) and its equipment. Offsets verified against HOI4 1.20.0.0.</summary>
+/// <summary>CProductionLine (military) and its equipment. Offsets verified against HOI4 1.20.1.0.</summary>
 public static unsafe class ProductionLine
 {
     public const int MilitaryLinesOffset = 88; // CCountryProduction: CPdxArray<CProductionLine*>

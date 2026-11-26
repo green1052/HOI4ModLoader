@@ -32,7 +32,7 @@ internal static unsafe class GameFixes
 
     [Function(CallingConventions.Microsoft)] public delegate void AirBaseRowsFn(nint view, nint airbase, byte showEmpty, nint filter, nint count, nint context);
 
-    private const int AgencyOfCountry = 0xFC0, OperativesOfAgency = 0xF0, TemplateOfTip = 0x190, TipOfTemplate = 0x18; // OperativesOfAgency moved 0xD8 -> 0xF0 in 1.19.4, still 0xF0 in 1.20.0.0
+    private const int AgencyOfCountry = 0xFC0, OperativesOfAgency = 0xF0, TemplateOfTip = 0x190, TipOfTemplate = 0x18; // OperativesOfAgency moved 0xD8 -> 0xF0 in 1.19.4, still 0xF0 in 1.20.1.0
 
     private static IHook<RemoveOperativeFn>? _removeOperative;
     private static IHook<AdjusterTooltipFn>? _adjusterTooltip;

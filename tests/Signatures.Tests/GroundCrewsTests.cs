@@ -16,6 +16,6 @@ public class GroundCrewsTests
         var at = image.FindAll(GroundCrews.CanExecuteSig)[0];
         var isOn = image.FindAll("48 89 54 24 10 53 48 83 EC 20 48 8B D9 4C 8D 44 24 38 48 81 C1 D8 04 00 00 48 8D 54 24 30 E8 ? ? ? ? 48 8B 44 24 30 48 3B 83 E0 04 00 00 74 ? 48 8B 40 18 0F B6 40 38")[0];
         Assert.Equal(isOn, GroundCrews.IsOnAt(at));
-        Assert.Equal(at - 0x19D7422 + 0x33E8EE8, GroundCrews.CostAt(at)); // 1.20.0.0 RVAs: the match (+0x36B0) and AIR_MORE_GROUND_CREWS_COST (+0x6528) both moved
+        Assert.Equal(at - 0x19D7422 + 0x33E8EE8, GroundCrews.CostAt(at)); // RVAs pinned in 1.20.0.0, unchanged in 1.20.1.0: match 0x19D7422, AIR_MORE_GROUND_CREWS_COST 0x33E8EE8
     }
 }
